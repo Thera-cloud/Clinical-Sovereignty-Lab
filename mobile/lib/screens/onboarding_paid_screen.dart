@@ -431,7 +431,7 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
         _ChartAnimation(),
         const SizedBox(height: 32),
         Text(
-          'Clinical Intelligence',
+          'Insight Intelligence',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: _gold,

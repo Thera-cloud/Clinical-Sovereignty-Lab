@@ -237,7 +237,7 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
-        title: const Text('Clinical Intake'),
+        title: const Text('Personal Intake'),
         backgroundColor: const Color(0xFF050505),
       ),
       body: _loading
@@ -252,7 +252,7 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
                     padding: const EdgeInsets.all(12),
                     children: [
                       const Text(
-                        'This intake helps Little Nate build rapport and helps your coach prepare clinically.',
+                        'This intake helps Little Nate build rapport and helps your coach prepare.',
                         style: TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 8),

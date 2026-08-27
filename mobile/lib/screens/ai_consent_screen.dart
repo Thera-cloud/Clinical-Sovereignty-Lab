@@ -132,8 +132,8 @@ class _AiConsentScreenState extends State<AiConsentScreen> {
                     ),
                     const SizedBox(height: 20),
                     const Text(
-                      'Little Nate is an AI therapeutic companion. To provide personalized '
-                      'responses, your conversations are processed by secure AI services.',
+                      'Little Nate is an AI wellness companion. To provide personalized '
+                      'responses, your conversations are processed by secure AI services.'
                       style: TextStyle(color: _D.textPrimary, fontSize: 15, height: 1.6),
                     ),
                     const SizedBox(height: 28),
@@ -176,7 +176,7 @@ class _AiConsentScreenState extends State<AiConsentScreen> {
                           const SizedBox(height: 4),
                           GestureDetector(
                             onTap: () => launchUrl(
-                              Uri.parse('https://sovereignsanctuary.net/privacy'),
+                              Uri.parse('https://app.sovereignsanctuary.net/privacy.html'),
                               mode: LaunchMode.externalApplication,
                             ),
                             child: const Text(
@@ -385,7 +385,7 @@ class _AiConsentDeclinedScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Little Nate requires AI processing to provide therapeutic responses. '
+                'Little Nate requires AI processing to provide personalized responses. '
                 'Without consent, the chat feature cannot be used.\n\n'
                 'You can still access scheduling, settings, and other non-AI features.',
                 textAlign: TextAlign.center,

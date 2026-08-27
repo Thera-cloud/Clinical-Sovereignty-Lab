@@ -323,7 +323,7 @@ class _OnboardingThresholdScreenState extends State<OnboardingThresholdScreen>
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Text(
-              'Your AI companion, trained in clinical wisdom. Nate listens without judgment, remembers what matters, and helps you discover patterns you might miss.',
+              'Your AI companion for wellness and growth. Nate listens without judgment, remembers what matters, and helps you discover patterns you might miss.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _textSecondary,

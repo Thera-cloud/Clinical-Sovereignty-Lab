@@ -1,0 +1,65 @@
+Little Nate 1.0.2 — App Store Review Notes
+Paste into App Store Connect → App Review Information → Notes
+
+────────────────────────────────────────
+GUIDELINE 1.4.1 — Wellness, not medical
+────────────────────────────────────────
+This app is a wellness and personal-growth companion, not a medical device.
+It does not diagnose, treat, or cure any condition. In-app copy no longer
+uses store-facing therapy/diagnosis/treatment claims. Crisis pointer: 988.
+Privacy Nutrition Label does not declare Health data.
+
+────────────────────────────────────────
+GUIDELINE 2.1(b) + 3.1.1 — StoreKit only on iOS
+────────────────────────────────────────
+All iOS digital goods use StoreKit:
+  Subscriptions (auto-renew)
+    net.sovereignsanctuary.inner_chamber_monthly
+    net.sovereignsanctuary.inner_chamber_annual
+    net.sovereignsanctuary.sovereign_circle_monthly
+    net.sovereignsanctuary.sovereign_circle_annual
+  Token packs (consumable)
+    net.sovereignsanctuary.token_light3
+    net.sovereignsanctuary.token_standard7
+    net.sovereignsanctuary.token_power
+    net.sovereignsanctuary.token_ultimate
+  Family Sanctuary charges (consumable)
+    net.sovereignsanctuary.sanctuary_charge_base_fee          ($20)
+    net.sovereignsanctuary.sanctuary_charge_assisted_response ($3)
+    net.sovereignsanctuary.sanctuary_charge_individual_coaching ($5)
+    net.sovereignsanctuary.sanctuary_charge_group_coaching    ($20)
+
+Receipts are validated server-side at POST /api/billing/verify-receipt/apple.
+The prior token 504 was Stripe-on-iOS; that path is removed from the iOS binary.
+
+Coach / DOJO mentoring plans ($150–$2100) are web-only at
+https://coach.sovereignsanctuary.net — not sold inside the iOS app.
+
+────────────────────────────────────────
+GUIDELINE 3.1.2(c) — EULA + subscription facts
+────────────────────────────────────────
+Privacy Policy: https://app.sovereignsanctuary.net/privacy.html
+Terms of Use (EULA): https://app.sovereignsanctuary.net/terms.html
+In-app Settings → Subscription shows title, length, StoreKit price, and
+tappable Terms + Privacy links. Manage Subscription opens the App Store
+subscriptions page.
+
+────────────────────────────────────────
+GUIDELINE 3 — Pricing confirmation
+────────────────────────────────────────
+Sovereign Circle Monthly = $149.00 USD (intentional)
+Sovereign Circle Annual  = $749.00 USD (intentional)
+
+────────────────────────────────────────
+HUMAN CHECKLIST (App Store Connect)
+────────────────────────────────────────
+[ ] Privacy Policy URL = https://app.sovereignsanctuary.net/privacy.html
+[ ] Custom EULA or Terms link in the app description
+[ ] Paid Apps Agreement active
+[ ] All 12 IAP products Ready to Submit / Cleared for Sale
+[ ] Sandbox IAP test on a physical iPad (Apple reviewed on iPad)
+[ ] Recapture listing screenshots AFTER copy change:
+      iPhone 6.9" (1320×2868) and iPad 13" (2064×2752)
+      First frames: gateway without "Therapy & Growth"; chat;
+      Settings StoreKit token sheet; subscription card with Terms + Privacy
+      Do NOT upload GooglePlay_Phone/ (1434×2868)

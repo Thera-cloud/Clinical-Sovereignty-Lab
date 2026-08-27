@@ -5,19 +5,6 @@
     <!-- Privacy Nutrition Label: What data this app collects -->
     <key>NSPrivacyCollectedDataTypes</key>
     <array>
-        <!-- Health & Fitness: Emotional coherence metrics -->
-        <dict>
-            <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypeHealth</string>
-            <key>NSPrivacyCollectedDataTypeLinked</key>
-            <true/>
-            <key>NSPrivacyCollectedDataTypeTracking</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypePurposes</key>
-            <array>
-                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-            </array>
-        </dict>
         <!-- User Content: Chat messages, voice transcriptions -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
@@ -31,7 +18,7 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
-        <!-- Audio Data: Voice biometrics for coherence analysis -->
+        <!-- Audio Data: Voice conversations with the companion -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
             <string>NSPrivacyCollectedDataTypeAudioData</string>

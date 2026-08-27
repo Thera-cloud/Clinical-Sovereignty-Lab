@@ -358,9 +358,9 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
           const SizedBox(height: 20),
         ],
 
-        // Reply Therapy progress
+        // Reply Reflection progress
         if ((replyTherapy['themes'] as Map?)?.isNotEmpty == true) ...[
-          _sectionLabel('REPLY THERAPY PROGRESS (3+3+3)'),
+          _sectionLabel('REPLY REFLECTION PROGRESS (3+3+3)'),
           const SizedBox(height: 8),
           _buildReplyTherapyCard(replyTherapy),
           const SizedBox(height: 20),
@@ -642,7 +642,7 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
         if (completedCount > 0)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: Text('$completedCount completed Reply Therapy cycles',
+            child: Text('$completedCount completed Reply Reflection cycles',
               style: const TextStyle(color: _Design.green, fontSize: 13, fontWeight: FontWeight.w600)),
           ),
         ...themes.entries.map((e) {

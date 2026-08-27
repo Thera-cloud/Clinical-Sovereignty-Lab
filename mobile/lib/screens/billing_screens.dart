@@ -12,6 +12,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../main.dart' show isNativeIOS;
+import '../services/iap_service.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -379,7 +381,41 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
 
     setState(() => _loading = true);
 
-    final token = widget.currentUserProfile['token'] ?? '';
+    final token = (widget.currentUserProfile['token'] ?? '').toString();
+    final username = (widget.currentUserProfile['username'] ?? '').toString();
+
+    if (isNativeIOS) {
+      final iapId = _planKeyToIapId(planKey);
+      if (iapId == null) {
+        await launchUrl(
+          Uri.parse('https://apps.apple.com/account/subscriptions'),
+          mode: LaunchMode.externalApplication,
+        );
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+      try {
+        PaymentService.instance.setAuthContext(username, token);
+        final result = await IapService.instance.purchase(
+          iapId,
+          userId: username,
+          authToken: token,
+        );
+        if (!mounted) return;
+        setState(() => _loading = false);
+        if (result.status == PaymentStatus.purchased || result.status == PaymentStatus.restored) {
+          Navigator.pop(context, planKey);
+        } else if (result.status != PaymentStatus.canceled) {
+          setState(() => _error = result.error ?? 'Purchase failed');
+        }
+      } catch (e) {
+        if (mounted) setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
+      return;
+    }
 
     try {
       final reqBody = <String, dynamic>{
@@ -1481,6 +1517,13 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
   }
 
   void _purchasePack(String packType, String label, int price) {
+    if (isNativeIOS) {
+      launchUrl(
+        Uri.parse('https://coach.sovereignsanctuary.net'),
+        mode: LaunchMode.externalApplication,
+      );
+      return;
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(

@@ -24,6 +24,7 @@ Required env vars:
 - STRIPE_PRICE_DOJO_{THERAPIST,PROJECT_PM,BUSINESS,CNC,MCAT,TEACHER,JUDGE,COACH_NATE}
 """
 
+import asyncio
 import logging
 import os
 import stripe
@@ -638,9 +639,10 @@ class StripeService:
         
         if existing and existing['stripe_subscription_id']:
             # Use billing portal for upgrades
-            session = stripe.billing_portal.Session.create(
+            session = await asyncio.to_thread(
+                stripe.billing_portal.Session.create,
                 customer=customer_id,
-                return_url=success_url
+                return_url=success_url,
             )
             return CreateCheckoutResponse(
                 checkout_url=session.url,
@@ -721,7 +723,9 @@ class StripeService:
             # Let Stripe skip payment collection when not required.
             session_params["payment_method_collection"] = "if_required"
 
-        session = stripe.checkout.Session.create(**session_params)
+        session = await asyncio.to_thread(
+            lambda: stripe.checkout.Session.create(**session_params)
+        )
         
         return CreateCheckoutResponse(
             checkout_url=session.url,
@@ -1134,7 +1138,8 @@ class StripeService:
         config = PACK_CONFIGS[pack_type]
         price_id = PRICES[f"COACHING_{pack_type.value}"]
         
-        session = stripe.checkout.Session.create(
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.create,
             customer=customer_id,
             mode="payment",
             payment_method_types=["card"],
@@ -1144,8 +1149,8 @@ class StripeService:
             metadata={
                 "user_id": user_id,
                 "pack_type": pack_type.value,
-                "sessions": str(config.sessions)
-            }
+                "sessions": str(config.sessions),
+            },
         )
         
         return CreateCheckoutResponse(
@@ -1185,7 +1190,8 @@ class StripeService:
                 "quantity": 1,
             }]
 
-        session = stripe.checkout.Session.create(
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.create,
             customer=customer_id,
             mode="payment",
             payment_method_types=["card"],

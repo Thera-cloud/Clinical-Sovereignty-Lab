@@ -42,6 +42,8 @@ import 'widgets/nate_home_widget.dart';
 import 'package:home_widget/home_widget.dart';
 import 'screens/checkin_screen.dart';
 import 'services/checkout_launcher.dart';
+import 'services/iap_service.dart';
+import 'services/payment_service.dart';
 // Debug-only: inspection harness for sensitive_clinical_profile_screen.
 // Reachable only via the kDebugMode-gated URL handler in _InitialRouteWidget;
 // release builds short-circuit the gate, leaving this import unreferenced
@@ -189,6 +191,10 @@ void main() {
 
   // ── Home Screen Widget initialization ──
   NateWidgetService.initialize();
+
+  if (isNativeIOS) {
+    IapService.instance.initialize();
+  }
 
   // ── HIVE DEFENSE v4.3: Device Shield — run full security check on launch ──
   if (!kIsWeb) {
@@ -3838,7 +3844,31 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
     }
   }
 
-  void _approveGroupCoaching() {
+  Future<bool> _iapSanctuaryCharge(String productId) async {
+    if (!isNativeIOS) return true;
+    final token = (widget.profile['token'] ?? '').toString();
+    final uid = (widget.profile['username'] ?? widget.username ?? '').toString();
+    if (token.isEmpty || uid.isEmpty) {
+      _showError('Sign in required for App Store purchases');
+      return false;
+    }
+    final result = await IapService.instance.purchase(
+      productId,
+      userId: uid,
+      authToken: token,
+    );
+    if (result.status == PaymentStatus.purchased ||
+        result.status == PaymentStatus.restored) {
+      return true;
+    }
+    if (result.status != PaymentStatus.canceled) {
+      _showError(result.error ?? 'Purchase failed');
+    }
+    return false;
+  }
+
+  Future<void> _approveGroupCoaching() async {
+    if (!await _iapSanctuaryCharge(IapService.sanctuaryGroup)) return;
     _channel?.sink.add(jsonEncode({
       'type': 'sanctuary_group_coaching_approve',
       'sanctuary_id': _sanctuaryId,
@@ -5635,7 +5665,8 @@ void _showCoachingLimitDialog(Map<String, dynamic> data) {
     );
   }
 
-  void _extendCoaching() {
+  Future<void> _extendCoaching() async {
+    if (!await _iapSanctuaryCharge(IapService.sanctuaryIndividual)) return;
     _channel?.sink.add(jsonEncode({
       'type': 'sanctuary_coaching_extend',
       'sanctuary_id': _sanctuaryId,
@@ -6021,7 +6052,8 @@ void _syncSanctuaryState() {
     }));
   }
 
-  void _requestAssistedResponse() {
+  Future<void> _requestAssistedResponse() async {
+    if (!await _iapSanctuaryCharge(IapService.sanctuaryAssisted)) return;
     _channel?.sink.add(jsonEncode({
       'type': 'sanctuary_request_assisted_response',
       'sanctuary_id': _sanctuaryId,
@@ -8105,7 +8137,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                 const SizedBox(height: 30),
 
                 _buildGateButton(
-                  "I AM A CLIENT", "Therapy & Growth", Icons.spa, Colors.blueAccent,
+                  "I AM A CLIENT", "Wellness & Growth", Icons.spa, Colors.blueAccent,
                   () => _showLoginDialog("CLIENT")
                 ),
                 const SizedBox(height: 20),
@@ -8134,7 +8166,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
               // =============================================================
               else ...[
                 _buildGateButton(
-                  "CLIENT PORTAL", "Therapy & Growth", Icons.spa, Colors.blueAccent,
+                  "CLIENT PORTAL", "Wellness & Growth", Icons.spa, Colors.blueAccent,
                   () => _showLoginDialog("CLIENT")
                 ),
                 const SizedBox(height: 20),
@@ -10828,7 +10860,7 @@ class _CoachEthicsScreenState extends State<CoachEthicsScreen> {
                     'waives the right to object to the account freeze and all account data will be inaccessible.\n\n'
                     'Coaches may retain their client relationships but NO platform data, session history, '
                     'AI-generated insights, or analytical reports may be taken.\n\n'
-                    'The platform\'s algorithms, data structures, therapeutic methodologies, coherence formulas, '
+                    'The platform\'s algorithms, data structures, wellness methodologies, coherence formulas, '
                     'and AI training systems are patent-protected intellectual property owned by Sovereign '
                     'Sanctuary. Unauthorized disclosure or reproduction of proprietary information constitutes '
                     'IP infringement and is actionable under applicable law.'
@@ -10838,7 +10870,7 @@ class _CoachEthicsScreenState extends State<CoachEthicsScreen> {
                     'and I waive the right to contest the freeze during investigation.'
                   ),
                   _checkbox(4,
-                    'I acknowledge that all platform algorithms, AI systems, and therapeutic methodologies '
+                    'I acknowledge that all platform algorithms, AI systems, and wellness methodologies '
                     'are proprietary intellectual property protected by patent, and I will not disclose, '
                     'reproduce, or misappropriate them.'
                   ),
@@ -10965,7 +10997,7 @@ class SovereignCovenantDoc extends StatelessWidget {
               SizedBox(height: 15),
               
               _Header("2. AI IDENTITY & LICENSING (CA AB 489)"),
-              Text("DISCLOSURE: 'Little Nate' is an AI, NOT a human. Neither the AI nor the App holds a medical license. Do not form a 'reasonable belief' that you are interacting with a licensed healthcare professional.", style: TextStyle(color: Colors.white70)),
+              Text("This app is a wellness and personal-growth tool, not a medical device. DISCLOSURE: 'Little Nate' is an AI, NOT a human. Neither the AI nor the App holds a medical license. Do not form a 'reasonable belief' that you are interacting with a licensed healthcare professional.", style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("3. AUTOMATED PROFILING CONSENT"),

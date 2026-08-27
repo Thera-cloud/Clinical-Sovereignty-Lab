@@ -1,9 +1,9 @@
 name: little_nate
-description: Sovereign Sanctuary — AI Therapy Platform
+description: Sovereign Sanctuary — AI Wellness Companion
 
 publish_to: 'none'
 
-version: 1.0.1+8
+version: 1.0.2+14
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -56,6 +56,9 @@ dependencies:
   googleapis: ^13.0.0
   extension_google_sign_in_as_googleapis_auth: ^2.0.12
   flutter_appauth: ^7.0.1
+
+  # In-App Purchase (StoreKit / Play Billing)
+  in_app_purchase: ^3.2.0
 
   # URL Launcher (for opening external links)
   url_launcher: ^6.2.2

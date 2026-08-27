@@ -17,10 +17,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
-import '../main.dart' show LobbyScreen, HardwareIdentity, ClientScheduleScreen;
+import '../main.dart' show LobbyScreen, HardwareIdentity, ClientScheduleScreen, isNativeIOS;
 import 'billing_screens.dart';
 import '../config/app_config.dart';
 import '../services/payment_service.dart';
+import '../services/iap_service.dart';
 import '../services/checkout_launcher.dart';
 import '../services/vault_entitlement.dart';
 import 'payment_confirmation_screen.dart';
@@ -853,12 +854,18 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     'ultimate': PaymentService.tokenUltimate,
   };
 
+  String _tokenPackPriceLabel(String packId, String fallback) {
+    if (!isNativeIOS) return fallback;
+    final iapId = _tokenPackIapMap[packId];
+    return IapService.instance.priceLabel(iapId ?? '') ?? fallback;
+  }
+
   void _showBuyTokensSheet() {
     final packs = [
-      {'id': 'light', 'label': 'Light Pack', 'tokens': '15,000', 'price': '\$3.00', 'icon': Icons.flash_on},
-      {'id': 'standard', 'label': 'Standard Pack', 'tokens': '50,000', 'price': '\$7.00', 'icon': Icons.bolt},
-      {'id': 'power', 'label': 'Power Pack', 'tokens': '150,000', 'price': '\$20.00', 'icon': Icons.local_fire_department},
-      {'id': 'ultimate', 'label': 'Ultimate Pack', 'tokens': '1,000,000', 'price': '\$125.00', 'icon': Icons.diamond},
+      {'id': 'light', 'label': 'Light Pack', 'tokens': '15,000', 'price': _tokenPackPriceLabel('light', '\$3.00'), 'icon': Icons.flash_on},
+      {'id': 'standard', 'label': 'Standard Pack', 'tokens': '50,000', 'price': _tokenPackPriceLabel('standard', '\$7.00'), 'icon': Icons.bolt},
+      {'id': 'power', 'label': 'Power Pack', 'tokens': '150,000', 'price': _tokenPackPriceLabel('power', '\$20.00'), 'icon': Icons.local_fire_department},
+      {'id': 'ultimate', 'label': 'Ultimate Pack', 'tokens': '1,000,000', 'price': _tokenPackPriceLabel('ultimate', '\$125.00'), 'icon': Icons.diamond},
     ];
     showModalBottomSheet(
       context: context,
@@ -930,7 +937,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         backgroundColor: _Design.bgCard,
         title: Text('Purchase $label', style: const TextStyle(color: _Design.gold, fontFamily: 'Courier')),
         content: Text(
-          'You\'ll be redirected to a secure payment page for $tokens tokens ($price). No charge until you complete checkout.',
+          isNativeIOS
+              ? 'Purchase $tokens tokens ($price) with your Apple ID. You will be charged through the App Store.'
+              : 'You\'ll be redirected to a secure payment page for $tokens tokens ($price). No charge until you complete checkout.',
           style: const TextStyle(color: _Design.textPrimary, fontSize: 13),
         ),
         actions: [
@@ -941,7 +950,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
             onPressed: () { Navigator.pop(ctx); _purchaseTokenPack(packId); },
-            child: const Text('Continue to Payment', style: TextStyle(color: Colors.black, fontSize: 13)),
+            child: Text(
+              isNativeIOS ? 'Buy with Apple' : 'Continue to Payment',
+              style: const TextStyle(color: Colors.black, fontSize: 13),
+            ),
           ),
         ],
       ),
@@ -950,8 +962,36 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
 
   Future<void> _purchaseTokenPack(String packId) async {
     try {
-      final token = _profile['token'] ?? '';
-      final username = _profile['username'] ?? '';
+      final token = (_profile['token'] ?? '').toString();
+      final username = (_profile['username'] ?? '').toString();
+      if (isNativeIOS) {
+        final iapId = _tokenPackIapMap[packId];
+        if (iapId == null || username.isEmpty || token.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Unable to start App Store purchase'), backgroundColor: Colors.red),
+            );
+          }
+          return;
+        }
+        PaymentService.instance.setAuthContext(username, token);
+        final result = await IapService.instance.purchase(
+          iapId,
+          userId: username,
+          authToken: token,
+        );
+        if (!mounted) return;
+        if (result.status == PaymentStatus.purchased || result.status == PaymentStatus.restored) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tokens added to your balance'), backgroundColor: Color(0xFF1A1A1A)),
+          );
+        } else if (result.status != PaymentStatus.canceled) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(result.error ?? 'Purchase failed'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
       final resp = await http.post(
         Uri.parse('${AppConfig.apiBaseUrl}/api/billing/token-packs/purchase'),
         headers: {
@@ -1137,6 +1177,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   }
 
   Future<void> _openBillingPortal() async {
+    if (isNativeIOS) {
+      await launchUrl(
+        Uri.parse('https://apps.apple.com/account/subscriptions'),
+        mode: LaunchMode.externalApplication,
+      );
+      return;
+    }
     final token = _profile['token'] ?? '';
     try {
       final resp = await http.post(
@@ -1184,8 +1231,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     };
     final prices = {
       'TRIAL': 'Free',
-      'STANDARD': '\$49/month',
-      'TOP_TIER': '\$149/month',
+      'STANDARD': isNativeIOS
+          ? (IapService.instance.priceLabel(PaymentService.innerChamberMonthly) ?? '\$49/month')
+          : '\$49/month',
+      'TOP_TIER': isNativeIOS
+          ? (IapService.instance.priceLabel(PaymentService.sovereignCircleMonthly) ?? '\$149/month')
+          : '\$149/month',
     };
     final currentName = names[_currentPlanKey] ?? _currentPlanKey;
     final newName = names[planKey] ?? planKey;
@@ -1302,9 +1353,88 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
+  String? _iapProductForPlan(String planKey) {
+    switch (planKey) {
+      case 'STANDARD':
+        return PaymentService.innerChamberMonthly;
+      case 'TOP_TIER':
+        return PaymentService.sovereignCircleMonthly;
+      default:
+        return null;
+    }
+  }
+
+  List<Widget> _iosSubscriptionFacts() {
+    final productId = _iapProductForPlan(_currentPlanKey);
+    final title = _tierDisplayName(_currentPlanKey);
+    final length = productId != null && productId.contains('annual') ? '1 year' : '1 month';
+    final price = productId == null
+        ? 'Free'
+        : (IapService.instance.priceLabel(productId) ??
+            (_currentPlanKey == 'TOP_TIER' ? '\$149.00' : '\$49.00'));
+    return [
+      _infoRow('Subscription', title),
+      _infoRow('Length', length),
+      _infoRow('Price', price),
+      _actionRow(
+        Icons.description_outlined,
+        'Terms of Use (EULA)',
+        'app.sovereignsanctuary.net/terms.html',
+        () => launchUrl(
+          Uri.parse('https://app.sovereignsanctuary.net/terms.html'),
+          mode: LaunchMode.externalApplication,
+        ),
+      ),
+      _actionRow(
+        Icons.privacy_tip_outlined,
+        'Privacy Policy',
+        'app.sovereignsanctuary.net/privacy.html',
+        () => launchUrl(
+          Uri.parse('https://app.sovereignsanctuary.net/privacy.html'),
+          mode: LaunchMode.externalApplication,
+        ),
+      ),
+    ];
+  }
+
   Future<void> _openStripeCheckoutForPlanChange(String planKey, String planName, bool isUpgrade) async {
-    final token = _profile['token'] ?? '';
-    final username = _profile['username'] ?? '';
+    final token = (_profile['token'] ?? '').toString();
+    final username = (_profile['username'] ?? '').toString();
+    if (isNativeIOS) {
+      if (planKey == 'TRIAL' || planKey == 'COACH_ONLY') {
+        await launchUrl(
+          Uri.parse('https://apps.apple.com/account/subscriptions'),
+          mode: LaunchMode.externalApplication,
+        );
+        return;
+      }
+      final productId = _iapProductForPlan(planKey);
+      if (productId == null || username.isEmpty || token.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to start App Store purchase'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+      PaymentService.instance.setAuthContext(username, token);
+      final result = await IapService.instance.purchase(
+        productId,
+        userId: username,
+        authToken: token,
+      );
+      if (!mounted) return;
+      if (result.status == PaymentStatus.purchased || result.status == PaymentStatus.restored) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Plan updated to $planName'), backgroundColor: const Color(0xFF1A1A1A)),
+        );
+      } else if (result.status != PaymentStatus.canceled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.error ?? 'Purchase failed'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
     if (username.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2743,6 +2873,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           _sectionHeader('SUBSCRIPTION', Icons.workspace_premium),
           _settingsCard([
             _infoRow('Current Plan', _tierDisplayName(plan.toString())),
+            if (isNativeIOS) ..._iosSubscriptionFacts(),
             _infoRow('Token Balance', '$tokenBalance tokens'),
             _infoRow('Usage This Month', '$tokenUsage tokens'),
             // Show pending downgrade if one is scheduled
@@ -2831,6 +2962,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 ));
               })),
               const SizedBox(width: 8),
+              if (!isNativeIOS)
               Expanded(child: _billingLink(Icons.school, 'Coaching', () {
                 Navigator.push(context, MaterialPageRoute(
                   builder: (_) => CoachingPackScreen(
@@ -2846,8 +2978,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           const SizedBox(height: 20),
 
           if (!_isCoachOnly) ...[
-          // --- Voice Therapy (prepaid call minutes) ---
-          _sectionHeader('VOICE THERAPY', Icons.phone_in_talk),
+          // --- Voice sessions (prepaid call minutes) ---
+          _sectionHeader('VOICE SESSIONS', Icons.phone_in_talk),
           _settingsCard([
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2881,6 +3013,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            if (isNativeIOS)
+              const Text(
+                'Voice minutes are purchased on the web at app.sovereignsanctuary.net.',
+                style: TextStyle(color: _Design.textSecondary, fontSize: 12, height: 1.4),
+              )
+            else
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -3138,7 +3276,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => QuizScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.insights, 'Coherence Reports', 'View your Nevedal coherence trends', () {
+            _actionRow(Icons.insights, 'Insight Reports', 'View your wellness insight trends', () {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => NevedalReportsScreen(profile: _profile),
               ));
@@ -3151,10 +3289,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => SecureSearchScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.assignment_outlined, 'Clinical Intake Form', 'Shared with Little Nate (section 1) + coach-only section 2', () {
+            _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Shared with Little Nate (section 1) + coach-only section 2', () {
               if ((_archetypeName ?? '').isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Complete your archetype journey first, then open Clinical Intake.')),
+                  const SnackBar(content: Text('Complete your archetype journey first, then open Personal Intake.')),
                 );
                 return;
               }
@@ -3374,7 +3512,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           // --- About & Support ---
           _sectionHeader('ABOUT & SUPPORT', Icons.info_outline),
           _settingsCard([
-            _infoRow('App Version', '1.0.1'),
+            _infoRow('App Version', '1.0.2'),
             _actionRow(Icons.help_outline, 'Help & FAQ', 'Ask Little Nate anything', () {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => _HelpFAQScreen(role: 'CLIENT', profile: _profile),
@@ -3390,7 +3528,17 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           // --- Become a Coach ---
           _sectionHeader('BECOME A COACH', Icons.school),
           _settingsCard([
-            if (_profile['upgrade_to_coach_status'] == 'PENDING')
+            if (isNativeIOS)
+              _actionRow(
+                Icons.open_in_new,
+                'Coach mentoring plans',
+                'Purchased at coach.sovereignsanctuary.net',
+                () => launchUrl(
+                  Uri.parse('https://coach.sovereignsanctuary.net'),
+                  mode: LaunchMode.externalApplication,
+                ),
+              )
+            else if (_profile['upgrade_to_coach_status'] == 'PENDING')
               _infoRow('Status', 'Upgrade pending admin approval')
             else if (_profile['upgrade_to_coach_status'] == 'REJECTED')
               _actionRow(Icons.refresh, 'Re-apply as Coach', 'Previous request was declined', _requestCoachUpgrade)
@@ -3840,7 +3988,9 @@ class _ChangePlanSheet extends StatelessWidget {
               context,
               name: 'Inner Chamber',
               subtitle: 'Standard',
-              price: '\$49',
+              price: isNativeIOS
+                  ? (IapService.instance.priceLabel(PaymentService.innerChamberMonthly) ?? '\$49')
+                  : '\$49',
               priceSub: '/month',
               planKey: 'STANDARD',
               rank: 1,
@@ -3861,7 +4011,9 @@ class _ChangePlanSheet extends StatelessWidget {
               context,
               name: 'Sovereign Circle',
               subtitle: 'Top Tier',
-              price: '\$149',
+              price: isNativeIOS
+                  ? (IapService.instance.priceLabel(PaymentService.sovereignCircleMonthly) ?? '\$149')
+                  : '\$149',
               priceSub: '/month',
               planKey: 'TOP_TIER',
               rank: 2,
@@ -3904,6 +4056,30 @@ class _ChangePlanSheet extends StatelessWidget {
                     'Your conversation history, metrics, and all data are never deleted when changing plans.',
                     style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.5),
                   ),
+                  if (isNativeIOS) ...[
+                    const SizedBox(height: 12),
+                    GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse('https://app.sovereignsanctuary.net/terms.html'),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: const Text(
+                        'Terms of Use (EULA)',
+                        style: TextStyle(color: _Design.gold, fontSize: 12, decoration: TextDecoration.underline),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse('https://app.sovereignsanctuary.net/privacy.html'),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: const Text(
+                        'Privacy Policy',
+                        style: TextStyle(color: _Design.gold, fontSize: 12, decoration: TextDecoration.underline),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -5692,7 +5868,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           // --- About & Support ---
           _sectionHeader('ABOUT & SUPPORT', Icons.info_outline),
           _settingsCard([
-            _infoRow('App Version', '1.0.1'),
+            _infoRow('App Version', '1.0.2'),
             _actionRow(Icons.help_outline, 'Help & FAQ', 'Ask Little Nate anything', () {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => _HelpFAQScreen(role: 'COACH', profile: _profile),
@@ -6107,11 +6283,11 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         },
         {
           'q': 'What is Tri-Corder mode?',
-          'a': 'Tri-Corder is a deep diagnostic scan of your emotional patterns — like a medical scanner for your inner world. It examines your coherence data, mood history, and behavioral markers to give you a detailed picture of where you are right now. Tap the mode picker icon (brain icon) in the chat bar to activate it.',
+          'a': 'Tri-Corder is a deep emotional reflection of your patterns — a reflection tool for your inner world. It examines your insight data, mood history, and behavioral markers to give you a detailed picture of where you are right now. Tap the mode picker icon (brain icon) in the chat bar to activate it.',
         },
         {
           'q': 'What is Archivist mode?',
-          'a': 'Archivist mode weaves your therapeutic journey into a narrative, spotting themes, patterns, and turning points you might miss on your own. It draws from your full conversation history with Nate to tell the story of your growth. Activate it from the mode picker in the chat bar.',
+          'a': 'Archivist mode weaves your growth journey into a narrative, spotting themes, patterns, and turning points you might miss on your own. It draws from your full conversation history with Nate to tell the story of your growth. Activate it from the mode picker in the chat bar.',
         },
         {
           'q': 'What is Guardian mode?',
@@ -6119,7 +6295,7 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         },
         {
           'q': 'What is Supervisor mode?',
-          'a': 'Supervisor mode reviews your progress through a clinical lens — like having a wise clinical supervisor looking over your journey. It evaluates therapeutic progress, identifies areas of growth, and suggests next steps. Activate it from the mode picker in the chat bar.',
+          'a': 'Supervisor mode reviews your progress with quality oversight — like having a wise mentor looking over your journey. It evaluates growth, identifies areas of strength, and suggests next steps. Activate it from the mode picker in the chat bar.',
         },
         {
           'q': 'How do I switch between Little Nate modes?',
@@ -6127,7 +6303,7 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         },
         {
           'q': 'How do I read my stats and coherence reports?',
-          'a': 'Your metrics bar shows Text Sent. (v1) — a lexicon-based chat sentiment score (not formula C_emo) — plus GAP and Quantum heuristics. For detailed trends, go to Settings > Your Tools > Coherence Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
+          'a': 'Your metrics bar shows Text Sent. (v1) — a lexicon-based chat sentiment score (not formula C_emo) — plus GAP and Quantum heuristics. For detailed trends, go to Settings > Your Tools > Insight Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
         },
         {
           'q': 'What is the Sovereign Vault?',
@@ -6534,7 +6710,7 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('1. PRIVATE MEMBERSHIP ASSOCIATION (1st AMENDMENT)',
               'You acknowledge that Sovereign Sanctuary operates as a Private Membership Association under the protections of the First Amendment to the United States Constitution. All interactions within this platform — between you and Little Nate (the AI companion), between you and your assigned coach, and between family members in the Family Sanctuary — are private exercises of speech and association.'),
             _section('2. AI IDENTITY AND LICENSING DISCLOSURE (CA AB 489)',
-              '"Little Nate" is an artificial intelligence system. Little Nate is NOT a human being, NOT a licensed therapist, NOT a licensed psychologist, and NOT a licensed medical professional of any kind. Neither the AI nor the Sovereign Sanctuary application holds a medical license, therapy license, or counseling credential in any jurisdiction. Little Nate is designed to provide emotional support, self-awareness tools, and coaching companionship — NOT medical advice, clinical diagnoses, treatment plans, or prescriptions.'),
+              'This app is a wellness and personal-growth tool, not a medical device. "Little Nate" is an artificial intelligence system. Little Nate is NOT a human being, NOT a licensed therapist, NOT a licensed psychologist, and NOT a licensed medical professional of any kind. Neither the AI nor the Sovereign Sanctuary application holds a medical license, therapy license, or counseling credential in any jurisdiction. Little Nate is designed to provide emotional support, self-awareness tools, and coaching companionship — NOT medical advice, clinical diagnoses, treatment plans, or prescriptions. Content is for informational and self-reflection purposes only. Not intended to diagnose, treat, cure, or prevent any condition. If you are in crisis, call 988 or go to the nearest emergency room.'),
             _section('3. AUTOMATED PROFILING CONSENT',
               'This platform utilizes "Automated Profiling" as defined under various state data protection laws. The core function of Sovereign Sanctuary is the continuous analysis of your emotional state through text analysis, voice biometrics, and (where applicable) facial geometry. By proceeding, you explicitly and voluntarily WAIVE any state-level rights to "opt-out" of automated profiling.'),
             _section('4. AGE VERIFICATION AND FAMILY ACCOUNTS (CA SB 243)',
@@ -6563,7 +6739,7 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('14. DATA RETENTION',
               'Active accounts: retained for duration of membership. Deleted accounts: held 30 days then permanently purged. Anonymized aggregate data may be retained indefinitely for research.'),
             _section('15. DATA SHARING',
-              'Your data is NEVER sold. Shared with: (a) xAI (Grok) and Microsoft Azure OpenAI — your conversation text and voice audio for AI-powered therapeutic responses, under enterprise agreements that prohibit use for model training; (b) your assigned Coach (session summaries); (c) Head of Household (aggregate family metrics, not individual content); (d) law enforcement (only when legally compelled).'),
+              'Your data is NEVER sold. Shared with: (a) xAI (Grok) and Microsoft Azure OpenAI — your conversation text and voice audio for AI-powered wellness responses, under enterprise agreements that prohibit use for model training; (b) your assigned Coach (session summaries); (c) Head of Household (aggregate family metrics, not individual content); (d) law enforcement (only when legally compelled).'),
             _section('16. YOUR PRIVACY RIGHTS',
               'California (CCPA/CPRA): right to know, delete, opt out of sale. Illinois (BIPA): biometric consent provided herein. Texas (CUBI): biometric notification provided. Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island: access, correct, delete, port data. Right to Delete via Settings. Right to Data Export returns available profile, session summaries, and metrics JSON (not a guaranteed full conversation-transcript dump); contact support for additional records as needed.'),
             _section('17. CHILDREN\'S PRIVACY (COPPA)',

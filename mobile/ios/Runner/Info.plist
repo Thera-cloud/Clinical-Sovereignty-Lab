@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>NSFaceIDUsageDescription</key>
-	<string>Sovereign Sanctuary uses Face ID to protect your therapeutic data and authenticate sensitive actions.</string>
+	<string>Sovereign Sanctuary uses Face ID to protect your account and authenticate sensitive actions.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Sovereign Sanctuary uses your microphone for voice conversations with your AI companion and real-time emotional coherence analysis.</string>
+	<string>Sovereign Sanctuary uses your microphone for voice conversations with your AI companion.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Sovereign Sanctuary uses speech recognition to transcribe your voice sessions for personalized therapeutic insights.</string>
+	<string>Sovereign Sanctuary uses speech recognition to transcribe voice conversations with your companion.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Sovereign Sanctuary uses Bluetooth to maintain the ZEFCP solidarity mesh and Quakete emotional support network.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

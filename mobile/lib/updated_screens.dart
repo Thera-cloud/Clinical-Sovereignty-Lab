@@ -2886,14 +2886,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 ctx,
                 'tri_corder',
                 'Tri-Corder',
-                'Deep diagnostic scan of emotional patterns',
+                'Deep emotional reflection of your patterns',
                 Icons.radar,
                 const Color(0xFF4ECDC4)),
             _aiModeTile(
                 ctx,
                 'archivist',
                 'Archivist',
-                'Narrative synthesis of therapeutic journey',
+                'Narrative synthesis of your growth journey',
                 Icons.auto_stories,
                 const Color(0xFF9D4EDD)),
             _aiModeTile(
@@ -2907,7 +2907,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 ctx,
                 'supervisor',
                 'Supervisor',
-                'Clinical quality oversight and recommendations',
+                'Quality oversight and recommendations',
                 Icons.supervisor_account,
                 const Color(0xFFE8D5A3)),
             _aiModeTile(
@@ -9584,7 +9584,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               title: const Text('Tri-Corder',
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Deep diagnostic scan of emotional patterns',
+              subtitle: const Text('Deep emotional reflection of your patterns',
                   style: TextStyle(color: Colors.white38, fontSize: 12)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -9596,7 +9596,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               title: const Text('Archivist',
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Narrative synthesis of therapeutic journey',
+              subtitle: const Text('Narrative synthesis of your growth journey',
                   style: TextStyle(color: Colors.white38, fontSize: 12)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -9622,7 +9622,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold)),
               subtitle: const Text(
-                  'Clinical quality oversight and recommendations',
+                  'Quality oversight and recommendations',
                   style: TextStyle(color: Colors.white38, fontSize: 12)),
               onTap: () {
                 Navigator.pop(ctx);

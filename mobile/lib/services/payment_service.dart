@@ -1,15 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 
 import '../config/app_config.dart';
 import 'checkout_launcher.dart';
+import 'iap_service.dart';
 
-/// Stripe-only payment service. All purchases redirect to an external
-/// Stripe Checkout page in the default browser.
+/// Payments: StoreKit on native iOS, Stripe checkout elsewhere.
 class PaymentService {
   PaymentService._();
   static final PaymentService _instance = PaymentService._();
@@ -51,7 +50,11 @@ class PaymentService {
   }
 
   Future<void> initialize() async {
-    _logger.i('PaymentService: Stripe-only — all purchases via external checkout');
+    if (IapService.instance.isNativeIOS) {
+      await IapService.instance.initialize();
+      return;
+    }
+    _logger.i('PaymentService: Stripe checkout for non-iOS platforms');
   }
 
   Future<void> purchase(
@@ -62,10 +65,34 @@ class PaymentService {
   }) async {
     final uid = userId ?? _userId;
     final token = authToken ?? _authToken;
+    if (IapService.instance.isNativeIOS) {
+      if (uid == null || uid.isEmpty || token == null || token.isEmpty) {
+        _purchaseUpdates.add(PurchaseStatusResult(
+          productId: productId,
+          status: PaymentStatus.error,
+          error: 'Not authenticated',
+        ));
+        return;
+      }
+      final result = await IapService.instance.purchase(
+        productId,
+        userId: uid,
+        authToken: token,
+      );
+      _purchaseUpdates.add(result);
+      return;
+    }
     await _purchaseViaStripe(productId, uid: uid, token: token, promoCode: promoCode);
   }
 
   Future<void> restorePurchases({String? authToken}) async {
+    if (IapService.instance.isNativeIOS) {
+      await IapService.instance.restorePurchases(
+        userId: _userId,
+        authToken: authToken ?? _authToken,
+      );
+      return;
+    }
     await _restoreFromBackend(token: authToken ?? _authToken);
   }
 
