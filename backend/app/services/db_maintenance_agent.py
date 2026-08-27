@@ -540,7 +540,7 @@ class DatabaseMaintenanceAgent:
                         SELECT {id_expr} AS row_id, {user_col} AS user_id
                         FROM {table}
                         WHERE {ts_col} < NOW() - ($1 || ' days')::interval
-                          AND NOT ({user_col} = ANY($2::text[]))
+                          AND NOT ({user_col}::text = ANY($2::text[]))
                         LIMIT {BATCH_LIMIT}
                         """,
                         str(days),
@@ -562,7 +562,7 @@ class DatabaseMaintenanceAgent:
                         SELECT {id_expr} AS row_id, {user_col} AS user_id
                         FROM {table}
                         WHERE {ts_col} < NOW() - ($1 || ' days')::interval
-                          AND {user_col} = ANY($2::text[])
+                          AND {user_col}::text = ANY($2::text[])
                         LIMIT {BATCH_LIMIT}
                         """,
                         str(days),
@@ -619,9 +619,9 @@ class DatabaseMaintenanceAgent:
 
         total_would_delete = 0
         per_table: dict[str, dict] = {}
-        # (table, user_col, ts_col) — column types are TEXT/VARCHAR for
-        # both target tables so ANY($::text[]) works with mixed
-        # username/hardware_id/uuid identifiers.
+        # (table, user_col, ts_col) — conversation_history.user_id is
+        # text; nevedal_metrics.user_id is uuid. Always compare
+        # user_col::text to ANY($::text[]).
         targets = [
             ("conversation_history", "user_id", "created_at"),
             ("nevedal_metrics", "user_id", "created_at"),
@@ -680,10 +680,9 @@ class DatabaseMaintenanceAgent:
         users in the given cohort. Empty list if the ``program_id``
         column is missing (pre-414 schema) or no users match.
 
-        ``conversation_history.user_id`` and ``nevedal_metrics.user_id``
-        both store TEXT and can be any of these three shapes depending
-        on the calling surface (voice → username, chat → hardware_id,
-        etc.), so we resolve all three and let ANY($::text[]) match.
+        ``conversation_history.user_id`` is text (username / hardware_id).
+        ``nevedal_metrics.user_id`` is uuid. Callers resolve all three
+        identifier shapes; SQL compares ``user_col::text = ANY($::text[])``.
         """
         try:
             rows = await conn.fetch(
@@ -719,7 +718,7 @@ class DatabaseMaintenanceAgent:
                 SELECT COUNT(*) AS c
                 FROM {table}
                 WHERE {ts_col} < NOW() - ($1 || ' days')::interval
-                  AND {user_col} = ANY($2::text[])
+                  AND {user_col}::text = ANY($2::text[])
                 """,
                 str(strict_days),
                 cohort_ids,
@@ -734,7 +733,7 @@ class DatabaseMaintenanceAgent:
                     SELECT COUNT(*) AS c
                     FROM {table}
                     WHERE {ts_col} < NOW() - ($1 || ' days')::interval
-                      AND NOT ({user_col} = ANY($2::text[]))
+                      AND NOT ({user_col}::text = ANY($2::text[]))
                     """,
                     str(global_days),
                     cohort_ids,

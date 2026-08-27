@@ -60,7 +60,7 @@ class _FakeConn:
                     r for r in rows
                     if r["user_id"] not in ids and r["age_days"] > days
                 ]
-            elif "user_id = ANY" in sql_norm:
+            elif "user_id::text = ANY" in sql_norm or "user_id = ANY" in sql_norm:
                 ids = set(args[1])
                 matched = [
                     r for r in rows
@@ -107,7 +107,8 @@ class _FakeConn:
             if f"FROM {table}" in sql_norm and "SELECT COUNT(*)" in sql_norm:
                 days = int(args[0])
                 cutoff_days = days  # older than N days == age > N days
-                if "user_id = ANY" in sql_norm and "NOT" not in sql_norm:
+                _any = "user_id::text = ANY" in sql_norm or "user_id = ANY" in sql_norm
+                if _any and "NOT" not in sql_norm:
                     ids = set(args[1])
                     c = sum(
                         1
@@ -115,7 +116,7 @@ class _FakeConn:
                         if r["user_id"] in ids and r["age_days"] > cutoff_days
                     )
                     return _FakeRow(c=c)
-                if "NOT (" in sql_norm and "user_id = ANY" in sql_norm:
+                if "NOT (" in sql_norm and _any:
                     ids = set(args[1])
                     c = sum(
                         1
@@ -480,3 +481,18 @@ def test_enforcement_no_cohort_forever_is_zero(tmp_path):
     assert result["deleted"] == 0
     assert all(n == 0 for n in result["per_table"].values())
     assert state["writes"] == []
+
+
+def test_retention_sql_casts_user_id_to_text():
+    """nevedal_metrics.user_id is uuid; compare via user_col::text."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "services"
+        / "db_maintenance_agent.py"
+    )
+    text = src.read_text()
+    assert text.count("{user_col}::text = ANY($2::text[])") == 4
+    assert "{user_col} = ANY($2::text[])" not in text
