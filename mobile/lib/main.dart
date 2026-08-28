@@ -8137,7 +8137,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                 const SizedBox(height: 30),
 
                 _buildGateButton(
-                  "I AM A CLIENT", "Wellness & Growth", Icons.spa, Colors.blueAccent,
+                  "I AM A CLIENT", "Coaching & Growth", Icons.spa, Colors.blueAccent,
                   () => _showLoginDialog("CLIENT")
                 ),
                 const SizedBox(height: 20),
@@ -8166,7 +8166,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
               // =============================================================
               else ...[
                 _buildGateButton(
-                  "CLIENT PORTAL", "Wellness & Growth", Icons.spa, Colors.blueAccent,
+                  "CLIENT PORTAL", "Coaching & Growth", Icons.spa, Colors.blueAccent,
                   () => _showLoginDialog("CLIENT")
                 ),
                 const SizedBox(height: 20),
