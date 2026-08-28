@@ -75,10 +75,13 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    final first = _hub == null;
+    if (first) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final r = await http.get(
         Uri.parse('${AppConfig.apiBaseUrl}/api/coach/integrations/hub'),
@@ -533,7 +536,10 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        CoachSovereignStudioTab(token: widget.token),
+        CoachSovereignStudioTab(
+          key: const ValueKey('coach_sovereign_studio'),
+          token: widget.token,
+        ),
         const SizedBox(height: 16),
         _panel(
           'STUDIO WEBHOOK SECRET',

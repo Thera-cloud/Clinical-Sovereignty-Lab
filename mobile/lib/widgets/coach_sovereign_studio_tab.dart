@@ -68,6 +68,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   int _complete = 0;
   bool _cloneConsent = false;
   bool _busy = false;
+  final Set<int> _uploading = {};
+  final Set<int> _locallyComplete = {};
   int? _recordingPart;
   final _recorder = CoachWebRecorder();
   final _noteCtrl = TextEditingController();
@@ -98,6 +100,71 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     super.dispose();
   }
 
+  List<Map<String, dynamic>> get _displayParts {
+    if (_parts.isNotEmpty) return _parts;
+    return List.generate(
+      7,
+      (i) => {
+        'index': i + 1,
+        'title': 'Part ${i + 1}',
+        'prompt': '',
+        'complete': false,
+      },
+    );
+  }
+
+  void _applyServerParts(dynamic raw, int? completeCount) {
+    final list = List<Map<String, dynamic>>.from((raw as List?) ?? []);
+    for (final p in list) {
+      final idx = (p['index'] as num?)?.toInt();
+      if (idx != null && _locallyComplete.contains(idx)) {
+        p['complete'] = true;
+      }
+    }
+    _parts = list;
+    _complete = list.isEmpty
+        ? _locallyComplete.length
+        : list.where((p) => p['complete'] == true).length;
+    if (completeCount != null && completeCount > _complete) {
+      _complete = completeCount;
+    }
+  }
+
+  void _markPartComplete(int n) {
+    _locallyComplete.add(n);
+    final list =
+        _displayParts.map((p) => Map<String, dynamic>.from(p)).toList();
+    for (final p in list) {
+      if ((p['index'] as num?)?.toInt() == n) {
+        p['complete'] = true;
+      }
+    }
+    _parts = list;
+    _complete = list.where((p) => p['complete'] == true).length;
+  }
+
+  Future<void> _refreshMirrorOnly() async {
+    try {
+      final statusR = await http.get(
+        Uri.parse(
+            '${AppConfig.apiBaseUrl}/api/coach/integrations/mirror-capture/status'),
+        headers: _h,
+      );
+      if (!mounted || statusR.statusCode != 200) return;
+      final j = json.decode(statusR.body) as Map<String, dynamic>;
+      setState(() {
+        _applyServerParts(j['parts'], (j['complete_count'] as num?)?.toInt());
+        _cloneConsent = j['clone_consent'] == true;
+      });
+    } catch (_) {}
+  }
+
+  Widget _spin() => const SizedBox(
+        width: 14,
+        height: 14,
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+      );
+
   Future<void> _refresh() async {
     try {
       final showsR = await http.get(
@@ -127,8 +194,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
       }
       if (statusR.statusCode == 200) {
         final j = json.decode(statusR.body) as Map<String, dynamic>;
-        _parts = List<Map<String, dynamic>>.from(j['parts'] ?? []);
-        _complete = (j['complete_count'] as num?)?.toInt() ?? 0;
+        _applyServerParts(j['parts'], (j['complete_count'] as num?)?.toInt());
         _cloneConsent = j['clone_consent'] == true;
       }
       if (ytR.statusCode == 200) {
@@ -359,7 +425,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
           const SnackBar(content: Text('Audio over 15 MB')));
       return;
     }
-    setState(() => _busy = true);
+    if (_uploading.contains(n)) return;
+    setState(() => _uploading.add(n));
     try {
       final r = await http.post(
         Uri.parse(
@@ -375,19 +442,22 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
       if (!mounted) return;
       final saved = r.statusCode == 200;
       final timedOut = r.statusCode == 504 || r.statusCode == 408;
+      if (saved || timedOut) {
+        setState(() => _markPartComplete(n));
+        unawaited(_refreshMirrorOnly());
+      }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(saved
               ? 'Part $n stored (re-record overwrites)'
               : (timedOut
-                  ? 'Upload timed out — refresh STUDIO; Part $n may already be saved'
+                  ? 'Part $n still saving in background — other parts stay open'
                   : 'Upload failed (${r.statusCode})'))));
-      await _refresh();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Upload failed: $e')));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _uploading.remove(n));
     }
   }
 
@@ -399,23 +469,18 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     }
     if (_recordingPart == n) {
       _tick?.cancel();
-      setState(() {
-        _recordingPart = null;
-        _busy = true;
-      });
+      setState(() => _recordingPart = null);
       try {
         final bytes = await _recorder.stop();
         if (bytes.isEmpty) {
           if (!mounted) return;
-          setState(() => _busy = false);
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('No audio captured')));
           return;
         }
-        await _uploadPart(n, bytes, _recorder.contentType);
+        unawaited(_uploadPart(n, bytes, _recorder.contentType));
       } catch (e) {
         if (!mounted) return;
-        setState(() => _busy = false);
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Record failed: $e')));
       }
@@ -464,7 +529,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         'ogg': 'audio/ogg',
         'webm': 'audio/webm',
       }[ext] ?? 'audio/webm';
-      await _uploadPart(n, bytes, ctype);
+      unawaited(_uploadPart(n, bytes, ctype));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -735,19 +800,18 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         Text('MIRROR CAPTURE  $_complete/7',
             style: const TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
         const SizedBox(height: 8),
-        ...(_parts.isEmpty
-            ? List.generate(7, (i) => {'index': i + 1, 'title': 'Part ${i + 1}', 'prompt': '', 'complete': false})
-            : _parts)
-            .map((p) {
+        ..._displayParts.map((p) {
           final n = (p['index'] as num?)?.toInt() ?? 0;
           final rec = _recordingPart == n;
+          final saving = _uploading.contains(n);
+          final micHeld = _recordingPart != null && !rec;
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${p['complete'] == true ? '✓' : '○'} ${p['title'] ?? 'Part $n'}',
+                  '${p['complete'] == true ? '✓' : (saving ? '…' : '○')} ${p['title'] ?? 'Part $n'}',
                   style: const TextStyle(color: _text, fontSize: 13),
                 ),
                 if ((p['prompt'] ?? '').toString().isNotEmpty)
@@ -763,19 +827,30 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
                             backgroundColor: rec
                                 ? const Color(0xFFEF4444)
                                 : _gold),
-                        onPressed: _busy ? null : () => _toggleRecord(n),
-                        icon: Icon(rec ? Icons.stop : Icons.mic,
-                            color: Colors.black, size: 16),
-                        label: Text(rec ? 'Stop ${_secs}s' : 'Record',
+                        onPressed: saving
+                            ? null
+                            : (rec || !micHeld
+                                ? () => _toggleRecord(n)
+                                : null),
+                        icon: saving
+                            ? _spin()
+                            : Icon(rec ? Icons.stop : Icons.mic,
+                                color: Colors.black, size: 16),
+                        label: Text(
+                            saving
+                                ? 'Saving…'
+                                : (rec ? 'Stop ${_secs}s' : 'Record'),
                             style: const TextStyle(color: Colors.black)),
                       ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: _gold),
-                      onPressed: _busy ? null : () => _pickPart(n),
-                      icon: const Icon(Icons.upload_file,
-                          color: Colors.black, size: 16),
-                      label: const Text('Upload',
-                          style: TextStyle(color: Colors.black)),
+                      onPressed: saving || rec ? null : () => _pickPart(n),
+                      icon: saving
+                          ? _spin()
+                          : const Icon(Icons.upload_file,
+                              color: Colors.black, size: 16),
+                      label: Text(saving ? 'Uploading…' : 'Upload',
+                          style: const TextStyle(color: Colors.black)),
                     ),
                   ],
                 ),
@@ -794,7 +869,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: _gold),
-          onPressed: _busy ? null : _finalize,
+          onPressed: _busy || _uploading.isNotEmpty ? null : _finalize,
           child: const Text('Finalize capture → persona style',
               style: TextStyle(color: Colors.black)),
         ),
