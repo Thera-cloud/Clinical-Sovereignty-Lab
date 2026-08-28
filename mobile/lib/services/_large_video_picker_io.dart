@@ -17,8 +17,8 @@ class _IoPickedVideo implements PickedLargeVideo {
     required this.name,
     required this.size,
     required this.contentType,
-    required this._raf,
-  });
+    required RandomAccessFile raf,
+  }) : _raf = raf;
 
   @override
   final String name;
@@ -85,6 +85,6 @@ Future<PickedLargeVideo?> pickLargeVideo() async {
     name: pf.name,
     size: pf.size,
     contentType: _guessContentType(pf.name),
-    _raf: raf,
+    raf: raf,
   );
 }
