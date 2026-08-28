@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -156,6 +157,121 @@ async def _put_r2(key: str, payload: bytes) -> bool:
         return False
 
 
+async def _encrypt_transcript(
+    db_pool, subject: str, client_id: str, text: str
+) -> Optional[str]:
+    if not text:
+        return None
+    if subject == "client":
+        from app.services.client_envelope_cipher import encrypt_for_client
+
+        return await encrypt_for_client(db_pool, client_id, text.encode())
+    return encrypt_coach_bytes(text.encode())
+
+
+async def _write_transcript(db_pool, rec_id: str, tx_cipher: Optional[str]) -> None:
+    if not db_pool or not tx_cipher:
+        return
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE coach_voice_recordings
+            SET transcript_ciphertext = $2
+            WHERE id = $1::uuid
+            """,
+            rec_id,
+            tx_cipher,
+        )
+
+
+async def _finish_voice_recording(
+    db_pool,
+    coach_id: str,
+    client_id: str,
+    blob: bytes,
+    ctype: str,
+    kind: str,
+    subject: str,
+    rec_id: str,
+    text: str,
+    clone_consent: bool,
+    capture_kind: Optional[str],
+) -> Dict[str, Any]:
+    """STT + biometrics + clone after the row exists. Never blocks the upload 200."""
+    if not text and blob:
+        text = await _transcribe(blob, ctype)
+        tx_cipher = await _encrypt_transcript(db_pool, subject, client_id, text)
+        await _write_transcript(db_pool, rec_id, tx_cipher)
+    bios: Dict[str, Any] = {}
+    if blob:
+        subject_id = client_id if subject == "client" else coach_id
+        try:
+            from app.services.biometrics_consent import is_biometrics_disabled
+
+            _bio_disabled = await is_biometrics_disabled(subject_id, db_pool)
+        except Exception as exc:
+            logger.warning("biometrics_consent check skipped: %s", exc)
+            _bio_disabled = False
+        try:
+            from app.services.coach_voice_biometrics import extract_campaign_biometrics
+
+            bios = extract_campaign_biometrics(blob, ctype, is_disabled=_bio_disabled) or {}
+        except Exception as exc:
+            logger.warning("campaign biometrics skipped: %s", exc)
+            bios = {}
+        if kind == "video":
+            try:
+                from app.services.coach_voice_biometrics import extract_visual_presence
+
+                visual = extract_visual_presence(blob) or {}
+                if visual:
+                    bios = {**bios, **visual}
+            except Exception as exc:
+                logger.warning("campaign visual presence skipped: %s", exc)
+    if subject == "coach" and blob:
+        allow_clone = True
+        if capture_kind:
+            allow_clone = bool(clone_consent)
+        if allow_clone:
+            try:
+                from app.services.coach_campaign_clone import register_clone, voice_id_for
+
+                if await register_clone(blob, coach_id, content_type=ctype):
+                    bios = {**bios, "clone_voice_id": voice_id_for(coach_id)}
+            except Exception as exc:
+                logger.warning("campaign clone register skipped: %s", exc)
+    if text or bios:
+        try:
+            from app.services.coach_voice_profile_service import upsert_voice_profile
+
+            await upsert_voice_profile(
+                db_pool,
+                coach_id,
+                text or "Client vault voice sample for coach presence.",
+                recording_id=rec_id,
+                biometrics=bios,
+            )
+        except Exception as exc:
+            logger.warning("voice profile upsert skipped: %s", exc)
+    return {
+        "transcribed": bool(text),
+        "transcript_preview": (text or "")[:400],
+        "biometrics": bool(bios.get("voice_biometrics")),
+        "presence_style": bios.get("presence_style") or "",
+    }
+
+
+def _schedule_heavy(coro) -> None:
+    task = asyncio.create_task(coro)
+
+    def _log(done: asyncio.Task) -> None:
+        exc = done.exception() if not done.cancelled() else None
+        if exc:
+            logger.warning("deferred voice ingest failed: %s", exc)
+
+    task.add_done_callback(_log)
+
+
 async def store_voice_recording(
     db_pool,
     coach_id: str,
@@ -168,6 +284,7 @@ async def store_voice_recording(
     capture_part_index: Optional[int] = None,
     capture_kind: Optional[str] = None,
     clone_consent: bool = False,
+    defer_heavy: bool = False,
 ) -> Dict[str, Any]:
     """R2 prefix coach_voice_campaigns/. Envelope-encrypt bytes. No LinkedIn/Gmail send."""
     studio_capture = bool(capture_kind)
@@ -200,13 +317,14 @@ async def store_voice_recording(
             raise ValueError("unsupported audio type")
 
     subject = "client" if client_id else "coach"
+    run_stt_inline = bool(blob) and not text and not defer_heavy
     if subject == "client":
         if not await client_vault_sync(db_pool, client_id):
             raise VaultBlocked("voice ingest blocked: vault_sync=false")
         from app.services.client_envelope_cipher import encrypt_for_client
 
         cipher = await encrypt_for_client(db_pool, client_id, blob)
-        if not text and blob:
+        if run_stt_inline:
             text = await _transcribe(blob, ctype)
         tx_cipher: Optional[str] = None
         if text:
@@ -216,7 +334,7 @@ async def store_voice_recording(
             cipher = encrypt_coach_bytes(blob)
         except EnvelopeUnavailable as exc:
             raise ValueError("coach envelope unavailable") from exc
-        if not text and blob:
+        if run_stt_inline:
             text = await _transcribe(blob, ctype)
         tx_cipher = None
         if text:
@@ -278,59 +396,30 @@ async def store_voice_recording(
                     capture_kind,
                     bool(clone_consent),
                 )
-    bios: Dict[str, Any] = {}
-    if blob:
-        # Slice 0: honor per-user biometrics opt-out (IL BIPA §15(b) / BAA §6.3).
-        subject_id = client_id if subject == "client" else coach_id
-        try:
-            from app.services.biometrics_consent import is_biometrics_disabled
-
-            _bio_disabled = await is_biometrics_disabled(subject_id, db_pool)
-        except Exception as exc:
-            logger.warning("biometrics_consent check skipped: %s", exc)
-            _bio_disabled = False
-        try:
-            from app.services.coach_voice_biometrics import extract_campaign_biometrics
-
-            bios = extract_campaign_biometrics(blob, ctype, is_disabled=_bio_disabled) or {}
-        except Exception as exc:
-            logger.warning("campaign biometrics skipped: %s", exc)
-            bios = {}
-        if kind == "video":
-            try:
-                from app.services.coach_voice_biometrics import extract_visual_presence
-
-                visual = extract_visual_presence(blob) or {}
-                if visual:
-                    bios = {**bios, **visual}
-            except Exception as exc:
-                logger.warning("campaign visual presence skipped: %s", exc)
-    if subject == "coach" and blob:
-        allow_clone = True
-        if capture_kind:
-            allow_clone = bool(clone_consent)
-        if allow_clone:
-            try:
-                from app.services.coach_campaign_clone import register_clone, voice_id_for
-
-                if await register_clone(blob, coach_id, content_type=ctype):
-                    bios = {**bios, "clone_voice_id": voice_id_for(coach_id)}
-            except Exception as exc:
-                logger.warning("campaign clone register skipped: %s", exc)
-    if text or bios:
-        try:
-            from app.services.coach_voice_profile_service import upsert_voice_profile
-
-            await upsert_voice_profile(
-                db_pool,
-                coach_id,
-                text or "Client vault voice sample for coach presence.",
-                recording_id=rec_id,
-                biometrics=bios,
-            )
-        except Exception as exc:
-            logger.warning("voice profile upsert skipped: %s", exc)
-    preview = text[:400] if text else ""
+    finish_args = (
+        db_pool,
+        coach_id,
+        client_id,
+        blob,
+        ctype,
+        kind,
+        subject,
+        rec_id,
+        text,
+        bool(clone_consent),
+        capture_kind,
+    )
+    if defer_heavy and blob:
+        _schedule_heavy(_finish_voice_recording(*finish_args))
+        heavy = {
+            "transcribed": bool(text),
+            "transcript_preview": (text or "")[:400],
+            "biometrics": False,
+            "presence_style": "",
+            "processing": True,
+        }
+    else:
+        heavy = await _finish_voice_recording(*finish_args)
     return {
         "ok": True,
         "id": rec_id,
@@ -339,10 +428,7 @@ async def store_voice_recording(
         "published": False,
         "media_kind": kind,
         "subject": subject,
-        "transcribed": bool(text),
-        "transcript_preview": preview,
-        "biometrics": bool(bios.get("voice_biometrics")),
-        "presence_style": bios.get("presence_style") or "",
+        **heavy,
     }
 
 

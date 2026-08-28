@@ -353,25 +353,42 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   }
 
   Future<void> _uploadPart(int n, Uint8List bytes, String contentType) async {
+    if (bytes.length > 15 * 1024 * 1024) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Audio over 15 MB')));
+      return;
+    }
     setState(() => _busy = true);
-    final r = await http.post(
-      Uri.parse(
-          '${AppConfig.apiBaseUrl}/api/coach/integrations/mirror-capture/parts/$n/upload'),
-      headers: _h,
-      body: json.encode({
-        'audio_b64': base64Encode(bytes),
-        'content_type': contentType,
-        'media_kind': 'audio',
-        'clone_consent': _cloneConsent,
-      }),
-    );
-    if (!mounted) return;
-    setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(r.statusCode == 200
-            ? 'Part $n stored (re-record overwrites)'
-            : 'Upload failed (${r.statusCode})')));
-    await _refresh();
+    try {
+      final r = await http.post(
+        Uri.parse(
+            '${AppConfig.apiBaseUrl}/api/coach/integrations/mirror-capture/parts/$n/upload'),
+        headers: _h,
+        body: json.encode({
+          'audio_b64': base64Encode(bytes),
+          'content_type': contentType,
+          'media_kind': 'audio',
+          'clone_consent': _cloneConsent,
+        }),
+      );
+      if (!mounted) return;
+      final saved = r.statusCode == 200;
+      final timedOut = r.statusCode == 504 || r.statusCode == 408;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(saved
+              ? 'Part $n stored (re-record overwrites)'
+              : (timedOut
+                  ? 'Upload timed out — refresh STUDIO; Part $n may already be saved'
+                  : 'Upload failed (${r.statusCode})'))));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _toggleRecord(int n) async {
@@ -423,21 +440,36 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   }
 
   Future<void> _pickPart(int n) async {
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['wav', 'mp3', 'm4a', 'ogg', 'webm'],
-      withData: true,
-      withReadStream: true,
-    );
-    if (picked == null || picked.files.isEmpty) return;
-    final bytes = await _pickedFileBytes(picked.files.first);
-    if (bytes == null || bytes.isEmpty) {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['wav', 'mp3', 'm4a', 'ogg', 'webm'],
+        withData: true,
+        withReadStream: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+      final file = picked.files.first;
+      final bytes = await _pickedFileBytes(file);
+      if (bytes == null || bytes.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read audio bytes')));
+        return;
+      }
+      final ext = (file.extension ?? '').toLowerCase();
+      final ctype = {
+        'wav': 'audio/wav',
+        'mp3': 'audio/mpeg',
+        'm4a': 'audio/m4a',
+        'ogg': 'audio/ogg',
+        'webm': 'audio/webm',
+      }[ext] ?? 'audio/webm';
+      await _uploadPart(n, bytes, ctype);
+    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not read audio bytes')));
-      return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Picker failed: $e')));
     }
-    await _uploadPart(n, bytes, 'audio/webm');
   }
 
   @override

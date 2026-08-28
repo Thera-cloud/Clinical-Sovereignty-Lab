@@ -514,6 +514,7 @@ async def ingest_voice(request: Request, user: Dict = Depends(require_coach)):
             transcript=transcript,
             media_kind=media_kind,
             content_type=content_type,
+            defer_heavy=True,
         )
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")
@@ -574,6 +575,7 @@ async def mirror_capture_upload(
             capture_part_index=int(part["index"]),
             capture_kind=str(part["kind"]),
             clone_consent=bool(body.get("clone_consent")),
+            defer_heavy=True,
         )
     except FlagOff:
         raise HTTPException(403, "temporarily unavailable")

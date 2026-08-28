@@ -1,5 +1,6 @@
 """Seam 3: Gmail drafts (no send), VaultBlocked, voice ingest, audio briefs."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -268,6 +269,40 @@ async def test_transcript_only_coach_ingest(monkeypatch):
     assert out["transcribed"] is True
     assert out["subject"] == "coach"
     upsert.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_defer_heavy_returns_before_stt(monkeypatch):
+    from app.services.voice_campaign_ingest import store_voice_recording
+
+    async def _slow(*_a, **_k):
+        await asyncio.sleep(30)
+        return "late"
+
+    monkeypatch.setenv("ENABLE_VOICE_CAMPAIGN", "true")
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest.encrypt_coach_bytes",
+        lambda data: "coach-cipher",
+    )
+    monkeypatch.setattr("app.services.voice_campaign_ingest._transcribe", _slow)
+    monkeypatch.setattr(
+        "app.services.voice_campaign_ingest._put_r2",
+        AsyncMock(return_value=False),
+    )
+    out = await store_voice_recording(
+        _FakePool(), "COACH", "", b"wav-bytes", defer_heavy=True
+    )
+    assert out["ok"] is True
+    assert out.get("processing") is True
+    assert out["transcribed"] is False
+    current = asyncio.current_task()
+    for task in asyncio.all_tasks():
+        if task is not current and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 def test_style_merge_and_crystal_surface():
