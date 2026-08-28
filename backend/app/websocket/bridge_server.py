@@ -3243,10 +3243,12 @@ _lr_engine = None  # QUANTUM-CRYSTAL-ARCH — initialized after db_pool
 _reconnect_engine = None  # QUANTUM-CRYSTAL-ARCH — Daily Reconnect ritual
 _training_ground_engine = None  # QUANTUM-CRYSTAL-ARCH — Training Ground ILM
 
+_get_nate_client_memory = None
 try:
     from app.services.intake_form_service import (
         get_intake_summary as _get_intake_summary,
         get_section1_for_nate as _get_section1_for_nate,
+        get_nate_client_memory as _get_nate_client_memory,
     )
     from app.services.intake_walkthrough import (
         get_intake_chat_policy_addendum as _get_intake_chat_policy_addendum,
@@ -3255,6 +3257,7 @@ try:
 except Exception:
     _get_intake_summary = None
     _get_section1_for_nate = None
+    _get_nate_client_memory = None
     _get_intake_chat_policy_addendum = None
     handle_intake_walkthrough_turn = None
 
@@ -9226,10 +9229,12 @@ class AzureCortex:
             print(f">>> [CTX-TIMING] {name}: {int((_time_ctx.monotonic() - _s) * 1000)}ms")
             return result
         async def _fetch_intake_context():
-            if not _cpool or not _uname or _get_section1_for_nate is None:
+            # QUANTUM-CRYSTAL-ARCH — form intake + Identity Forge (11-turn memory)
+            _intake_fn = _get_nate_client_memory or _get_section1_for_nate
+            if not _cpool or not _uname or _intake_fn is None:
                 return ""
             async with _cpool.acquire() as _iconn:
-                return await _get_section1_for_nate(_iconn, _uname)
+                return await _intake_fn(_iconn, _uname)
 
         async def _fetch_fsf_context():
             if not _cpool or _role != "CLIENT" or not _allow_fsf(_depth):

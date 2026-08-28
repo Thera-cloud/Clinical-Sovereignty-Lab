@@ -372,20 +372,124 @@ async def get_intake_summary(conn, username: str) -> Dict[str, Any]:
     }
 
 
+# Saved on the intake row; injected into Nate. Omit address / emergency contact.
+_NATE_INTAKE_FIELDS: List[str] = SECTION1_FIELDS + [
+    "q15_prior_treatment",
+    "q16_current_medications",
+    "q17_family_history",
+    "q18_suicide_self_harm_history",
+    "q19_trauma_history",
+    "q20_substance_use",
+    "q21_sleep_appetite_energy",
+]
+
+# Identity Forge 11-turn labels — pair with user answers in conversation_history.
+_IDENTITY_FORGE_LABELS: List[Tuple[int, str]] = [
+    (1, "Consented to getting-to-know-you conversation"),
+    (2, "What brought them here"),
+    (3, "Who they are (not roles)"),
+    (4, "Their world right now"),
+    (5, "Roots — people, culture, faith"),
+    (6, "What they carry"),
+    (7, "Strength that kept them going"),
+    (8, "Who they are in their healing story"),
+    (9, "Faith / spirit / God"),
+    (10, "What they hope will change"),
+    (11, "Story symbols that must never appear"),
+]
+
+
+def _coerce_conversation_history(raw: Any) -> List[Dict[str, Any]]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    return [m for m in raw if isinstance(m, dict)]
+
+
+def iter_identity_forge_pairs(conversation: Any) -> List[Tuple[int, str, str]]:
+    """Pair Identity Forge user answers to the 11 canonical prompts."""
+    user_turns = [
+        str(m.get("content") or "").strip()
+        for m in _coerce_conversation_history(conversation)
+        if (m.get("role") or "") == "user" and str(m.get("content") or "").strip()
+    ]
+    pairs: List[Tuple[int, str, str]] = []
+    for idx, (turn, label) in enumerate(_IDENTITY_FORGE_LABELS):
+        if idx >= len(user_turns):
+            break
+        pairs.append((turn, label, user_turns[idx]))
+    return pairs
+
+
+def format_identity_forge_for_nate(conversation: Any) -> str:
+    pairs = iter_identity_forge_pairs(conversation)
+    if not pairs:
+        return ""
+    lines = [
+        "IDENTITY FORGE (SAVED — durable memory; they completed this with you and expect you to remember it)",
+        "Never treat this as a first meeting. Never recast them as a victim.",
+    ]
+    for turn, label, answer in pairs:
+        lines.append(f"{turn}. {label}: {answer}")
+    return "\n".join(lines)
+
+
+async def get_identity_forge_for_nate(conn, username: str) -> str:
+    if not username:
+        return ""
+    row = await conn.fetchrow(
+        """
+        SELECT f.conversation_history
+        FROM sse_identity_forge f
+        JOIN users u ON (
+            f.user_id = u.username
+            OR f.user_id = u.hardware_id
+            OR f.user_id = u.id::text
+        )
+        WHERE u.username = $1
+          AND f.status = 'complete'
+        ORDER BY f.completed_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        username,
+    )
+    if not row:
+        return ""
+    return format_identity_forge_for_nate(row["conversation_history"])
+
+
+async def get_nate_client_memory(conn, username: str) -> str:
+    """Form intake + Identity Forge for chat and voice prompts."""
+    parts: List[str] = []
+    form = await get_section1_for_nate(conn, username)
+    if form:
+        parts.append(form)
+    forge = await get_identity_forge_for_nate(conn, username)
+    if forge:
+        parts.append(forge)
+    return "\n\n".join(parts)
+
+
 async def get_section1_for_nate(conn, username: str) -> str:
     row = await conn.fetchrow(
         """
         SELECT user_id, coach_nate_style_guidance, {}
         FROM intake_form
         WHERE user_id = $1
-        """.format(", ".join(SECTION1_FIELDS)),
+        """.format(", ".join(_NATE_INTAKE_FIELDS)),
         username,
     )
     if not row:
         return ""
     data = _row_to_dict(row)
     lines: List[str] = []
-    for field in SECTION1_FIELDS:
+    for field in _NATE_INTAKE_FIELDS:
         value = data.get(field)
         if _is_blank(value):
             continue
@@ -397,7 +501,7 @@ async def get_section1_for_nate(conn, username: str) -> str:
 
     if not lines:
         return ""
-    return "CLIENT INTAKE (SECTION 1)\n" + "\n".join(lines)
+    return "CLIENT INTAKE (SAVED)\n" + "\n".join(lines)
 
 
 async def credit_walkthrough_question(

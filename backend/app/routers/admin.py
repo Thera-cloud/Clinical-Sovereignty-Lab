@@ -6023,7 +6023,21 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
             for w in wbooks:
                 prov = await conn.fetchrow("SELECT filename FROM sse_ip_provenance WHERE story_plot_id = $1 LIMIT 1", w["storyboard_id"])
                 result["workbooks"].append({"storyboard_title": w["storyboard_id"], "source": prov["filename"] if prov else None})
-            crystal = await conn.fetchval("SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id = ANY($1) AND confidence >= 0.5 ORDER BY created_at DESC LIMIT 1", ids)
+            crystal = None
+            try:
+                _uid_row = await conn.fetchrow(
+                    "SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL",
+                    uname,
+                )
+                if _uid_row and _uid_row["id"]:
+                    crystal = await conn.fetchval(
+                        "SELECT crystal_text FROM nate_intelligence_crystals "
+                        "WHERE user_id = $1 AND confidence >= 0.5 "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        _uid_row["id"],
+                    )
+            except Exception:
+                crystal = None
             if crystal:
                 result["crystal_insight"] = crystal[:200]
             lp = await conn.fetchval("SELECT r2_url FROM sse_panel_log WHERE user_id = ANY($1) AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1", ids)

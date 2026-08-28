@@ -3289,13 +3289,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => SecureSearchScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Shared with Little Nate (section 1) + coach-only section 2', () {
-              if ((_archetypeName ?? '').isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Complete your archetype journey first, then open Personal Intake.')),
-                );
-                return;
-              }
+            _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Saved to your record. Nate uses section 1 + clinical history; address/emergency stay coach-only.', () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => IntakeFormScreen(profile: _profile)),

@@ -230,6 +230,17 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
     except Exception:
         pass
 
+    # SOVEREIGN-VOICE — Identity Forge 11-turn memory
+    try:
+        from app.services.intake_form_service import get_identity_forge_for_nate
+        if db_pool and username:
+            async with db_pool.acquire() as _fg_conn:
+                _forge = await get_identity_forge_for_nate(_fg_conn, username)
+            if _forge:
+                memory_block += _forge + "\n\n"
+    except Exception:
+        pass
+
     # QUANTUM-CRYSTAL-ARCH: cycle skill / treatment plan for voice
     skill_plan_block = ""
     try:
@@ -2115,11 +2126,11 @@ async def run_twilio_grok_xtts_bridge(
                         from app.services.vectorize_service import index_conversation
 
                         asyncio.create_task(_record_ec_snapshot("final"))
-                        pair_count = min(len(user_turns), len(assistant_turns))
+                        pair_count = max(len(user_turns), len(assistant_turns))
                         async with db_pool.acquire() as conn:
                             for i in range(pair_count):
-                                u = user_turns[i]["text"]
-                                a = assistant_turns[i]["text"]
+                                u = user_turns[i]["text"] if i < len(user_turns) else ""
+                                a = assistant_turns[i]["text"] if i < len(assistant_turns) else ""
                                 if not u and not a:
                                     continue
                                 await conn.execute(

@@ -333,12 +333,54 @@ async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict
         data["symbol_exclusions"] = symbol_exclusions
 
     try:
-        from app.websocket.crystal_recall_bridge import crystallize_from_conversation
-        crystal_text = f"Intake: {data.get('presenting_concern','')} | Wound: {data.get('wound_indicator','')} | Strength: {data.get('strength_indicator','')}"
-        await crystallize_from_conversation(db_pool, user_id, crystal_text,
-            f"Identity forged: {data.get('archetype_hint','')} archetype, {data.get('cultural_context','')}",
-            domain="clinical", min_score=2)
-    except Exception:
-        pass
+        await persist_identity_forge_memories(db_pool, user_id, conversation)
+    except Exception as exc:
+        logger.warning("Identity forge crystal persist failed for %s: %s", user_id, exc)
 
     return data
+
+
+async def persist_identity_forge_memories(db_pool, user_id: str, conversation: list) -> int:
+    """Write each Identity Forge answer as a high-confidence user-scoped crystal."""
+    if not db_pool or not user_id:
+        return 0
+    from app.services.intake_form_service import iter_identity_forge_pairs
+
+    pairs = iter_identity_forge_pairs(conversation)
+    if not pairs:
+        return 0
+    written = 0
+    async with db_pool.acquire() as conn:
+        user_uuid = await conn.fetchval(
+            "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
+            user_id,
+        )
+        if not user_uuid:
+            logger.warning("Identity forge crystals skipped — user %s unresolved", user_id[:40])
+            return 0
+        for turn, label, answer in pairs:
+            if len(answer) < 8:
+                continue
+            crystal_text = f"Identity Forge Q{turn} ({label}): {answer}"
+            content_hash = hashlib.sha256(
+                f"identity_forge:{user_uuid}:q{turn}:{answer}".encode()
+            ).hexdigest()
+            meta = json.dumps({"source": "identity_forge", "turn": turn, "label": label})
+            row = await conn.fetchrow(
+                """
+                INSERT INTO nate_intelligence_crystals
+                    (crystal_text, domain, scope, topics, source_count,
+                     generation, confidence, content_hash, user_id, origin_surface, metadata)
+                VALUES ($1, 'clinical', 'user', ARRAY['identity_forge'], 2, 0, 0.85, $2, $3, 'identity_forge', $4::jsonb)
+                ON CONFLICT (content_hash) DO UPDATE SET
+                    crystal_text = EXCLUDED.crystal_text,
+                    confidence = GREATEST(nate_intelligence_crystals.confidence, 0.85),
+                    last_recalled_at = NOW()
+                RETURNING id
+                """,
+                crystal_text, content_hash, user_uuid, meta,
+            )
+            if row:
+                written += 1
+    logger.info("Identity forge memories persisted for %s: %s crystals", user_id[:40], written)
+    return written
