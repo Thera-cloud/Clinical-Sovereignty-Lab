@@ -9,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../services/coach_web_recorder.dart';
 import '../services/studio_livekit_room.dart';
+import '../services/studio_part_player.dart';
+import 'coach_studio_persona_tools.dart';
 
 const _lnLabel = 'Little Nate (co-host)';
 const _verticals = <String>[
@@ -75,6 +77,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   final _noteCtrl = TextEditingController();
   Timer? _tick;
   int _secs = 0;
+  int _personaEpoch = 0;
+  List<Map<String, dynamic>> _lastDiff = const [];
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -90,6 +94,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   @override
   void dispose() {
     _tick?.cancel();
+    stopStudioPlayback();
     if (_recordingPart != null) {
       _recorder.stop();
     }
@@ -410,12 +415,77 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
       body: json.encode({}),
     );
     if (!mounted) return;
-    setState(() => _busy = false);
+    setState(() {
+      _busy = false;
+      if (r.statusCode == 200) {
+        try {
+          final j = json.decode(r.body) as Map<String, dynamic>;
+          _lastDiff = List<Map<String, dynamic>>.from(j['diff'] ?? []);
+        } catch (_) {
+          _lastDiff = const [];
+        }
+        _personaEpoch += 1;
+      }
+    });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(r.statusCode == 200
-            ? 'Persona style updated'
+            ? 'Persona style updated — review the card below'
             : 'Finalize failed (${r.statusCode})')));
     await _refresh();
+  }
+
+  Future<void> _showTranscript(int n) async {
+    final r = await http.get(
+      Uri.parse(
+          '${AppConfig.apiBaseUrl}/api/coach/integrations/mirror-capture/parts/$n/transcript'),
+      headers: _h,
+    );
+    if (!mounted) return;
+    if (r.statusCode != 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Transcript failed (${r.statusCode})')));
+      return;
+    }
+    final j = json.decode(r.body) as Map<String, dynamic>;
+    final text = (j['transcript'] ?? '').toString();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text('Part $n transcript',
+            style: const TextStyle(color: _text, fontSize: 14)),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Text(
+              text.isEmpty ? 'No transcript yet — STT may still be running' : text,
+              style: const TextStyle(color: _text, fontSize: 12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _playPart(int n) async {
+    final r = await http.get(
+      Uri.parse(
+          '${AppConfig.apiBaseUrl}/api/coach/integrations/mirror-capture/parts/$n/audio'),
+      headers: _h,
+    );
+    if (!mounted) return;
+    if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Play failed (${r.statusCode})')));
+      return;
+    }
+    final mime = r.headers['content-type'] ?? 'audio/webm';
+    playStudioBytes(r.bodyBytes, mime);
   }
 
   Future<void> _uploadPart(int n, Uint8List bytes, String contentType) async {
@@ -852,6 +922,24 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
                       label: Text(saving ? 'Uploading…' : 'Upload',
                           style: const TextStyle(color: Colors.black)),
                     ),
+                    if (p['complete'] == true ||
+                        p['has_audio'] == true ||
+                        _locallyComplete.contains(n))
+                      TextButton.icon(
+                        onPressed: saving ? null : () => _playPart(n),
+                        icon: const Icon(Icons.play_arrow,
+                            color: _gold, size: 16),
+                        label: const Text('Play',
+                            style: TextStyle(color: _gold, fontSize: 12)),
+                      ),
+                    if (p['complete'] == true ||
+                        p['has_transcript'] == true ||
+                        _locallyComplete.contains(n))
+                      TextButton(
+                        onPressed: saving ? null : () => _showTranscript(n),
+                        child: const Text('Show transcript',
+                            style: TextStyle(color: _gold, fontSize: 12)),
+                      ),
                   ],
                 ),
               ],
@@ -872,6 +960,12 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
           onPressed: _busy || _uploading.isNotEmpty ? null : _finalize,
           child: const Text('Finalize capture → persona style',
               style: TextStyle(color: Colors.black)),
+        ),
+        const SizedBox(height: 20),
+        CoachStudioPersonaTools(
+          token: widget.token,
+          epoch: _personaEpoch,
+          pendingDiff: _lastDiff,
         ),
       ],
     );

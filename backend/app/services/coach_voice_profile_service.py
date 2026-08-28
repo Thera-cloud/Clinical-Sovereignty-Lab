@@ -17,6 +17,113 @@ INTERVIEW_PROMPTS = [
     "What phrase do clients hear from you when they feel stuck?",
 ]
 
+_DO_NOT_MARKERS = (
+    "never",
+    "do not",
+    "don't",
+    "dont ",
+    "must not",
+    "won't",
+    "cannot say",
+    "do-not",
+    "forbid",
+)
+_TOSS_MARKERS = ("toss", "over to nate", "little nate", "take it nate")
+
+STYLE_LIST_KEYS = (
+    "phrases",
+    "do_not_say",
+    "toss_phrases",
+    "signature_frameworks",
+    "topics",
+    "word_patterns",
+)
+STYLE_STR_KEYS = (
+    "tone",
+    "cadence",
+    "presence_style",
+    "preface_style",
+    "introduction_style",
+    "body_style",
+    "climax_style",
+    "conclusion_style",
+    "stance",
+    "assistant_stance",
+)
+
+
+def extract_do_not_lines(text: str, *, all_lines: bool = False) -> List[str]:
+    found: List[str] = []
+    for raw in re.split(r"[\n;]+", text or ""):
+        line = raw.strip().strip("-•*")
+        if len(line) < 2:
+            continue
+        low = line.lower()
+        if all_lines or any(m in low for m in _DO_NOT_MARKERS):
+            if line not in found:
+                found.append(line[:160])
+        if len(found) >= 16:
+            break
+    return found
+
+
+def extract_toss_lines(text: str) -> List[str]:
+    found: List[str] = []
+    for raw in re.split(r"[\n.]+", text or ""):
+        line = raw.strip()
+        if len(line) < 4:
+            continue
+        if any(m in line.lower() for m in _TOSS_MARKERS):
+            if line not in found:
+                found.append(line[:160])
+        if len(found) >= 16:
+            break
+    return found
+
+
+def style_diff(old: Dict[str, Any], new: Dict[str, Any]) -> List[Dict[str, Any]]:
+    changes: List[Dict[str, Any]] = []
+    old = old or {}
+    new = new or {}
+    for key in STYLE_LIST_KEYS:
+        prev = {str(x).strip() for x in (old.get(key) or []) if str(x).strip()}
+        nxt = {str(x).strip() for x in (new.get(key) or []) if str(x).strip()}
+        for val in sorted(nxt - prev):
+            changes.append({"key": key, "op": "add", "value": val})
+        for val in sorted(prev - nxt):
+            changes.append({"key": key, "op": "remove", "value": val})
+    for key in STYLE_STR_KEYS:
+        prev = str(old.get(key) or "").strip()
+        nxt = str(new.get(key) or "").strip()
+        if nxt and nxt != prev:
+            changes.append({"key": key, "op": "set", "value": nxt, "previous": prev})
+    return changes
+
+
+def apply_style_ops(style: Dict[str, Any], ops: List[Dict[str, Any]]) -> Dict[str, Any]:
+    out = dict(style or {})
+    for raw in ops or []:
+        if not isinstance(raw, dict):
+            continue
+        key = str(raw.get("key") or "").strip()
+        op = str(raw.get("op") or "").strip()
+        val = raw.get("value")
+        if not key:
+            continue
+        if op == "set":
+            out[key] = val
+            continue
+        lst = [str(x).strip() for x in (out.get(key) or []) if str(x).strip()]
+        item = str(val or "").strip()
+        if not item:
+            continue
+        if op == "add" and item not in lst:
+            lst.append(item)
+        elif op == "remove":
+            lst = [x for x in lst if x != item]
+        out[key] = lst[:16]
+    return out
+
 
 def heuristic_style(transcript: str) -> Dict[str, Any]:
     text = (transcript or "").strip()
@@ -39,6 +146,9 @@ def heuristic_style(transcript: str) -> Dict[str, Any]:
         "climax_style": "one pointed invitation, not a lecture",
         "conclusion_style": closer[:180] or "leave the door open",
         "assistant_stance": "encourage without diagnosing",
+        "do_not_say": extract_do_not_lines(text),
+        "toss_phrases": extract_toss_lines(text),
+        "signature_frameworks": [],
         "source": "heuristic",
         "version": 1,
     }
@@ -109,6 +219,9 @@ def merge_style(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
         "clone_voice_id": _str("clone_voice_id"),
         "stance": _str("stance"),
         "assistant_stance": _str("assistant_stance", "encourage without diagnosing"),
+        "do_not_say": _list("do_not_say"),
+        "toss_phrases": _list("toss_phrases"),
+        "signature_frameworks": _list("signature_frameworks"),
         "source": "merged",
         "version": version,
     }
@@ -143,7 +256,10 @@ async def extract_style_via_ln(transcript: str) -> Optional[Dict[str, Any]]:
                 "body_style (how they develop the middle), "
                 "climax_style (how they land the turn or invitation), "
                 "conclusion_style (how they close), "
-                "stance, assistant_stance.\n\n"
+                "stance, assistant_stance, "
+                "do_not_say (array of words/phrases they forbid), "
+                "toss_phrases (array of on-air toss lines to Little Nate), "
+                "signature_frameworks (array of named methods they use).\n\n"
                 f"{text[:6000]}"
             ),
             system="Return valid JSON only. No markdown.",

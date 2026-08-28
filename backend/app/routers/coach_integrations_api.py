@@ -589,7 +589,116 @@ async def mirror_capture_upload(
 async def mirror_capture_finalize(request: Request, user: Dict = Depends(require_coach)):
     from app.services.studio_mirror_capture import finalize as _finalize
 
-    return await _finalize(getattr(request.app.state, "db_pool", None), _hw(user))
+    body: Dict[str, Any] = {}
+    try:
+        raw = await request.body()
+        if raw:
+            body = json.loads(raw)
+    except Exception:
+        body = {}
+    return await _finalize(
+        getattr(request.app.state, "db_pool", None),
+        _hw(user),
+        coach_note=str(body.get("coach_note") or ""),
+    )
+
+
+@router.get("/mirror-capture/persona")
+async def mirror_capture_persona(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import persona_review
+
+    return await persona_review(getattr(request.app.state, "db_pool", None), _hw(user))
+
+
+@router.put("/mirror-capture/persona")
+async def mirror_capture_persona_put(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import persist_persona
+
+    body = await request.json()
+    style = body.get("style") if isinstance(body.get("style"), dict) else body
+    out = await persist_persona(
+        getattr(request.app.state, "db_pool", None), _hw(user), style or {}
+    )
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 400), out.get("reason") or "error")
+    return out
+
+
+@router.post("/mirror-capture/style/apply")
+async def mirror_capture_style_apply(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import apply_persona_ops
+
+    body = await request.json()
+    ops = body.get("accept") or body.get("ops") or []
+    if not isinstance(ops, list):
+        raise HTTPException(422, "accept must be a list")
+    out = await apply_persona_ops(
+        getattr(request.app.state, "db_pool", None), _hw(user), ops
+    )
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 400), out.get("reason") or "error")
+    return out
+
+
+@router.get("/mirror-capture/parts/{n}/transcript")
+async def mirror_capture_part_transcript(
+    n: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.studio_mirror_capture import part_transcript
+
+    out = await part_transcript(
+        getattr(request.app.state, "db_pool", None), _hw(user), n
+    )
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 404), out.get("reason") or "not found")
+    return out
+
+
+@router.get("/mirror-capture/parts/{n}/audio")
+async def mirror_capture_part_audio(
+    n: int, request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.studio_mirror_capture import part_audio
+
+    out = await part_audio(getattr(request.app.state, "db_pool", None), _hw(user), n)
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 404), out.get("reason") or "not found")
+    return Response(content=out["bytes"], media_type=out.get("content_type") or "audio/webm")
+
+
+@router.post("/mirror-capture/booth")
+async def mirror_capture_booth(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.studio_mirror_capture import booth_reply
+
+    body = await request.json()
+    out = await booth_reply(
+        getattr(request.app.state, "db_pool", None),
+        _hw(user),
+        str(body.get("kind") or "free"),
+        str(body.get("text") or body.get("prompt") or ""),
+    )
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 400), out.get("reason") or "error")
+    return out
+
+
+@router.post("/mirror-capture/booth/feedback")
+async def mirror_capture_booth_feedback(
+    request: Request, user: Dict = Depends(require_coach)
+):
+    from app.services.studio_mirror_capture import booth_feedback
+
+    body = await request.json()
+    out = await booth_feedback(
+        getattr(request.app.state, "db_pool", None),
+        _hw(user),
+        str(body.get("verdict") or ""),
+        note=str(body.get("note") or ""),
+        reply=str(body.get("reply") or ""),
+    )
+    if not out.get("ok"):
+        raise HTTPException(int(out.get("code") or 400), out.get("reason") or "error")
+    return out
 
 
 @router.post("/mirror-capture/consent-clone")
