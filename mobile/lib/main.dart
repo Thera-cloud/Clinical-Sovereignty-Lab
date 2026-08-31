@@ -2116,11 +2116,16 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     }
 
     debugLog(">>> SENDING: $text");
+    final panelDepth = text.contains('[SSE Panel:') ||
+        text.contains('[Story Panel:') ||
+        text.toLowerCase().contains('three focus topics') ||
+        text.toLowerCase().contains('sovereign journey') ||
+        text.toLowerCase().contains('focus topics got cut');
     _wsSend(jsonEncode({
       "type": "nate_query", 
       "nate_query": text,
       "modality": "General",
-      "depth_mode": "faster",
+      "depth_mode": panelDepth ? "extra" : "faster",
     }));
 
     setState(() {

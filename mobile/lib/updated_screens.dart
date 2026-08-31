@@ -4449,12 +4449,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     if (kDebugMode) print(">>> SENDING: $text");
     _lastUserMessage = text;
     _preferServerAvatar = false;
+    final panelDepth = text.contains('[SSE Panel:') ||
+        text.contains('[Story Panel:') ||
+        text.toLowerCase().contains('three focus topics') ||
+        text.toLowerCase().contains('sovereign journey') ||
+        text.toLowerCase().contains('focus topics got cut');
     _wsSend(jsonEncode({
       // FIX-H
       "type": "nate_query",
       "nate_query": text,
       "modality": "General",
-      "depth_mode": _chatDepthMode,
+      "depth_mode": panelDepth ? 'extra' : _chatDepthMode,
     }));
 
     setState(() {

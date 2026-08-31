@@ -12,6 +12,26 @@ from typing import Any
 
 _SSE_PANEL_REF_RE = re.compile(r"\[SSE Panel:([a-fA-F0-9\-]+)\]", re.I)
 _STORY_PANEL_LEGACY_RE = re.compile(r"\[Story Panel:[^\]]*\]\s*", re.I)
+_PANEL_FOLLOWUP_RE = re.compile(
+    r"(?:focus topics?|three topics|3 topics|got cut off|cut off|"
+    r"post them again|story panel|journey (?:image|panel)|"
+    r"sovereign journey|sift(?:\s+pass)?)",
+    re.I,
+)
+_SHORT_PANEL_ACK_RE = re.compile(
+    r"^(?:sure|yes|yeah|yep|ok|okay|please|go on|continue|and then\??|"
+    r"for me or for you\??|what(?:'s| is) next\??|"
+    r"can you (?:repeat|repost|list) (?:them|that|those)\??)\s*[.!]?\s*$",
+    re.I,
+)
+_COMPLETE_FOCUS_THREE_RE = re.compile(
+    r"(?:^|\n)\s*1[\.)]\s+\S.{8,}?(?:\n)\s*2[\.)]\s+\S.{8,}?(?:\n)\s*3[\.)]\s+\S.{8,}",
+    re.I | re.S,
+)
+_FOCUS_HEADING_RE = re.compile(
+    r"(?:For today,\s*)?(?:here are )?(?:the )?three focus topics\b",
+    re.I,
+)
 
 # Client-facing memory → character map (grouped themes per manifestation).
 CHARACTER_THEME_GUIDE: dict[str, dict[str, Any]] = {
@@ -234,8 +254,76 @@ def _format_cycle_signals(rows: list[Any]) -> str:
     return "\n".join(lines)
 
 
+def _sse_panel_contract() -> str:
+    return (
+        "[SSE PANEL CONTRACT] You must include section E: exactly 3 numbered focus "
+        "topics, each a complete sentence. Write E immediately after C — before SIFT. "
+        "Never stop after a bare '1.' Never say you already listed the topics unless "
+        "RECENT CHAT shows three complete numbered items. If the client says the topics "
+        "were cut off, list all three now. If space is short, shorten A–C and SIFT; "
+        "never omit E."
+    )
+
+
+def focus_topics_complete(text: str) -> bool:
+    return bool(_COMPLETE_FOCUS_THREE_RE.search(text or ""))
+
+
+def sse_should_complete_focus_topics(user_text: str, ctx: str) -> bool:
+    if not ctx or "DEEP REFLECTION PROTOCOL" not in ctx:
+        return False
+    blob = user_text or ""
+    if _SSE_PANEL_REF_RE.search(blob) or _STORY_PANEL_LEGACY_RE.search(blob):
+        return True
+    if "asking about my Sovereign Journey" in blob:
+        return True
+    return bool(_PANEL_FOLLOWUP_RE.search(blob))
+
+
+def _topics_from_ctx(ctx: str) -> list[str]:
+    char = "this panel's core character"
+    m = re.search(r"Core character manifested:\s*(.+)", ctx or "")
+    if m:
+        char = m.group(1).strip() or char
+    themes: list[str] = []
+    tm = re.search(r"Crystal themes that drove this panel:\s*(.+)", ctx or "")
+    if tm:
+        themes = [
+            t.strip()
+            for t in tm.group(1).split(",")
+            if t.strip() and "not stored" not in t.lower() and t.strip() != "n/a"
+        ]
+    theme = themes[0] if themes else "what you brought into the space today"
+    theme2 = themes[1] if len(themes) > 1 else "a feeling the scene is holding"
+    return [
+        f"What {char} is reflecting in {theme} — without needing to fix it.",
+        f"A body-sense or image in the scene that wants a name around {theme2}.",
+        "One thread from recent conversation this image is holding for you today.",
+    ]
+
+
+def ensure_three_focus_topics(ai_text: str, ctx: str) -> str:
+    """If the model cut off or skipped section E, finish the three numbered topics."""
+    text = ai_text or ""
+    if focus_topics_complete(text):
+        return text
+    topics = _topics_from_ctx(ctx)
+    block = (
+        "\n\nFor today, here are three focus topics for reflection or journaling:\n"
+        f"1. {topics[0]}\n"
+        f"2. {topics[1]}\n"
+        f"3. {topics[2]}\n"
+    )
+    heading = _FOCUS_HEADING_RE.search(text)
+    if heading:
+        return text[: heading.start()].rstrip() + block
+    return text.rstrip() + block
+
+
 def _build_deep_reflection_protocol(char_name: str) -> str:
     return "\n".join([
+        _sse_panel_contract(),
+        "",
         "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]",
         "",
         "PURPOSE: The journey image is a memory-evocation tool. It brings FAR crystal memory "
@@ -260,17 +348,17 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
         "   - If REPLY THERAPY 3+3+3 data is present, mention corrective emotional experience "
         "progress only in human terms (mismatch → reconsolidation → evocative recall), not counts.",
         "",
+        "E. Three focus topics for today (WRITE THIS BEFORE SIFT — required, never omit)",
+        "   Exactly 3 numbered topics (1. 2. 3.) drawn from crystal themes, chat history, "
+        "cycle patterns, and this panel's character. Each topic is one complete sentence "
+        "for reflection or journaling today — not tasks or homework. Do not stop after '1.'",
+        "",
         "D. SIFT exploration (Sense → Image → Feel → Think)",
         "   Offer SIFT as a gentle doorway into the imagery:",
         "   - Sense: what the body notices in the scene (grounding, breath, tension).",
         "   - Image: which symbol or figure calls to them.",
         "   - Feel: emotion beneath the image.",
         "   - Think: meaning they are making — without fixing or diagnosing.",
-        "",
-        "E. Three focus topics for today",
-        "   End with exactly 3 numbered topics drawn from the intersection of crystal themes, "
-        "chat history, cycle patterns, and this panel's character. Each topic is for reflection "
-        "or journaling today — not tasks or homework.",
         "",
         "F. Optional deeper dive",
         "   Close by offering: if they wish to go further with the imagery and core character "
@@ -302,6 +390,7 @@ def _build_panel_block(
 
     parts = [
         "[SOVEREIGN JOURNEY PANEL — client asked about this image]",
+        _sse_panel_contract(),
         _format_theme_map(),
         "",
         f"THIS PANEL ({gen_str}):",
@@ -446,6 +535,17 @@ async def _gather_therapeutic_evidence(
     return out
 
 
+def _http_get_bytes(url: str) -> bytes | None:
+    """Sync GET for asyncio.to_thread — must not be async (coroutine has no len)."""
+    import httpx
+
+    with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        resp = client.get(url)
+        if resp.status_code != 200 or not resp.content:
+            return None
+        return resp.content
+
+
 async def _r2_url_to_data_url(url: str) -> str | None:
     if not url or not url.startswith("http"):
         return None
@@ -454,16 +554,7 @@ async def _r2_url_to_data_url(url: str) -> str | None:
         import asyncio
         import base64
 
-        import httpx
-
-        async def _fetch() -> bytes | None:
-            with httpx.Client(timeout=12.0, follow_redirects=True) as client:
-                resp = client.get(url)
-                if resp.status_code != 200 or not resp.content:
-                    return None
-                return resp.content
-
-        data = await asyncio.to_thread(_fetch)
+        data = await asyncio.to_thread(_http_get_bytes, url)
         if not data or len(data) > 4_000_000:
             return None
         ctype = "image/png"
@@ -479,6 +570,52 @@ async def _r2_url_to_data_url(url: str) -> str | None:
         return None
 
 
+async def _recent_panel_thread(db_pool, ids: list[str]) -> bool:
+    if not db_pool or not ids:
+        return False
+    try:
+        rows = await db_pool.fetch(
+            """
+            SELECT user_text, ai_text
+            FROM conversation_history
+            WHERE user_id = ANY($1::text[])
+            ORDER BY created_at DESC
+            LIMIT 6
+            """,
+            ids,
+        )
+    except Exception as exc:
+        print(f">>> [SSE PANEL] Follow-up thread check skipped: {type(exc).__name__}: {exc}")
+        return False
+    for r in rows:
+        blob = f"{r.get('user_text') or ''} {r.get('ai_text') or ''}"
+        if "Sovereign Journey story panel" in blob or _PANEL_FOLLOWUP_RE.search(blob):
+            return True
+        if "DEEP REFLECTION" in blob or "focus topics" in blob.lower():
+            return True
+    return False
+
+
+async def _latest_journey_panel_row(db_pool, ids: list[str]):
+    if not db_pool or not ids:
+        return None
+    try:
+        return await db_pool.fetchrow(
+            """
+            SELECT panel_id, panel_type, r2_url, narrative_text, biome,
+                   character_manifest, panel_tone, crystal_domains_used, generated_at
+            FROM sse_panel_log
+            WHERE user_id = ANY($1::text[])
+            ORDER BY generated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            ids,
+        )
+    except Exception as exc:
+        print(f">>> [SSE PANEL] Latest panel lookup skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
 async def build_sse_panel_chat_context(
     db_pool, profile: dict[str, Any], user_text: str
 ) -> tuple[str, str, str | None]:
@@ -488,12 +625,17 @@ async def build_sse_panel_chat_context(
 
     match = _SSE_PANEL_REF_RE.search(user_text)
     legacy = bool(_STORY_PANEL_LEGACY_RE.search(user_text)) if not match else False
-    if not match and not legacy:
-        return user_text, "", None
-
     ids = _member_ids(profile)
     if not ids:
         return user_text, "", None
+
+    followup = False
+    if not match and not legacy:
+        followup = bool(_PANEL_FOLLOWUP_RE.search(user_text))
+        if not followup and _SHORT_PANEL_ACK_RE.match(user_text.strip()):
+            followup = await _recent_panel_thread(db_pool, ids)
+        if not followup:
+            return user_text, "", None
 
     row = None
     if match:
@@ -551,6 +693,9 @@ async def build_sse_panel_chat_context(
             "(asking about my Sovereign Journey story panel image) ", user_text, count=1
         ).strip()
 
+    if followup and not row:
+        row = await _latest_journey_panel_row(db_pool, ids)
+
     if not row:
         evidence = await _gather_therapeutic_evidence(db_pool, ids, [])
         ctx = "\n".join([
@@ -570,6 +715,12 @@ async def build_sse_panel_chat_context(
             "Panel record was not resolved. Still follow the DEEP REFLECTION PROTOCOL using "
             "evidence above and the client's message.",
         ])
+        if followup:
+            ctx += (
+                "\n\n[SSE PANEL FOLLOW-UP] The client is continuing the journey-panel turn. "
+                "If RECENT CHAT shows an incomplete '1.' or they asked to repost, list all "
+                "three complete focus topics now. Do not claim you already posted them."
+            )
         return user_text, ctx, None
 
     themes, domains = _parse_crystal_meta(row.get("crystal_domains_used"))
@@ -578,4 +729,10 @@ async def build_sse_panel_chat_context(
     image_data_url = await _r2_url_to_data_url(row.get("r2_url") or "")
     if image_data_url:
         ctx += "\n\n[SSE PANEL IMAGE] The journey panel image is attached as a vision block."
+    if followup:
+        ctx += (
+            "\n\n[SSE PANEL FOLLOW-UP] The client is continuing the journey-panel turn. "
+            "If RECENT CHAT shows an incomplete '1.' or they asked to repost, list all "
+            "three complete focus topics now. Do not claim you already posted them."
+        )
     return user_text, ctx, image_data_url

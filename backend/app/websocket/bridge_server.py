@@ -9911,6 +9911,7 @@ class AzureCortex:
 
         # === VAULT CONTENT INJECTION === # QUANTUM-CRYSTAL-ARCH
         vault_context = ""
+        _sse_panel_ctx = ""  # QUANTUM-CRYSTAL-ARCH — panel protocol E / vision
         _vault_image_data_url = None  # SOVEREIGN-VOICE: vision block for image vault items
         try:
             # QUANTUM-CRYSTAL-ARCH: global upload/vault chat retrieval
@@ -10544,6 +10545,8 @@ class AzureCortex:
                         )
             except Exception as _ttc_pre_err:
                 print(f">>> [THERAPEUTIC-CTRL] pre-flight failed for {uid}: {_ttc_pre_err}")
+            if _sse_panel_ctx:
+                _len_cap = max(int(_len_cap or 0), 1500)  # QUANTUM-CRYSTAL-ARCH — protocol E room
             # QUANTUM-CRYSTAL-ARCH: buffer until audit unless stream-before-audit (Faster default).
             _stream_before_audit = bool(_stream_before_audit_fn(_depth))
             _buffer_for_therapeutic_audit = bool(_ttc_audit_meta) and not _stream_before_audit
@@ -11029,6 +11032,20 @@ class AzureCortex:
             if _closed_response != full_response:
                 print(f">>> [LENGTH-CAP] Trimmed mid-sentence truncation for {uid} ({len(full_response)} → {len(_closed_response)} chars)")
                 full_response = _closed_response
+            if _sse_panel_ctx:
+                try:
+                    from app.services.sse_panel_chat_context import (
+                        ensure_three_focus_topics as _sse_e,
+                        sse_should_complete_focus_topics as _sse_need_e,
+                    )
+                    _sse_src = _qg_verbatim_user_text if _qg_verbatim_user_text else user_text
+                    if _sse_need_e(_sse_src, _sse_panel_ctx):
+                        _sse_fixed = _sse_e(full_response, _sse_panel_ctx)
+                        if _sse_fixed != full_response:
+                            print(f">>> [SSE PANEL] Completed missing focus topics for {uid}")
+                            full_response = _sse_fixed
+                except Exception as _sse_e_err:
+                    print(f">>> [SSE PANEL] Focus-topic complete skipped: {_sse_e_err}")
             _final_response = full_response
             if not full_response.strip():
                 await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.", client_context=_ctx, turn_id=_turn_id)

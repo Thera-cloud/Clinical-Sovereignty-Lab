@@ -189,3 +189,105 @@ async def test_daily_panel_infers_serpent_from_narrative():
     assert "Core character manifested: Serpent" in ctx
     assert "Cartographer" in ctx
     assert "Never claim a figure is absent" in ctx
+    assert "SSE PANEL CONTRACT" in ctx
+    assert "WRITE THIS BEFORE SIFT" in ctx
+
+
+def test_http_get_bytes_is_sync_not_coroutine():
+    import inspect
+    assert inspect.iscoroutinefunction(_sse._http_get_bytes) is False
+
+
+def test_ensure_three_focus_topics_completes_cutoff():
+    ctx = (
+        "Core character manifested: Curiosity\n"
+        "Crystal themes that drove this panel: loneliness, growth\n"
+        "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]\n"
+    )
+    cut = (
+        "SIFT is a doorway.\n"
+        "For today, here are three focus topics for reflection or journaling:\n"
+        "1."
+    )
+    out = _sse.ensure_three_focus_topics(cut, ctx)
+    assert _sse.focus_topics_complete(out)
+    assert "1." in out and "2." in out and "3." in out
+    assert out.count("1.") >= 1
+
+
+def test_ensure_three_focus_topics_leaves_complete_alone():
+    ctx = "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]"
+    ok = "Intro.\n1. First complete topic here today.\n2. Second complete topic here today.\n3. Third complete topic here today.\n"
+    assert _sse.ensure_three_focus_topics(ok, ctx) == ok
+
+
+def test_sse_should_complete_on_panel_rewrite_and_cut_followup():
+    ctx = "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]"
+    assert _sse.sse_should_complete_focus_topics(
+        "I am curious.(asking about my Sovereign Journey story panel image)", ctx
+    )
+    assert _sse.sse_should_complete_focus_topics(
+        "thank you, the 3 Focus topics got cut off. Could you please post them again?", ctx
+    )
+    assert not _sse.sse_should_complete_focus_topics("hi", ctx)
+
+
+@pytest.mark.asyncio
+async def test_focus_topic_followup_reinjects_latest_panel():
+    row = {
+        "panel_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "panel_type": "journey",
+        "r2_url": None,
+        "narrative_text": "Curiosity waits by an open door.",
+        "biome": "open_sky",
+        "character_manifest": "Curiosity",
+        "panel_tone": "meditative",
+        "crystal_domains_used": {"themes": ["loneliness"], "domains": ["clinical"]},
+        "generated_at": datetime(2026, 6, 25, tzinfo=timezone.utc),
+    }
+    db = _FakeDB(row=row)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    text = "thank you, little Nate, the 3 Focus topics got cut off. Could you please post them again?"
+    new_text, ctx, img = await build_sse_panel_chat_context(db, profile, text)
+    assert new_text == text
+    assert "DEEP REFLECTION PROTOCOL" in ctx
+    assert "SSE PANEL FOLLOW-UP" in ctx
+    assert "Curiosity" in ctx
+    assert img is None
+
+
+@pytest.mark.asyncio
+async def test_short_ack_reinjects_when_recent_panel_thread():
+    row = {
+        "panel_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "panel_type": "journey",
+        "r2_url": None,
+        "narrative_text": "Mirror reflects two paths.",
+        "biome": "forest",
+        "character_manifest": "Mirror",
+        "panel_tone": "gentle",
+        "crystal_domains_used": {"themes": ["trust"], "domains": ["clinical"]},
+        "generated_at": datetime(2026, 6, 25, tzinfo=timezone.utc),
+    }
+    chat_rows = [
+        {
+            "user_text": "(asking about my Sovereign Journey story panel image)",
+            "ai_text": "For today, here are three focus topics: 1.",
+            "created_at": datetime(2026, 8, 28, tzinfo=timezone.utc),
+        },
+    ]
+    db = _FakeDB(row=row, chat_rows=chat_rows)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    _new_text, ctx, _img = await build_sse_panel_chat_context(db, profile, "for me or for you")
+    assert "DEEP REFLECTION PROTOCOL" in ctx
+    assert "SSE PANEL FOLLOW-UP" in ctx
+
+
+@pytest.mark.asyncio
+async def test_plain_hi_does_not_reinject_panel():
+    db = _FakeDB(row=None)
+    profile = {"hardware_id": "CLIENT_1_ID"}
+    new_text, ctx, img = await build_sse_panel_chat_context(db, profile, "hi")
+    assert new_text == "hi"
+    assert ctx == ""
+    assert img is None
