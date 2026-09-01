@@ -138,6 +138,8 @@ def test_migration_407_and_api_routes():
     assert "Open studio room" in dart
     assert "SESSION VIEW" in dart
     html = (ROOT / "mobile/web/studio_livekit_room.html").read_text()
+    nate_html = (ROOT / "mobile/web/studio_nate_room.html").read_text()
+    assert html == nate_html
     assert "livekit-client.umd.min.js" in html
     assert "cdn.jsdelivr.net" not in html
     assert "setCameraEnabled(false)" in html
@@ -210,7 +212,7 @@ def test_s4_room_meter_sip():
     from datetime import datetime, timezone
 
     url = room_embed_url("wss://lk.example", "tok", "guest")
-    assert "studio_livekit_room.html" in url
+    assert "studio_nate_room.html" in url
     assert "role=guest" in url
     plan = egress_plan("sid-1", rtmp_url="rtmp://x", live_unlocked=False)
     assert plan["delay_s"] == 45
@@ -267,6 +269,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
+    assert "v=20260901e" in html
     assert "expression_viewer.html" not in html
     portrait = (ROOT / "mobile/web/avatar-modes/studio_portrait.html").read_text()
     assert "plates/exp_01_neutral.png" in portrait
@@ -312,6 +315,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
+    assert "v=20260901e" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]

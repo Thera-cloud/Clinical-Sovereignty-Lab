@@ -39,6 +39,7 @@ paths = (
     "signup.html",
     "try.html",
     "studio_livekit_room.html",
+    "studio_nate_room.html",
     "livekit-client.umd.min.js",
     "avatar-modes/expression_viewer.html",
     "avatar-modes/studio_portrait.html",
