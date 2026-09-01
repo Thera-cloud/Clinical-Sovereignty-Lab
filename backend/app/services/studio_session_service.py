@@ -235,7 +235,7 @@ async def cohost_turn(
             prompt=prefix + blob,
             system=system,
             domain="general",
-            max_tokens=160,
+            max_tokens=80,
         )
         gen = (out.get("text") or "").strip()
         if gen:
@@ -256,6 +256,14 @@ async def synthesize_cohost_line(text: str, voice_router=None) -> bytes:
     line = (text or "").strip()
     if not line:
         return b""
+    try:
+        from app.services.studio_phone_voice import synthesize_studio_voice
+
+        audio = await synthesize_studio_voice(line)
+        if audio:
+            return audio
+    except Exception as exc:
+        logger.warning("studio speak phone voice skipped: %s", exc)
     if voice_router is None:
         return b""
     try:
@@ -269,17 +277,6 @@ async def synthesize_cohost_line(text: str, voice_router=None) -> bytes:
             return audio
     except Exception as exc:
         logger.warning("studio speak azure skipped: %s", exc)
-    try:
-        audio = await asyncio.wait_for(
-            voice_router.process_text_to_speech(
-                line, tts_provider="edge_tts", voice="nate_warm"
-            ),
-            timeout=8.0,
-        )
-        if audio:
-            return audio
-    except Exception as exc:
-        logger.warning("studio speak edge fallback skipped: %s", exc)
     return b""
 
 
@@ -314,7 +311,7 @@ async def ingest_live_caption(
     try:
         from app.services.whisper_stt import transcribe
 
-        text = (await transcribe(audio, content_type=ctype)) or ""
+        text = (await transcribe(audio, content_type=ctype, fail_fast=True)) or ""
     except Exception as exc:
         logger.warning("studio caption stt skipped: %s", exc)
     text = text.strip()

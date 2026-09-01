@@ -340,10 +340,23 @@ def test_s4_apply_probe_egress_billing_autoscale():
     spoken = asyncio.run(_sess.synthesize_cohost_line(""))
     assert spoken == b""
     src_sess = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "synthesize_studio_voice" in src_sess
     assert 'tts_provider="azure_premium"' in src_sess
     assert 'voice="onyx"' in src_sess
-    assert 'tts_provider="edge_tts"' in src_sess
-    assert 'voice="nate_warm"' in src_sess
+    assert 'tts_provider="edge_tts"' not in src_sess
+    assert 'voice="nate_warm"' not in src_sess
+    voice_src = (ROOT / "backend/app/services/studio_phone_voice.py").read_text()
+    assert 'GROK_VOICE' in voice_src
+    assert 'voice": "Rex"' in voice_src or 'GROK_VOICE' in voice_src
+    assert "2025-04-01-preview" in voice_src
+    assert 'voice": "onyx"' in voice_src
+    assert "trusted older brother" in voice_src
+    assert "nateTurn(blob, false, 'caption')" not in html
+    assert "event:'open')" not in html
+    assert "caller_join" in html
+    from app.services.studio_phone_voice import studio_audio_media_type
+
+    assert studio_audio_media_type(b"RIFF____WAVE") == "audio/wav"
     blocked = asyncio.run(_sess.cohost_turn(None, "sid-1", "please diagnose this therapy case"))
     assert blocked["ok"] is True
     assert blocked.get("redirect") is True

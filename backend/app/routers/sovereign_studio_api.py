@@ -687,7 +687,9 @@ async def cohost_speak_public(session_id: UUID, body: CohostSpeakBody, request: 
     )
     if not audio:
         raise HTTPException(502, "tts")
-    return Response(content=audio, media_type="audio/mpeg")
+    from app.services.studio_phone_voice import studio_audio_media_type
+
+    return Response(content=audio, media_type=studio_audio_media_type(audio))
 
 
 @public_router.post("/sessions/{session_id}/cohost/caption")

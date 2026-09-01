@@ -56,6 +56,7 @@ async def transcribe(
     language: str = "en",
     content_type: str = "audio/webm",
     prompt: Optional[str] = None,
+    fail_fast: bool = False,
 ) -> Optional[str]:
     """
     Transcribe audio bytes to text via Azure Whisper.
@@ -102,9 +103,11 @@ async def transcribe(
             await asyncio.sleep(_STT_MIN_INTERVAL_S - gap)
 
         last_err = ""
-        for attempt in range(_STT_MAX_RETRIES):
+        retries = 1 if fail_fast else _STT_MAX_RETRIES
+        http_timeout = 8.0 if fail_fast else 120.0
+        for attempt in range(retries):
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                async with httpx.AsyncClient(timeout=http_timeout) as client:
                     resp = await client.post(
                         _transcription_url(),
                         headers=headers,
@@ -123,7 +126,7 @@ async def transcribe(
                     return None
 
                 last_err = f"HTTP {resp.status_code} — {resp.text[:200]}"
-                if resp.status_code == 429 and attempt + 1 < _STT_MAX_RETRIES:
+                if resp.status_code == 429 and (not fail_fast) and attempt + 1 < retries:
                     # Retry-After header or exponential backoff
                     ra = resp.headers.get("Retry-After")
                     try:

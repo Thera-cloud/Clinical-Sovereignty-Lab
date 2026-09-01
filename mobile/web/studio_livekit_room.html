@@ -287,10 +287,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       capPauseTimer = null;
       if (lnPaused || guest) { pendingCaps = []; return; }
       if (nateSpeaking || turnBusy || Object.keys(capRecs).length) { armCaptionTurn(); return; }
-      var blob = pendingCaps.join('\n');
-      pendingCaps = [];
-      if (!shouldAskCaps(blob)) return;
-      nateTurn(blob, false, 'caption');
+      if (pendingCaps.length > 12) pendingCaps = pendingCaps.slice(-12);
     }, 2800);
   }
   function postCaption(id, blob){
@@ -451,7 +448,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     waiting.push(participant.identity || 'caller');
     renderWait();
     if (!guest) {
-      nateTurn('Caller ' + (participant.identity || '') + ' just joined the podcast room.', false, 'caller_join');
+      setStatus('Caller joined — tap Toss or Talk when you want Little Nate.');
     }
   });
   room.on(LK.RoomEvent.ParticipantDisconnected, function(participant){
@@ -534,11 +531,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   }).then(function(){
     rememberLocalMic();
-    setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
-    if (!greeted && !guest){
-      greeted = true;
-      nateTurn('The podcast room is live. Host is here. No lecture — short hello, then wait for the host or a caller.', false, 'open');
-    }
+    setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat, Talk, or Toss. Voice matches the phone call.');
+    greeted = true;
   }).catch(function(e){
     setStatus('Connect failed: ' + tidyErr(e));
   });
@@ -591,7 +585,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     this.classList.toggle('on', camOn);
   };
   document.getElementById('btnToss').onclick = function(){
-    nateTurn(lastHeard || 'Host tossed the floor to you. Address the room and take the next question.', true);
+    var tossCtx = pendingCaps.slice(-8).join('\n') || lastHeard
+      || 'Host tossed the floor to you. Address the room and take the next question.';
+    nateTurn(tossCtx, true);
   };
   document.getElementById('btnPause').onclick = function(){
     lnPaused = !lnPaused;
