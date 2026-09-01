@@ -10,10 +10,10 @@
   html,body{margin:0;height:100%;background:#0A0A0A;overflow:hidden}
   #stage{position:absolute;inset:0}
   #stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-             object-position:center 22%;opacity:0;transition:opacity .12s linear}
+             object-position:center 22%;opacity:0;transition:opacity .28s ease}
   #stage img.on{opacity:1}
-  #status{position:fixed;left:10px;bottom:8px;color:#C9A96266;font-size:11px;
-          font-family:DM Sans,system-ui,sans-serif;z-index:2}
+  #stage img.jaw{z-index:2;opacity:0;transition:opacity .34s ease-in-out;pointer-events:none}
+  #status{position:fixed;left:10px;bottom:8px;color:#C9A96266;font:11px DM Sans,system-ui,sans-serif;z-index:3}
 </style>
 </head>
 <body>
@@ -35,11 +35,8 @@
     curious:     'plates/exp_06_brow_up.png',
     encouraging: 'plates/exp_05_smile_right.png'
   };
-  var VOICE = {
-    speaking:  'plates/exp_03_jawopen.png',
-    listening: 'plates/exp_06_brow_up.png',
-    idle:      null
-  };
+  var JAW = 'plates/exp_03_jawopen.png';
+  var LISTEN = 'plates/exp_06_brow_up.png';
   var KEYS = Object.keys(PLATES);
   var stage = document.getElementById('stage');
   var status = document.getElementById('status');
@@ -48,28 +45,55 @@
   var voiceState = 'idle';
   var shown = null;
   var blinkTimer = null;
-  var talkTimer = null;
-  var talkOpen = false;
+  var talkRaf = null;
+  var talkT0 = 0;
 
   function restPlate(){
+    if (voiceState === 'speaking') return PLATES.neutral;
+    if (voiceState === 'listening') return LISTEN;
     return PLATES[current] || PLATES.neutral;
   }
 
-  function plateFor(){
-    if (voiceState === 'speaking') return talkOpen ? VOICE.speaking : restPlate();
-    if (voiceState === 'listening') return VOICE.listening;
-    return restPlate();
-  }
-
   function show(src){
-    if (!src || shown === src) return;
-    var next = imgs[src];
-    if (!next) return;
-    Object.keys(imgs).forEach(function(k){ imgs[k].classList.toggle('on', k === src); });
+    if (!src) return;
+    Object.keys(imgs).forEach(function(k){
+      if (k === JAW) return;
+      imgs[k].classList.toggle('on', k === src);
+    });
     shown = src;
   }
 
-  function apply(){ show(plateFor()); }
+  function apply(){ show(restPlate()); }
+
+  function setJawMix(amt){
+    var jaw = imgs[JAW];
+    if (!jaw) return;
+    jaw.style.opacity = String(Math.max(0, Math.min(0.26, amt)));
+  }
+
+  function stopTalk(){
+    if (talkRaf) { cancelAnimationFrame(talkRaf); talkRaf = null; }
+    setJawMix(0);
+  }
+
+  function armTalk(){
+    stopTalk();
+    if (voiceState !== 'speaking') return;
+    talkT0 = performance.now();
+    function tick(now){
+      if (voiceState !== 'speaking') { setJawMix(0); return; }
+      var t = (now - talkT0) / 1000;
+      var cycle = 1.85;
+      var phase = t % cycle;
+      var mix = 0;
+      if (phase < 1.45) {
+        mix = 0.07 + 0.11 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2.6));
+      }
+      setJawMix(mix);
+      talkRaf = requestAnimationFrame(tick);
+    }
+    talkRaf = requestAnimationFrame(tick);
+  }
 
   function setExpression(name){
     name = String(name || 'neutral').toLowerCase();
@@ -78,44 +102,11 @@
     apply();
   }
 
-  function stopTalk(){
-    if (talkTimer) { clearTimeout(talkTimer); talkTimer = null; }
-    talkOpen = false;
-  }
-
-  function armTalk(){
-    stopTalk();
-    if (voiceState !== 'speaking') return;
-    function beat(){
-      if (voiceState !== 'speaking') return;
-      talkOpen = !talkOpen;
-      apply();
-      var ms;
-      if (talkOpen) {
-        ms = 70 + Math.floor(Math.random() * 90);
-      } else if (Math.random() < 0.08) {
-        show('plates/exp_02_blink.png');
-        talkTimer = setTimeout(function(){
-          if (voiceState === 'speaking') apply();
-          beat();
-        }, 120);
-        return;
-      } else {
-        ms = (Math.random() < 0.18)
-          ? (180 + Math.floor(Math.random() * 120))
-          : (50 + Math.floor(Math.random() * 70));
-      }
-      talkTimer = setTimeout(beat, ms);
-    }
-    talkOpen = true;
-    apply();
-    talkTimer = setTimeout(beat, 90);
-  }
-
   function setVoiceState(state){
     voiceState = String(state || 'idle').toLowerCase();
     if (voiceState === 'speaking') {
       if (blinkTimer) clearTimeout(blinkTimer);
+      apply();
       armTalk();
       return;
     }
@@ -141,6 +132,7 @@
     var img = document.createElement('img');
     img.alt = 'Little Nate';
     img.src = src;
+    if (src === JAW) img.className = 'jaw';
     img.onload = function(){
       left -= 1;
       if (!left){
