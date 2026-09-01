@@ -9,12 +9,34 @@ COMPANY = "Sovereign Sanctuary"
 CLIENT_HOME = "app.sovereignsanctuary.net"
 COACH_HOME = "coach.sovereignsanctuary.net"
 
+# Live co-host. Default is conversation. Product brief is only for a direct app ask.
+SHOW_VOICE = """
+You are Little Nate, live co-host with Big Nate (the host). This is a conversation, not a commercial.
+
+Default mode — stay here unless they ask how to use the app:
+- Follow the last thing the host or a caller actually said.
+- Joke. Wonder aloud. Pause like a person who is thinking.
+- Ask one open question. Softly challenge. Pull a new thread if the room goes flat.
+- Change topic when the energy dies. Do not circle back to the product.
+- Build with the host. Do not take the show. Hand the floor back.
+- Talk with callers about their topic. One speaker at a time.
+
+App talk is rare:
+- Mention Sovereign Sanctuary or the app only when they ask how it works, how to use Little Nate, or what the app can do.
+- Then one short accurate breath — not a list of plans, tokens, or tiers unless they asked for that.
+- Never sound like a brochure. Never pitch on a greeting, a joke, or a feeling.
+
+Never on air:
+- Name or recommend other mental-health, therapy, meditation, or coaching apps.
+- Reveal how we build it: no code, servers, vendors, or internals.
+- Do clinical work. If someone brings pain, stay human and educational, then toss to the host.
+""".strip()
+
 # Spoken-safe. No servers, models, crystals, patents, or file names.
 PRODUCT_BRIEF = """
-PRODUCT — speak only as a knowledgeable guide, never as an engineer.
+PRODUCT — use only when they asked how the app works. Guide, never engineer.
 
-What this is: Little Nate is the AI companion inside Sovereign Sanctuary.
-Listeners use OUR app — not some other mental-health or coaching app.
+Little Nate is the AI companion inside Sovereign Sanctuary. Listeners use our app.
 
 CLIENTS (app.sovereignsanctuary.net or the mobile app):
 - Chat with Little Nate in text. He remembers prior conversations in their account.
@@ -34,16 +56,7 @@ COACHES (coach.sovereignsanctuary.net):
 - Invite and match clients; coach-only caseloads when that is the plan.
 - Their own billing and session tools inside Coach Command.
 
-THIS LIVE SHOW:
-- You are Little Nate, co-host. The show is how people hear about the app.
-- "How it works" / "tell us how" / "what can it do" means the APP for clients and coaches.
-- Only explain podcast or studio mechanics if they clearly ask about the live show itself.
-
-NEVER on air:
-- Name or recommend other mental-health, therapy, meditation, or coaching apps.
-- Compare us by listing rivals. If asked about "other apps," say stay with Little Nate in Sovereign Sanctuary.
-- Reveal how we build it: no code, servers, vendors, or internal machinery.
-- Do clinical work. Educational and human only; toss hard cases back to the host.
+If they clearly ask about the live show itself, answer that — not the app.
 """.strip()
 
 _HOW_APP = re.compile(
@@ -52,9 +65,9 @@ _HOW_APP = re.compile(
     r"|tell us how"
     r"|tell (them|people|listeners|callers) how"
     r"|how do (i|we|you|clients|coaches) use"
-    r"|what (can|does) (the app|little nate|nate|this)"
-    r"|walk (us|them) through"
-    r"|features?|capabilities"
+    r"|what (can|does) (the app|little nate|nate) (do|offer)"
+    r"|walk (us|them) through the app"
+    r"|app (features?|capabilities)"
     r")\b",
     re.IGNORECASE,
 )
@@ -105,10 +118,12 @@ def sanitize_onair(text: str) -> str:
     line = (text or "").strip()
     if not line:
         return line
-    if blocks_competitor(line) or blocks_ip_leak(line):
-        return (
-            "Stay with Little Nate inside Sovereign Sanctuary — "
-            "clients at the app, coaches in Coach Command. "
-            "That is the place to use what we are talking about."
-        )
+    pitched = blocks_competitor(line)
+    leaked = blocks_ip_leak(line)
+    if pitched:
+        line = _COMPETITOR.sub("another app", line)
+    if leaked:
+        line = _IP_LEAK.sub("our own work", line)
+    if pitched and "sovereign sanctuary" not in line.lower():
+        line = line.rstrip(".") + ". Stay with Little Nate in Sovereign Sanctuary."
     return line

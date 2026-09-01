@@ -269,7 +269,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260901g" in html
+    assert "v=20260901h" in html
     assert "expression_viewer.html" not in html
     assert "speakGen" in html
     assert "pendingCaps.slice(-24)" in html
@@ -321,7 +321,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260901g" in url
+    assert "v=20260901h" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -351,6 +351,9 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert spoken == b""
     src_sess = (ROOT / "backend/app/services/studio_session_service.py").read_text()
     assert "PRODUCT_BRIEF" in src_sess
+    assert "SHOW_VOICE" in src_sess
+    assert "asks_app_howto(blob)" in src_sess
+    assert "asks_app_howto(thread_text" not in src_sess
     assert "remember_line" in src_sess
     assert "THIS_SHOW" in src_sess
     assert "synthesize_studio_voice" in src_sess
@@ -388,6 +391,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
 def test_studio_product_thread_and_onair_guards():
     from app.services.studio_product_brief import (
         PRODUCT_BRIEF,
+        SHOW_VOICE,
         asks_app_howto,
         blocks_competitor,
         blocks_ip_leak,
@@ -397,6 +401,9 @@ def test_studio_product_thread_and_onair_guards():
     assert asks_app_howto("tell us how it works") is True
     assert asks_app_howto("what can Little Nate do for coaches") is True
     assert asks_app_howto("good morning everyone") is False
+    assert asks_app_howto("that's a cool feature of the conversation") is False
+    assert "not a commercial" in SHOW_VOICE.lower()
+    assert "Do not default to the app" in (ROOT / "backend/app/services/studio_session_service.py").read_text()
     assert "app.sovereignsanctuary.net" in PRODUCT_BRIEF
     assert "Coach Command" in PRODUCT_BRIEF
     assert "Family Sanctuary" in PRODUCT_BRIEF

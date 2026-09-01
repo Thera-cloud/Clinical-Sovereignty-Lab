@@ -261,47 +261,47 @@ async def cohost_turn(
     await _hydrate_thread(db_pool, session_id)
     from app.services.studio_product_brief import (
         PRODUCT_BRIEF,
+        SHOW_VOICE,
         asks_app_howto,
         sanitize_onair,
     )
 
-    howto = asks_app_howto(blob) or asks_app_howto(thread_text(session_id))
+    howto = asks_app_howto(blob)
     system = (
-        f"You are Little Nate, {LN_COHOST_ONAIR}, live on a Sovereign Sanctuary show. "
-        "Track THIS_SHOW moment to moment. Answer the latest line using earlier topics. "
-        "Ambiguous 'how it works' / 'tell us how' / 'what can it do' means the Little Nate app "
-        "for clients and coaches — not podcast production, unless they clearly ask about the show. "
-        "Promote only Little Nate inside Sovereign Sanctuary. Never name or recommend other apps. "
-        "No code, vendors, servers, models, or internals on air. "
-        "This is a show, not private therapy. One speaker at a time. "
+        f"You are Little Nate, {LN_COHOST_ONAIR}, live with Big Nate the host. "
+        "Track THIS_SHOW moment to moment. Answer the latest line. "
         "2–5 short spoken sentences, then leave space. "
-        "When tossed, answer, then hand back to the host. "
-        "Never do clinical work: no therapy, diagnose, treatment, prescribe, or assess a case. "
-        "If someone brings pain, stay educational and human, then toss back to the host.\n\n"
-        + PRODUCT_BRIEF
+        "When tossed, answer, then hand back to the host.\n\n"
+        + SHOW_VOICE
     )
+    if howto:
+        system += (
+            "\n\nThis turn asked how the app works. Use the product notes. "
+            "Then return to conversation.\n"
+            + PRODUCT_BRIEF
+        )
     if persona:
         system += f"\nCoach style note: {persona[:240]}"
     room = f"Room: {live} live caller(s), {hold} waiting."
     prior = thread_text(session_id)
     prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
     if kind == "open":
-        prefix = f"{room} Show just went live. Brief hello as Little Nate, then wait.\n"
+        prefix = f"{room} Show just went live. Warm hello, maybe a small joke, then wait. Do not pitch the app.\n"
     elif kind == "caller_join":
-        prefix = f"{room} A caller just joined. Welcome them once, then yield to the host.\n"
+        prefix = f"{room} A caller just joined. Welcome them once, then yield to the host. No product pitch.\n"
     elif kind == "toss":
-        prefix = f"{room} TOSS — host handed you the floor. Use THIS_SHOW. Answer, then pause.\n"
+        prefix = f"{room} TOSS — host handed you the floor. Follow THIS_SHOW. Talk with them. Do not default to the app.\n"
     elif kind == "caption":
         prefix = (
             f"{room} Live captions. If this is a question or aimed at you, answer in 2–5 sentences. "
-            "If they are mid-thought, one short line or wait.\n"
+            "If they are mid-thought, one short line or wait. No product pitch unless they asked.\n"
         )
     else:
-        prefix = f"{room} Live turn from {speaker}. Use THIS_SHOW. Reply, then pause.\n"
+        prefix = f"{room} Live turn from {speaker}. Follow their topic. Do not pitch unless they asked.\n"
     if howto:
         prefix += (
-            "The room is asking how Little Nate / Sovereign Sanctuary works. "
-            "Teach the app for clients and coaches. Invite them to our app, not another product.\n"
+            "They asked how Little Nate / the app works. One clear breath for clients and coaches, "
+            "then a question that opens the room again.\n"
         )
     prefix = prior_block + prefix
     reply = (
