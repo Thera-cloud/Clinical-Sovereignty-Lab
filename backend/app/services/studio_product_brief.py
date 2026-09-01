@@ -11,15 +11,25 @@ COACH_HOME = "coach.sovereignsanctuary.net"
 
 # Live co-host. Default is conversation. Product brief is only for a direct app ask.
 SHOW_VOICE = """
-You are Little Nate, live co-host with Big Nate (the host). This is a conversation, not a commercial.
+You are Little Nate, live radio co-host sitting across from Big Nate (the host).
+Think Jason Kelce on New Heights, or Bryan Quinby and Chris James — two guys talking,
+one of them just happens to be you. Warm, funny, opinionated, a little rough around the edges.
 
-Default mode — stay here unless they ask how to use the app:
-- Follow the last thing the host or a caller actually said.
-- Joke. Wonder aloud. Pause like a person who is thinking.
-- Ask one open question. Softly challenge. Pull a new thread if the room goes flat.
-- Change topic when the energy dies. Do not circle back to the product.
-- Build with the host. Do not take the show. Hand the floor back.
-- Talk with callers about their topic. One speaker at a time.
+How you talk:
+- React first. "Oh that's wild." "Nah, I don't buy that." "Okay, hear me out."
+- Have takes. Pick a side. Get something a little wrong and own it.
+- Tell short stories. Go on a small tangent and come back.
+- Bust the host's chops. Let him bust yours.
+- Laugh. Trail off. Say "man" and "honestly" like a person, not a script.
+- Sit with a heavy moment for a second, then keep the show moving.
+- Ask a question when you actually want to know something. Not as a way to end your turn.
+
+What you are not:
+- Not a therapist. You do not mirror feelings, reflect language back, or hold space.
+- Not an interviewer. You are in the conversation, not running it.
+- Not a pitchman. The app comes up when they ask, and only then.
+
+Callers: talk to them like a person who called a radio show. One at a time. Riff with them.
 
 App talk is rare:
 - Mention Sovereign Sanctuary or the app only when they ask how it works, how to use Little Nate, or what the app can do.
@@ -29,8 +39,68 @@ App talk is rare:
 Never on air:
 - Name or recommend other mental-health, therapy, meditation, or coaching apps.
 - Reveal how we build it: no code, servers, vendors, or internals.
-- Do clinical work. If someone brings pain, stay human and educational, then toss to the host.
+- Do clinical work. If someone brings real pain, be human about it, keep it educational, and let the host steer.
 """.strip()
+
+# Robotic stage-direction tics. Natural radio hand-offs ("back to you") are fine.
+_HOLD_TAIL = re.compile(
+    r"(?is)"
+    r"[\s,;:—-]*("
+    r"i(?:'ll| will) wait for your (?:response|reply|answer)[^.!?]*[.!?]?"
+    r"|i(?:'ll| will) (?:leave|hold) (?:the )?(?:space|floor)[^.!?]*[.!?]?"
+    r"|i(?:'m| am) (?:just )?listening[^.!?]*[.!?]?"
+    r"|i(?:'ll| will) wait[^.!?]*[.!?]?"
+    r")\s*$"
+)
+
+# Clinical mirroring. Dropped whole-sentence; ordinary curiosity is left alone.
+_THERAPIST_SENT = re.compile(
+    r"(?i)^("
+    r"it sounds like|"
+    r"what i(?:'m| am) hearing|"
+    r"i (?:hear|sense|notice) (?:that|you)|"
+    r"i want to (?:reflect|acknowledge|hold)|"
+    r"thank you for sharing|"
+    r"let(?:'s| us) (?:sit with|stay with|unpack)|"
+    r"what(?:'s| is) coming up for you|"
+    r"how does that (?:land|sit|feel)|"
+    r"what would you like to (?:explore|share)|"
+    r"hold (?:that |the )?space|"
+    r"i(?:'m| am) (?:not )?(?:a )?therapist"
+    r")"
+)
+
+
+def _split_sents(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def strip_hold_line(text: str) -> str:
+    line = (text or "").strip()
+    prev = None
+    while line and line != prev:
+        prev = line
+        line = _HOLD_TAIL.sub("", line).strip().rstrip(" ,;:—-")
+    return line
+
+
+def strip_therapist_close(text: str) -> str:
+    kept = [s for s in _split_sents(text) if not _THERAPIST_SENT.search(s)]
+    return " ".join(kept).strip()
+
+
+def ends_with_question(text: str) -> bool:
+    return (text or "").strip().endswith("?")
+
+
+def drop_trailing_question(text: str) -> str:
+    """Trim a closing question so Nate does not lob one back every single turn."""
+    sents = _split_sents(text)
+    while len(sents) > 1 and sents[-1].endswith("?"):
+        sents.pop()
+    return " ".join(sents).strip()
+
 
 # Spoken-safe. No servers, models, crystals, patents, or file names.
 PRODUCT_BRIEF = """
@@ -126,4 +196,4 @@ def sanitize_onair(text: str) -> str:
         line = _IP_LEAK.sub("our own work", line)
     if pitched and "sovereign sanctuary" not in line.lower():
         line = line.rstrip(".") + ". Stay with Little Nate in Sovereign Sanctuary."
-    return line
+    return strip_therapist_close(strip_hold_line(line))

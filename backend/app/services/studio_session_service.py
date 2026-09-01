@@ -161,6 +161,13 @@ def thread_text(session_id: str) -> str:
     return "\n".join(_THREAD.get(session_id or "", []) or [])
 
 
+def _last_nate_line(session_id: str) -> str:
+    for line in reversed(_THREAD.get(session_id or "", []) or []):
+        if line.startswith("NATE: "):
+            return line[6:]
+    return ""
+
+
 async def _hydrate_thread(db_pool, session_id: str) -> None:
     if not db_pool or thread_text(session_id):
         return
@@ -236,23 +243,6 @@ async def cohost_turn(
             ),
             "redirect": True,
         }
-    persona = ""
-    if db_pool:
-        try:
-            from app.services.broadcast_persona_resolver import resolve
-
-            async with db_pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT show_id FROM studio_sessions WHERE id = $1::uuid",
-                    session_id,
-                )
-            if row:
-                resolved = await resolve(db_pool, str(row["show_id"]))
-                if resolved.get("ok"):
-                    style = resolved.get("style") or {}
-                    persona = str(style.get("tone") or style.get("stance") or "")
-        except Exception as exc:
-            logger.warning("studio cohost persona skipped: %s", exc)
     kind = (event or "line").strip().lower()
     if toss:
         kind = "toss"
@@ -263,15 +253,18 @@ async def cohost_turn(
         PRODUCT_BRIEF,
         SHOW_VOICE,
         asks_app_howto,
+        drop_trailing_question,
+        ends_with_question,
         sanitize_onair,
     )
 
     howto = asks_app_howto(blob)
     system = (
         f"You are Little Nate, {LN_COHOST_ONAIR}, live with Big Nate the host. "
-        "Track THIS_SHOW moment to moment. Answer the latest line. "
-        "2–5 short spoken sentences, then leave space. "
-        "When tossed, answer, then hand back to the host.\n\n"
+        "Radio co-host energy, not therapy. "
+        "Track THIS_SHOW moment to moment and answer the latest line. "
+        "2–5 short spoken sentences. Land on a take more often than a question. "
+        "No mirroring their words back, no interviewing.\n\n"
         + SHOW_VOICE
     )
     if howto:
@@ -280,40 +273,45 @@ async def cohost_turn(
             "Then return to conversation.\n"
             + PRODUCT_BRIEF
         )
-    if persona:
-        system += f"\nCoach style note: {persona[:240]}"
     room = f"Room: {live} live caller(s), {hold} waiting."
     prior = thread_text(session_id)
     prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
     if kind == "open":
-        prefix = f"{room} Show just went live. Warm hello, maybe a small joke, then wait. Do not pitch the app.\n"
+        prefix = (
+            f"{room} Show just went live. Warm hello, then a small joke or take of your own. "
+            "Land it on a statement. No app pitch.\n"
+        )
     elif kind == "caller_join":
-        prefix = f"{room} A caller just joined. Welcome them once, then yield to the host. No product pitch.\n"
+        prefix = f"{room} A caller just joined. Welcome them like a person, once. No product pitch.\n"
     elif kind == "toss":
-        prefix = f"{room} TOSS — host handed you the floor. Follow THIS_SHOW. Talk with them. Do not default to the app.\n"
+        prefix = (
+            f"{room} TOSS — host handed you the floor. Follow THIS_SHOW. "
+            "React, then say what you actually think. Do not default to the app.\n"
+        )
     elif kind == "caption":
         prefix = (
-            f"{room} Live captions. If this is a question or aimed at you, answer in 2–5 sentences. "
-            "If they are mid-thought, one short line or wait. No product pitch unless they asked.\n"
+            f"{room} Live captions. If this is aimed at you, answer in 2–5 sentences. "
+            "If they are mid-thought, one short reaction. No product pitch unless they asked.\n"
         )
     else:
-        prefix = f"{room} Live turn from {speaker}. Follow their topic. Do not pitch unless they asked.\n"
+        prefix = (
+            f"{room} Live turn from {speaker}. Follow their topic. "
+            "React and add your take. Do not pitch unless they asked.\n"
+        )
     if howto:
         prefix += (
-            "They asked how Little Nate / the app works. One clear breath for clients and coaches, "
-            "then a question that opens the room again.\n"
+            "They asked how Little Nate / the app works. One clear breath for clients and coaches. "
+            "Land on a statement.\n"
         )
     prefix = prior_block + prefix
     reply = (
-        "I'm here. Whenever you're ready."
+        "Hey — Little Nate with you. Let's see where this one goes."
         if kind == "open"
-        else "Welcome in. Host, over to you."
+        else "Hey, welcome in."
         if kind == "caller_join"
-        else "I'm on the floor. What should we open with?"
+        else "Alright, I'm in."
         if kind == "toss"
-        else "I heard the room. What should we take next?"
-        if kind == "caption"
-        else "I'm with you. Say that again and I'll pick it up."
+        else "Yeah, man — that tracks."
     )
     provider = "fallback"
     try:
@@ -322,7 +320,7 @@ async def cohost_turn(
         out = await NateInferenceRouter().generate(
             prompt=prefix + blob,
             system=system,
-            domain="general",
+            domain="culture",
             max_tokens=160 if howto else 120,
         )
         gen = (out.get("text") or "").strip()
@@ -332,15 +330,20 @@ async def cohost_turn(
     except Exception as exc:
         logger.warning("studio cohost inference skipped: %s", exc)
     if inv6_blocks(reply):
-        reply = (
-            "I'll keep this on the educational side. "
-            "Host, take us to the next question for the room."
-        )
+        reply = "I'll keep this on the educational side and stay with the room."
         provider = "inv6_filter"
     cleaned = sanitize_onair(reply)
     if cleaned != reply:
         reply = cleaned
         provider = "onair_guard"
+    # A question is fine. Two Nate turns in a row ending in one is an interview.
+    if ends_with_question(reply) and ends_with_question(_last_nate_line(session_id)):
+        trimmed = drop_trailing_question(reply)
+        if trimmed:
+            reply = trimmed
+            provider = "onair_guard"
+    if not (reply or "").strip():
+        reply = "Yeah, man — that tracks."
     remember_line(session_id, speaker or "HOST", blob)
     remember_line(session_id, "NATE", reply)
     await _persist_line(db_pool, session_id, "host", speaker or "HOST", blob)

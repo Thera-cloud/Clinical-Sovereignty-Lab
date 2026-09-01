@@ -269,14 +269,14 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260901h" in html
+    assert "v=20260901i" in html
     assert "expression_viewer.html" not in html
     assert "speakGen" in html
     assert "pendingCaps.slice(-24)" in html
     assert "pendingCaps.slice(-8)" not in html
     portrait = (ROOT / "mobile/web/avatar-modes/studio_portrait.html").read_text()
     assert "plates/exp_01_neutral.png" in portrait
-    assert "plates/exp_03_jawopen.png" in portrait
+    assert "plates/exp_03_jaw_mouth.png" in portrait
     assert "setJawMix" in portrait
     assert "armTalk" in portrait
     assert "talkOpen" not in portrait
@@ -284,6 +284,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "setVoiceState" in portrait
     assert "lil_nate.glb" not in portrait
     assert (ROOT / "mobile/web/avatar-modes/plates/exp_01_neutral.png").is_file()
+    assert (ROOT / "mobile/web/avatar-modes/plates/exp_03_jaw_mouth.png").is_file()
     assert (ROOT / "mobile/web/avatar-modes/plates/exp_06_brow_up.png").is_file()
     assert "mininate_neutral.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
     assert "lil_nate.glb" not in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
@@ -321,7 +322,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260901h" in url
+    assert "v=20260901i" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -402,8 +403,40 @@ def test_studio_product_thread_and_onair_guards():
     assert asks_app_howto("what can Little Nate do for coaches") is True
     assert asks_app_howto("good morning everyone") is False
     assert asks_app_howto("that's a cool feature of the conversation") is False
-    assert "not a commercial" in SHOW_VOICE.lower()
-    assert "Do not default to the app" in (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "jason kelce" in SHOW_VOICE.lower()
+    assert "not a therapist" in SHOW_VOICE.lower()
+    assert "not mirror" in SHOW_VOICE.lower()
+    assert "when you actually want to know" in SHOW_VOICE.lower()
+    assert "never end with a question" not in SHOW_VOICE.lower()
+    sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "Do not default to the app" in sess_src
+    assert "Coach style note" not in sess_src
+    assert 'domain="culture"' in sess_src
+    assert "No follow-up question" not in sess_src
+    held = sanitize_onair("Nice take. I will wait for your response.")
+    assert "wait for your" not in held.lower()
+    assert "nice take" in held.lower()
+    mirrored = sanitize_onair(
+        "It sounds like you're carrying a lot. What's coming up for you? That stuff is heavy."
+    )
+    assert "sounds like" not in mirrored.lower()
+    assert "coming up for you" not in mirrored.lower()
+    assert "heavy" in mirrored.lower()
+    # A natural co-host question survives the guard.
+    asked = sanitize_onair("Sovereignty is just keeping your own mind. You ever try that?")
+    assert "you ever try that?" in asked.lower()
+    assert "sovereignty" in asked.lower()
+    # Natural radio hand-offs are not stage direction.
+    assert "back to you" in sanitize_onair("That's my take. Back to you, host.").lower()
+
+    from app.services.studio_product_brief import drop_trailing_question, ends_with_question
+
+    assert ends_with_question("You ever try that?") is True
+    assert ends_with_question("Nah, I don't buy it.") is False
+    assert drop_trailing_question("That's wild. You ever try that?") == "That's wild."
+    # Never empty out a reply that is only a question.
+    assert drop_trailing_question("You ever try that?") == "You ever try that?"
+    assert "_last_nate_line" in (ROOT / "backend/app/services/studio_session_service.py").read_text()
     assert "app.sovereignsanctuary.net" in PRODUCT_BRIEF
     assert "Coach Command" in PRODUCT_BRIEF
     assert "Family Sanctuary" in PRODUCT_BRIEF
