@@ -10,7 +10,7 @@
   html,body{margin:0;height:100%;background:#0A0A0A;overflow:hidden}
   #stage{position:absolute;inset:0}
   #stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-             object-position:center 22%;opacity:0;transition:opacity .18s linear}
+             object-position:center 22%;opacity:0;transition:opacity .12s linear}
   #stage img.on{opacity:1}
   #status{position:fixed;left:10px;bottom:8px;color:#C9A96266;font-size:11px;
           font-family:DM Sans,system-ui,sans-serif;z-index:2}
@@ -48,11 +48,17 @@
   var voiceState = 'idle';
   var shown = null;
   var blinkTimer = null;
+  var talkTimer = null;
+  var talkOpen = false;
+
+  function restPlate(){
+    return PLATES[current] || PLATES.neutral;
+  }
 
   function plateFor(){
-    if (voiceState === 'speaking') return VOICE.speaking;
+    if (voiceState === 'speaking') return talkOpen ? VOICE.speaking : restPlate();
     if (voiceState === 'listening') return VOICE.listening;
-    return PLATES[current] || PLATES.neutral;
+    return restPlate();
   }
 
   function show(src){
@@ -72,8 +78,48 @@
     apply();
   }
 
+  function stopTalk(){
+    if (talkTimer) { clearTimeout(talkTimer); talkTimer = null; }
+    talkOpen = false;
+  }
+
+  function armTalk(){
+    stopTalk();
+    if (voiceState !== 'speaking') return;
+    function beat(){
+      if (voiceState !== 'speaking') return;
+      talkOpen = !talkOpen;
+      apply();
+      var ms;
+      if (talkOpen) {
+        ms = 70 + Math.floor(Math.random() * 90);
+      } else if (Math.random() < 0.08) {
+        show('plates/exp_02_blink.png');
+        talkTimer = setTimeout(function(){
+          if (voiceState === 'speaking') apply();
+          beat();
+        }, 120);
+        return;
+      } else {
+        ms = (Math.random() < 0.18)
+          ? (180 + Math.floor(Math.random() * 120))
+          : (50 + Math.floor(Math.random() * 70));
+      }
+      talkTimer = setTimeout(beat, ms);
+    }
+    talkOpen = true;
+    apply();
+    talkTimer = setTimeout(beat, 90);
+  }
+
   function setVoiceState(state){
     voiceState = String(state || 'idle').toLowerCase();
+    if (voiceState === 'speaking') {
+      if (blinkTimer) clearTimeout(blinkTimer);
+      armTalk();
+      return;
+    }
+    stopTalk();
     apply();
     armBlink();
   }
