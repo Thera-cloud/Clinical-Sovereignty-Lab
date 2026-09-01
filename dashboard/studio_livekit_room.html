@@ -48,7 +48,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="board">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901j" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901k" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
     <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" class="empty">No live callers</span></div></div>
   </div>
   <aside id="chat">
@@ -160,6 +160,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     a.muted = false;
     a.volume = 1;
     a.src = nateAudioUrl;
+    a.onplaying = function(){
+      if (gen !== speakGen) return;
+      lnAvatar('warm', 'speaking');
+    };
     a.onended = function(){
       if (gen !== speakGen) return;
       nateSpeaking = false;
@@ -184,7 +188,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!audioUnlocked){ pendingNate = text; setStatus('Click once so speakers can play Little Nate.'); return Promise.resolve(); }
     var gen = ++speakGen;
     nateSpeaking = true;
-    lnAvatar('warm', 'speaking');
+    lnAvatar('warm');
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (!cfg.session || !cfg.token){
       nateSpeaking = false;
