@@ -41,6 +41,13 @@ paths = (
     "studio_livekit_room.html",
     "livekit-client.umd.min.js",
     "avatar-modes/expression_viewer.html",
+    "avatar-modes/studio_portrait.html",
+    "avatar-modes/plates/exp_01_neutral.png",
+    "avatar-modes/plates/exp_02_blink.png",
+    "avatar-modes/plates/exp_03_jawopen.png",
+    "avatar-modes/plates/exp_04_smile_left.png",
+    "avatar-modes/plates/exp_05_smile_right.png",
+    "avatar-modes/plates/exp_06_brow_up.png",
     "avatar-modes/vendor/three.module.js",
 )
 files = [f"https://{h}/{p}" for h in hosts for p in paths]

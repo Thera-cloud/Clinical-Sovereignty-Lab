@@ -266,12 +266,19 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LIVE WITH LITTLE NATE" in html
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
-    assert "/avatar-modes/expression_viewer.html" in html
+    assert "/avatar-modes/studio_portrait.html" in html
+    assert "expression_viewer.html" not in html
+    portrait = (ROOT / "mobile/web/avatar-modes/studio_portrait.html").read_text()
+    assert "plates/exp_01_neutral.png" in portrait
+    assert "plates/exp_03_jawopen.png" in portrait
+    assert "setExpression" in portrait
+    assert "setVoiceState" in portrait
+    assert "lil_nate.glb" not in portrait
+    assert (ROOT / "mobile/web/avatar-modes/plates/exp_01_neutral.png").is_file()
+    assert (ROOT / "mobile/web/avatar-modes/plates/exp_06_brow_up.png").is_file()
     assert "mininate_neutral.glb" in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
     assert "lil_nate.glb" not in (ROOT / "mobile/web/avatar-modes/expression_viewer.html").read_text()
     assert (ROOT / "mobile/web/avatar-modes/mininate_neutral.glb").is_file()
-    assert (ROOT / "mobile/web/avatar-modes/mininate_empathetic.glb").is_file()
-    assert (ROOT / "mobile/web/avatar-modes/mininate_sad.glb").is_file()
     assert (ROOT / "mobile/web/avatar-modes/vendor/three.module.js").is_file()
     assert "/cohost/turn" in html
     assert "/cohost/caption" in html
@@ -281,6 +288,10 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "holdHostMic" not in html
     assert "Room link expired" in html
     assert "MediaRecorder" in html
+    assert "drainTurns" in html
+    assert "recd.start();" in html
+    assert "recd.start(2400)" not in html
+    assert "speakBrowser(text)" not in html
     assert "ActiveSpeakersChanged" in html
     assert "caller_join" in html
     assert "grid-template-columns:1fr 1fr 1fr" in html
@@ -322,6 +333,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert captioned.get("event") == "caption"
     assert _sess.caption_should_ask("CALLER: what is sovereignty?") is True
     assert _sess.caption_should_ask("ok") is False
+    assert _sess.caption_should_ask("late.") is False
     quiet = asyncio.run(_sess.ingest_live_caption(b"", speaker="caller"))
     assert quiet["ok"] is False
     assert quiet["reason"] == "no_speech"
@@ -330,6 +342,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     src_sess = (ROOT / "backend/app/services/studio_session_service.py").read_text()
     assert 'tts_provider="azure_premium"' in src_sess
     assert 'voice="onyx"' in src_sess
+    assert 'tts_provider="edge_tts"' in src_sess
+    assert 'voice="nate_warm"' in src_sess
     blocked = asyncio.run(_sess.cohost_turn(None, "sid-1", "please diagnose this therapy case"))
     assert blocked["ok"] is True
     assert blocked.get("redirect") is True

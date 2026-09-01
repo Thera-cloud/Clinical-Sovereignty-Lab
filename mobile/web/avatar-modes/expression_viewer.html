@@ -52,6 +52,7 @@ const EXPR_FILE = {
   encouraging: 'mininate_empathetic.glb',
 };
 const THERAPY_KEYS = Object.keys(EXPR_FILE);
+const LIVE_FILE = 'mininate_neutral.glb';
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const status = document.getElementById('status');
 const panel = document.getElementById('panel');
@@ -61,13 +62,16 @@ const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setClearColor(0x050505);
+if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+scene.add(new THREE.AmbientLight(0xffffff, 0.28));
 scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.05));
 const key = new THREE.DirectionalLight(0xfff2dd, 1.55); key.position.set(1.4, 2.2, 2.4);
 scene.add(key);
 const fill = new THREE.DirectionalLight(0x88aacc, 0.35); fill.position.set(-2, 1, -1);
 scene.add(fill);
+let pinMinY = null;
 
 function resize(){
   const w = innerWidth, h = innerHeight;
@@ -101,17 +105,53 @@ function fileFor(name){
   return EXPR_FILE[name] || EXPR_FILE.neutral;
 }
 
+function paintMaterials(obj){
+  obj.traverse((o)=>{
+    if (!o.isMesh || !o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach((m)=>{
+      if (m.metalness !== undefined) m.metalness = 0;
+      if (m.envMapIntensity !== undefined) m.envMapIntensity = 0;
+      if (m.roughness !== undefined) m.roughness = Math.max(Number(m.roughness) || 0, 0.62);
+      if (m.map && THREE.SRGBColorSpace) {
+        m.map.colorSpace = THREE.SRGBColorSpace;
+        m.map.needsUpdate = true;
+      }
+      m.needsUpdate = true;
+    });
+  });
+}
+
+function pinToFloor(obj){
+  obj.position.set(0, 0, 0);
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  if (pinMinY == null){
+    pinMinY = box.min.y;
+    return;
+  }
+  obj.position.y += pinMinY - box.min.y;
+}
+
+function applyMood(name){
+  const warm = /warm|empathetic|encouraging|proud|calming|validating/.test(name);
+  const low = /sad|frustrated/.test(name);
+  key.color.setHex(warm ? 0xffe6c4 : low ? 0xc8d4e4 : 0xfff2dd);
+  key.intensity = voiceState === 'speaking' ? 1.72 : 1.55;
+}
+
 function showScene(gltf){
   if (root) scene.remove(root);
   root = gltf.scene;
+  paintMaterials(root);
   scene.add(root);
   if (!framed){
     frameObject(root);
     framed = true;
+    root.updateMatrixWorld(true);
+    pinMinY = new THREE.Box3().setFromObject(root).min.y;
   } else {
-    const box = new THREE.Box3().setFromObject(root);
-    const center = box.getCenter(new THREE.Vector3());
-    root.position.sub(center);
+    pinToFloor(root);
   }
 }
 
@@ -129,11 +169,15 @@ function loadFile(file, done){
 function setExpression(name){
   name = canon(name);
   if (!(name in EXPR_FILE)) name = 'neutral';
-  const file = fileFor(name);
-  if (name === current && cache[file]) return;
   current = name;
+  const file = DEBUG ? fileFor(name) : LIVE_FILE;
+  if (!DEBUG && root){
+    applyMood(name);
+    return;
+  }
   loadFile(file, (gltf)=>{
     showScene(gltf);
+    applyMood(name);
     if (!readySent){
       readySent = true;
       status.textContent = DEBUG ? ('ready — ' + file) : '';
@@ -145,6 +189,7 @@ function setExpression(name){
 
 function setVoiceState(state){
   voiceState = String(state || 'idle').toLowerCase();
+  applyMood(current || 'neutral');
 }
 
 function tick(){
@@ -153,7 +198,7 @@ function tick(){
 }
 requestAnimationFrame(tick);
 
-['mininate_empathetic.glb', 'mininate_sad.glb'].forEach(f => loadFile(f, ()=>{}));
+if (DEBUG) ['mininate_empathetic.glb', 'mininate_sad.glb'].forEach(f => loadFile(f, ()=>{}));
 setExpression('neutral');
 
 addEventListener('message', (e)=>{

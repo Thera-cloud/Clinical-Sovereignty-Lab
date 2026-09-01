@@ -48,7 +48,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="board">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/expression_viewer.html" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260901d" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
     <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" class="empty">No live callers</span></div></div>
   </div>
   <aside id="chat">
@@ -80,6 +80,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var room = null, micOn = true, camOn = false, lnPaused = false, waiting = [];
   var lastHeard = '', greeted = false, rec = null, nateSpeaking = false, bargeTimer = null;
   var audioTracks = {}, capRecs = {}, pendingCaps = [], capPauseTimer = null;
+  var turnQ = [], turnBusy = false;
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
     var q = new URLSearchParams(location.search);
@@ -149,16 +150,6 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   document.addEventListener('pointerdown', unlockAudio, true);
   document.addEventListener('keydown', unlockAudio, true);
-  function speakBrowser(text){
-    if (!window.speechSynthesis){ nateSpeaking = false; lnAvatar(null, 'idle'); return; }
-    var u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.02;
-    u.volume = 1;
-    u.onend = function(){ nateSpeaking = false; lnAvatar('attentive', 'idle'); };
-    u.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); };
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  }
   function playNateBlob(blob){
     var a = speakerEl();
     if (!a) return Promise.reject();
@@ -171,8 +162,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     a.onended = function(){
       nateSpeaking = false;
       lnAvatar('attentive', 'idle');
+      drainTurns();
     };
-    a.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); };
+    a.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); drainTurns(); };
     var play = a.play();
     if (play && play.catch) return play.catch(function(){
       pendingNate = '';
@@ -181,13 +173,18 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     return play;
   }
   function speakNate(text){
-    if (lnPaused || !text) return;
-    if (!audioUnlocked){ pendingNate = text; setStatus('Click once so speakers can play Little Nate.'); return; }
+    if (lnPaused || !text) return Promise.resolve();
+    if (!audioUnlocked){ pendingNate = text; setStatus('Click once so speakers can play Little Nate.'); return Promise.resolve(); }
     nateSpeaking = true;
     lnAvatar('warm', 'speaking');
     if (window.speechSynthesis) speechSynthesis.cancel();
-    if (!cfg.session || !cfg.token){ speakBrowser(text); return; }
-    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
+    if (!cfg.session || !cfg.token){
+      nateSpeaking = false;
+      setStatus('Little Nate voice needs a live session — computer voice is off.');
+      drainTurns();
+      return Promise.resolve();
+    }
+    return fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
       body: JSON.stringify({text: text})
@@ -195,9 +192,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (!r.ok) throw new Error('tts');
       return r.blob();
     }).then(function(blob){
-      if (lnPaused){ nateSpeaking = false; return; }
+      if (lnPaused){ nateSpeaking = false; drainTurns(); return; }
+      if (!blob || blob.size < 80) throw new Error('empty_tts');
       return playNateBlob(blob);
-    }).catch(function(){ speakBrowser(text); });
+    }).catch(function(){
+      nateSpeaking = false;
+      lnAvatar('thoughtful', 'idle');
+      setStatus('Little Nate voice is catching up — tap Toss or type the line again.');
+      drainTurns();
+    });
   }
   function fitMedia(el){
     if (!el) return;
@@ -275,6 +278,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (low.indexOf('caller:') !== -1) return true;
     if (blob.indexOf('?') !== -1) return true;
     if (low.indexOf('nate') !== -1 || low.indexOf('co-host') !== -1 || low.indexOf('cohost') !== -1) return true;
+    if (blob.length < 24) return false;
     return blob.length >= 80;
   }
   function armCaptionTurn(){
@@ -282,12 +286,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     capPauseTimer = setTimeout(function(){
       capPauseTimer = null;
       if (lnPaused || guest) { pendingCaps = []; return; }
-      if (nateSpeaking || Object.keys(capRecs).length) { armCaptionTurn(); return; }
+      if (nateSpeaking || turnBusy || Object.keys(capRecs).length) { armCaptionTurn(); return; }
       var blob = pendingCaps.join('\n');
       pendingCaps = [];
       if (!shouldAskCaps(blob)) return;
       nateTurn(blob, false, 'caption');
-    }, 1100);
+    }, 2800);
   }
   function postCaption(id, blob){
     if (guest || lnPaused || !cfg.session || !cfg.token) return;
@@ -301,6 +305,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       body: fd
     }).then(function(r){ return r.json(); }).then(function(j){
       if (!j || !j.ok || !j.text) return;
+      if ((j.text || '').trim().length < 8) return;
       var who = j.speaker === 'caller' ? 'CALLER' : 'HOST';
       lastHeard = j.text;
       addLine(who, j.text);
@@ -328,7 +333,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (!ev.data || ev.data.size < 400) return;
       postCaption(id, ev.data);
     };
-    try { recd.start(2400); } catch (e) { delete capRecs[id]; }
+    try { recd.start(); } catch (e) { delete capRecs[id]; }
   }
   function stopNateVoice(){
     nateSpeaking = false;
@@ -337,10 +342,24 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (a){ try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {} }
     if (window.speechSynthesis) speechSynthesis.cancel();
     lnAvatar('attentive', 'idle');
+    drainTurns();
+  }
+  function drainTurns(){
+    if (turnBusy || nateSpeaking || !turnQ.length) return;
+    var job = turnQ.shift();
+    runNateTurn(job.text, job.toss, job.event);
   }
   function nateTurn(text, toss, event){
     if (!cfg.session || !cfg.token){ setStatus('Nate chat needs a live session token.'); return; }
     if (lnPaused && !toss && event !== 'caller_join') return;
+    var kind = event || (toss ? 'toss' : 'line');
+    if (toss) turnQ = [];
+    else if (kind === 'caption') turnQ = turnQ.filter(function(j){ return j.event !== 'caption'; });
+    turnQ.push({text: text, toss: !!toss, event: kind});
+    drainTurns();
+  }
+  function runNateTurn(text, toss, event){
+    turnBusy = true;
     if (toss) { lnPaused = false; document.getElementById('btnPause').textContent = 'Pause LN'; document.getElementById('btnPause').classList.remove('on'); }
     var ctx = roomCtx();
     var kind = event || (toss ? 'toss' : 'line');
@@ -361,10 +380,13 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       var t = (j && (j.text || j.reason)) || '';
       if (!j || !j.ok){ lnAvatar('thoughtful', 'idle'); setStatus('Little Nate: ' + (t || 'turn failed')); return; }
       addLine('Nate', t);
-      speakNate(t);
       sendData({op:'nate_line', text:t});
       setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
-    }).catch(function(e){ setStatus('Nate chat failed: ' + e); });
+      return speakNate(t);
+    }).catch(function(e){ setStatus('Nate chat failed: ' + e); }).then(function(){
+      turnBusy = false;
+      drainTurns();
+    });
   }
   window.addEventListener('resize', function(){ drawEnv(0.35); });
   drawEnv(0.35);

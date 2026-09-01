@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from typing import Any, Dict
@@ -255,15 +256,30 @@ async def synthesize_cohost_line(text: str, voice_router=None) -> bytes:
     line = (text or "").strip()
     if not line:
         return b""
-    if voice_router is not None:
-        try:
-            audio = await voice_router.process_text_to_speech(
+    if voice_router is None:
+        return b""
+    try:
+        audio = await asyncio.wait_for(
+            voice_router.process_text_to_speech(
                 line, tts_provider="azure_premium", voice="onyx"
-            )
-            if audio:
-                return audio
-        except Exception as exc:
-            logger.warning("studio speak azure skipped: %s", exc)
+            ),
+            timeout=8.0,
+        )
+        if audio:
+            return audio
+    except Exception as exc:
+        logger.warning("studio speak azure skipped: %s", exc)
+    try:
+        audio = await asyncio.wait_for(
+            voice_router.process_text_to_speech(
+                line, tts_provider="edge_tts", voice="nate_warm"
+            ),
+            timeout=8.0,
+        )
+        if audio:
+            return audio
+    except Exception as exc:
+        logger.warning("studio speak edge fallback skipped: %s", exc)
     return b""
 
 
@@ -278,6 +294,9 @@ def caption_should_ask(blob: str) -> bool:
         return True
     if "nate" in low or "co-host" in low or "cohost" in low:
         return True
+    # Drop STT crumbs ("late.") — wait for a real host/caller utterance.
+    if len(text) < 24:
+        return False
     return len(text) >= 80
 
 
