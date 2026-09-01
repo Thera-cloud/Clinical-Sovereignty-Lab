@@ -80,12 +80,22 @@
     stopTalk();
     if (voiceState !== 'speaking') return;
     talkT0 = performance.now();
+    var phase = 0;
+    var last = talkT0;
+    var shutUntil = 0;
     function tick(now){
       if (voiceState !== 'speaking') { setJawMix(0); return; }
+      var dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      if (now < shutUntil) { setJawMix(0); talkRaf = requestAnimationFrame(tick); return; }
       var t = (now - talkT0) / 1000;
-      var cycle = 0.26 + 0.16 * (0.5 + 0.5 * Math.sin(t * 2.1));
-      var phase = (t % cycle) / cycle;
-      setJawMix(phase < 0.5 ? 1 : 0);
+      var hz = 2.2 + 0.35 * Math.sin(t * 0.9);
+      phase += hz * dt;
+      if (phase >= 1) {
+        phase -= 1;
+        if (Math.random() < 0.18) shutUntil = now + 90 + Math.random() * 220;
+      }
+      setJawMix(phase < 0.42 ? 1 : 0);
       talkRaf = requestAnimationFrame(tick);
     }
     talkRaf = requestAnimationFrame(tick);
