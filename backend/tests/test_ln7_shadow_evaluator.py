@@ -170,6 +170,30 @@ def test_verdict_clean_when_within_band():
 
 
 # --------------------------------------------------------------------------
+# weekly durable dedupe
+# --------------------------------------------------------------------------
+
+def test_iso_week_start_utc_is_monday():
+    from datetime import datetime, timezone
+
+    sev = _sev()
+    wed = datetime(2026, 8, 26, 15, 0, tzinfo=timezone.utc)  # Wednesday
+    start = sev.iso_week_start_utc(wed)
+    assert start.date().isoformat() == "2026-08-24"
+    assert start.tzinfo is timezone.utc
+
+
+def test_run_shadow_sample_skips_when_already_sampled_this_week():
+    sev = _sev()
+    _preload_lazy_deps()
+    with patch.object(sev, "already_sampled_this_iso_week", new=AsyncMock(return_value=True)), \
+         patch("app.services.ln7_outcome_envelope.write_envelope", new=AsyncMock()) as mock_write:
+        out = _run(sev.run_shadow_sample(db_pool=object()))
+    assert out.get("skipped") == "already_sampled_this_week"
+    mock_write.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------
 # run_shadow_sample
 # --------------------------------------------------------------------------
 

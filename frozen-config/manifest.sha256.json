@@ -4,6 +4,7 @@
     "claim_templates.json": "d027abbfa26f1bb2b9e08856cee68663359c7e5d9793eefea286a204a377b824",
     "compliance_grants.json": "2a94a85cee70e5cdba1d0bfd0aef71c6f6a1e8975edcc8e6cc5e7017c76e2999",
     "dual_coo_checklist.json": "8335ce73a0c4bd6b28b68ddc9aa64d98d8e58d98e6ef9f961c009d0da1df39f1",
+    "fence_tests/conftest.py": "22c77d63f8cbdacc054fe130b02cf63e9359a7c4617f084ed82557eb61db6294",
     "fence_tests/test_droplet_lockfile_weld.py": "da7cad23a0694bd163185723b54f82991a742b2be438f723246b66e2c0dced8d",
     "fence_tests/test_governance_weld.py": "4976836621f5bbfe482db23865d4a0246a8d3d4da90167ecb09d2a917475f422",
     "fence_tests/test_heldout_weld.py": "b1aaa498360277aa560e15acfa94e617e7fe9f2f70d2995417dcdccaa0b8e1a4",

@@ -24,7 +24,7 @@ import copy
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("ln7_shadow_evaluator")
@@ -98,11 +98,41 @@ def _verdict(bands: Dict[str, Any], ref: Dict[str, Any], live_metrics: Dict[str,
     return {"tripped": tripped, "drifts": drifts}
 
 
-async def run_shadow_sample(db_pool=None) -> Dict[str, Any]:
+def iso_week_start_utc(now: Optional[datetime] = None) -> datetime:
+    now = now or datetime.now(timezone.utc)
+    monday = now.date() - timedelta(days=now.isoweekday() - 1)
+    return datetime(monday.year, monday.month, monday.day, tzinfo=timezone.utc)
+
+
+async def already_sampled_this_iso_week(db_pool) -> bool:
+    """Durable weekly dedupe — survives backend restart (agent loop does not)."""
+    if not db_pool or not hasattr(db_pool, "acquire"):
+        return False
+    try:
+        since = iso_week_start_utc()
+        async with db_pool.acquire() as conn:
+            val = await conn.fetchval(
+                """
+                SELECT 1 FROM outcome_envelope
+                WHERE loop_name = 'shadow_eval' AND event_kind = 'weekly_sample'
+                  AND created_at >= $1
+                LIMIT 1
+                """,
+                since,
+            )
+        return bool(val)
+    except Exception as e:
+        logger.warning("already_sampled_this_iso_week: %s", e)
+        return False
+
+
+async def run_shadow_sample(db_pool=None, *, force: bool = False) -> Dict[str, Any]:
     """Run the live evaluator's measurement once, score it against BOTH the
     live (frozen) bands and the shadow (candidate) bands, and log both
     verdicts to outcome_envelope. Never mutates frozen-config, never
     influences the live drift_sentinel's tripped/anomaly decision."""
+    if db_pool and not force and await already_sampled_this_iso_week(db_pool):
+        return {"ok": True, "skipped": "already_sampled_this_week"}
     from app.services.ln7_frozen_config import load_json
     from app.services.goodhart_drift_sentinel import measure_live_metrics
     from app.services.ln7_outcome_envelope import write_envelope

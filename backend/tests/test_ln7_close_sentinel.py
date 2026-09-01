@@ -45,6 +45,54 @@ def sentinel(engine):
         SERVICES / "ln7_close_sentinel.py",
     )
 
+def test_utc_day_key_is_utc_date(sentinel):
+    from datetime import datetime, timezone
+
+    assert sentinel.utc_day_key(datetime(2026, 8, 31, 23, 0, tzinfo=timezone.utc)) == "2026-08-31"
+
+
+def test_already_sent_utc_day_true_and_false(sentinel):
+    class _Conn:
+        def __init__(self, hit):
+            self.hit = hit
+            self.query = None
+
+        async def fetchval(self, query, *args):
+            self.query = query
+            return 1 if self.hit else None
+
+    async def _run():
+        yes = _Conn(True)
+        no = _Conn(False)
+        assert await sentinel.already_sent_utc_day(yes, "2026-08-31") is True
+        assert await sentinel.already_sent_utc_day(no, "2026-08-31") is False
+        assert "ln7_close_digest_snapshots" in (yes.query or "")
+
+    asyncio.run(_run())
+
+
+def test_run_close_digest_skips_when_already_sent_today(sentinel):
+    class _Conn:
+        async def fetchval(self, query, *args):
+            return 1
+
+    class _Pool:
+        def acquire(self):
+            return self
+
+        async def __aenter__(self):
+            return _Conn()
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def _run():
+        out = await sentinel.run_close_digest(_Pool())
+        assert out == {"ok": True, "skipped": "already_sent_today"}
+
+    asyncio.run(_run())
+
+
 def test_compose_digest_fixed_sections(engine, sentinel):
     ItemScore = engine.ItemScore
     scores = [

@@ -25,6 +25,19 @@ def test_migrations_305_310_exist_not_303_304_reuse():
     assert (mig / "312_ln7_g1_open_flag.sql").is_file()
 
 
+def test_fence_manifest_pins_conftest():
+    """conftest.py is real fence-test source (macOS numpy SIGFPE guard).
+    Shipping it unpinned holds promotions RED on every GREEN boot."""
+    import hashlib
+    import json
+
+    pin = json.loads((FROZEN / "manifest.sha256.json").read_text())
+    rel = "fence_tests/conftest.py"
+    assert rel in pin["files"], "pin fence_tests/conftest.py in manifest.sha256.json"
+    live = hashlib.sha256((FROZEN / rel).read_bytes()).hexdigest()
+    assert pin["files"][rel] == live
+
+
 def test_fence_manifest_green():
     from app.services.ln7_frozen_config import verify_manifest
 

@@ -160,6 +160,26 @@ def compose_digest(
     return body, overall, blocked, alerts
 
 
+def utc_day_key(now: Optional[datetime] = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%d")
+
+
+async def already_sent_utc_day(conn, day_key: Optional[str] = None) -> bool:
+    """Durable daily dedupe — survives backend restart (in-memory _last_day does not)."""
+    day_key = day_key or utc_day_key()
+    row = await conn.fetchval(
+        """
+        SELECT 1 FROM ln7_close_digest_snapshots
+        WHERE created_at >= $1::date
+          AND created_at < ($1::date + INTERVAL '1 day')
+        LIMIT 1
+        """,
+        day_key,
+    )
+    return bool(row)
+
+
 async def run_close_digest(
     db_pool,
     *,
@@ -172,6 +192,12 @@ async def run_close_digest(
         return {"ok": False, "error": "no_db"}
 
     async with db_pool.acquire() as conn:
+        if not force_send:
+            try:
+                if await already_sent_utc_day(conn):
+                    return {"ok": True, "skipped": "already_sent_today"}
+            except Exception as e:
+                logger.warning("close_sentinel: daily dedupe check failed: %s", e)
         scores, alerts = await score_all(conn, inject_veto_miss=inject_veto_miss)
         prev = await conn.fetchrow(
             """SELECT day_index, overall_pct, items_json, created_at
