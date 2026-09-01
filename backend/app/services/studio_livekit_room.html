@@ -80,7 +80,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var room = null, micOn = true, camOn = false, lnPaused = false, waiting = [];
   var lastHeard = '', greeted = false, rec = null, nateSpeaking = false, bargeTimer = null;
   var audioTracks = {}, capRecs = {}, pendingCaps = [], capPauseTimer = null;
-  var turnQ = [], turnBusy = false;
+  var turnQ = [], turnBusy = false, speakGen = 0;
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
     var q = new URLSearchParams(location.search);
@@ -150,9 +150,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   document.addEventListener('pointerdown', unlockAudio, true);
   document.addEventListener('keydown', unlockAudio, true);
-  function playNateBlob(blob){
+  function playNateBlob(blob, gen){
     var a = speakerEl();
     if (!a) return Promise.reject();
+    if (gen !== speakGen) return Promise.resolve();
     if (nateAudioUrl) try { URL.revokeObjectURL(nateAudioUrl); } catch (e) {}
     nateAudioUrl = URL.createObjectURL(blob);
     a.pause();
@@ -160,11 +161,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     a.volume = 1;
     a.src = nateAudioUrl;
     a.onended = function(){
+      if (gen !== speakGen) return;
       nateSpeaking = false;
       lnAvatar('attentive', 'idle');
       drainTurns();
     };
-    a.onerror = function(){ nateSpeaking = false; lnAvatar('neutral', 'idle'); drainTurns(); };
+    a.onerror = function(){
+      if (gen !== speakGen) return;
+      nateSpeaking = false;
+      lnAvatar('neutral', 'idle');
+      drainTurns();
+    };
     var play = a.play();
     if (play && play.catch) return play.catch(function(){
       pendingNate = '';
@@ -175,6 +182,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function speakNate(text){
     if (lnPaused || !text) return Promise.resolve();
     if (!audioUnlocked){ pendingNate = text; setStatus('Click once so speakers can play Little Nate.'); return Promise.resolve(); }
+    var gen = ++speakGen;
     nateSpeaking = true;
     lnAvatar('warm', 'speaking');
     if (window.speechSynthesis) speechSynthesis.cancel();
@@ -192,10 +200,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (!r.ok) throw new Error('tts');
       return r.blob();
     }).then(function(blob){
-      if (lnPaused){ nateSpeaking = false; drainTurns(); return; }
+      if (gen !== speakGen || lnPaused){ if (gen === speakGen) nateSpeaking = false; return; }
       if (!blob || blob.size < 80) throw new Error('empty_tts');
-      return playNateBlob(blob);
+      return playNateBlob(blob, gen);
     }).catch(function(){
+      if (gen !== speakGen) return;
       nateSpeaking = false;
       lnAvatar('thoughtful', 'idle');
       setStatus('Little Nate voice is catching up — tap Toss or type the line again.');
@@ -287,7 +296,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       capPauseTimer = null;
       if (lnPaused || guest) { pendingCaps = []; return; }
       if (nateSpeaking || turnBusy || Object.keys(capRecs).length) { armCaptionTurn(); return; }
-      if (pendingCaps.length > 12) pendingCaps = pendingCaps.slice(-12);
+      if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
     }, 2800);
   }
   function postCaption(id, blob){
@@ -308,7 +317,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       addLine(who, j.text);
       sendData({op:'caption', speaker: who, text: j.text});
       pendingCaps.push(who + ': ' + j.text);
-      if (pendingCaps.length > 12) pendingCaps = pendingCaps.slice(-12);
+      if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       armCaptionTurn();
     }).catch(function(){});
   }
@@ -333,6 +342,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     try { recd.start(); } catch (e) { delete capRecs[id]; }
   }
   function stopNateVoice(){
+    speakGen += 1;
     nateSpeaking = false;
     pendingNate = '';
     var a = speakerEl();
@@ -377,6 +387,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       var t = (j && (j.text || j.reason)) || '';
       if (!j || !j.ok){ lnAvatar('thoughtful', 'idle'); setStatus('Little Nate: ' + (t || 'turn failed')); return; }
       addLine('Nate', t);
+      pendingCaps.push('NATE: ' + t);
+      if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       sendData({op:'nate_line', text:t});
       setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
       return speakNate(t);
@@ -545,6 +557,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     lastHeard = text;
     stopNateVoice();
     addLine(guest ? 'Caller' : 'Host', text);
+    pendingCaps.push((guest ? 'CALLER' : 'HOST') + ': ' + text);
+    if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
     sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
     nateTurn(text, false, 'line');
   };
@@ -563,6 +577,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       lastHeard = text;
       stopNateVoice();
       addLine(guest ? 'Caller' : 'Host', text);
+      pendingCaps.push((guest ? 'CALLER' : 'HOST') + ': ' + text);
+      if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
       nateTurn(text, false, 'line');
     };
@@ -585,7 +601,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     this.classList.toggle('on', camOn);
   };
   document.getElementById('btnToss').onclick = function(){
-    var tossCtx = pendingCaps.slice(-8).join('\n') || lastHeard
+    var tossCtx = pendingCaps.slice(-24).join('\n') || lastHeard
       || 'Host tossed the floor to you. Address the room and take the next question.';
     nateTurn(tossCtx, true);
   };

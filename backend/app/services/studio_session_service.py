@@ -11,6 +11,9 @@ from app.services.studio_invariants import LN_COHOST_LABEL, guest_video_allowed
 
 logger = logging.getLogger("studio_session")
 
+_THREAD: Dict[str, list] = {}
+_THREAD_MAX = 40
+
 
 async def create_session(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
     if not db_pool:
@@ -138,7 +141,75 @@ async def append_utterance(
         )
     if not row:
         return {"ok": False, "reason": "not_found", "code": 404}
+    remember_line(session_id, "HOST", blob)
     return {"ok": True, "leg_id": str(row["id"])}
+
+
+def remember_line(session_id: str, speaker: str, text: str) -> None:
+    line = f"{(speaker or 'HOST').strip()}: {(text or '').strip()}"
+    sid = (session_id or "").strip()
+    if not sid or len(line) < 8:
+        return
+    buf = _THREAD.setdefault(sid, [])
+    if buf and buf[-1] == line[:500]:
+        return
+    buf.append(line[:500])
+    _THREAD[sid] = buf[-_THREAD_MAX:]
+
+
+def thread_text(session_id: str) -> str:
+    return "\n".join(_THREAD.get(session_id or "", []) or [])
+
+
+async def _hydrate_thread(db_pool, session_id: str) -> None:
+    if not db_pool or thread_text(session_id):
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT role, utterances_json
+                FROM session_legs
+                WHERE session_id = $1::uuid
+                """,
+                session_id,
+            )
+        for row in rows:
+            role = "NATE" if (row["role"] or "") == "cohost_ai" else "HOST"
+            raw = row["utterances_json"] or []
+            if isinstance(raw, str):
+                import json
+
+                raw = json.loads(raw)
+            for item in raw[-_THREAD_MAX:]:
+                if isinstance(item, dict):
+                    remember_line(session_id, str(item.get("t") or role), str(item.get("text") or ""))
+                elif item:
+                    remember_line(session_id, role, str(item))
+    except Exception as exc:
+        logger.warning("studio thread hydrate skipped: %s", exc)
+
+
+async def _persist_line(db_pool, session_id: str, role: str, speaker: str, text: str) -> None:
+    if not db_pool or not session_id or not (text or "").strip():
+        return
+    import json
+
+    blob = json.dumps([{"t": speaker, "text": (text or "").strip()[:500]}])
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE session_legs
+                SET utterances_json = COALESCE(utterances_json, '[]'::jsonb) || $2::jsonb
+                WHERE session_id = $1::uuid AND role = $3
+                """,
+                session_id,
+                blob,
+                role,
+            )
+    except Exception as exc:
+        logger.warning("studio thread persist skipped: %s", exc)
 
 
 async def cohost_turn(
@@ -187,35 +258,52 @@ async def cohost_turn(
         kind = "toss"
     live = max(0, int(callers or 0))
     hold = max(0, int(waiting or 0))
+    await _hydrate_thread(db_pool, session_id)
+    from app.services.studio_product_brief import (
+        PRODUCT_BRIEF,
+        asks_app_howto,
+        sanitize_onair,
+    )
+
+    howto = asks_app_howto(blob) or asks_app_howto(thread_text(session_id))
     system = (
-        f"You are Little Nate, {LN_COHOST_ONAIR}, live on a public educational podcast. "
-        "This is a show, not a private chat and not a therapy session. "
-        "Turn-taking like a human guest: one speaker at a time, pause after you talk, "
-        "do not talk over the host or a caller, do not fill every silence. "
-        "1–3 short spoken sentences, then leave space. "
-        "When tossed, take the floor, answer, then hand back to the host. "
-        "When a caller is live, include them by name if you have it; when only the host is here, stay ready. "
-        "Never do clinical work: no therapy, diagnose, treatment, prescribe, or assess your case. "
-        "If someone brings pain, stay educational and human, then toss back to the host."
+        f"You are Little Nate, {LN_COHOST_ONAIR}, live on a Sovereign Sanctuary show. "
+        "Track THIS_SHOW moment to moment. Answer the latest line using earlier topics. "
+        "Ambiguous 'how it works' / 'tell us how' / 'what can it do' means the Little Nate app "
+        "for clients and coaches — not podcast production, unless they clearly ask about the show. "
+        "Promote only Little Nate inside Sovereign Sanctuary. Never name or recommend other apps. "
+        "No code, vendors, servers, models, or internals on air. "
+        "This is a show, not private therapy. One speaker at a time. "
+        "2–5 short spoken sentences, then leave space. "
+        "When tossed, answer, then hand back to the host. "
+        "Never do clinical work: no therapy, diagnose, treatment, prescribe, or assess a case. "
+        "If someone brings pain, stay educational and human, then toss back to the host.\n\n"
+        + PRODUCT_BRIEF
     )
     if persona:
-        system += f" Coach style note: {persona[:240]}"
+        system += f"\nCoach style note: {persona[:240]}"
     room = f"Room: {live} live caller(s), {hold} waiting."
+    prior = thread_text(session_id)
+    prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
     if kind == "open":
-        prefix = f"{room} Podcast room just went live. Brief hello as co-host, then wait.\n"
+        prefix = f"{room} Show just went live. Brief hello as Little Nate, then wait.\n"
     elif kind == "caller_join":
         prefix = f"{room} A caller just joined. Welcome them once, then yield to the host.\n"
     elif kind == "toss":
-        prefix = f"{room} TOSS — host handed you the floor. Answer, then pause.\n"
+        prefix = f"{room} TOSS — host handed you the floor. Use THIS_SHOW. Answer, then pause.\n"
     elif kind == "caption":
         prefix = (
-            f"{room} Live captions labeled HOST vs CALLER. A pause just happened. "
-            "If this is a question or aimed at you, answer in 1–3 sentences. "
-            "If they are mid-thought, one short line or wait. Do not talk over them. "
-            "Do not invent speech that is not in the captions.\n"
+            f"{room} Live captions. If this is a question or aimed at you, answer in 2–5 sentences. "
+            "If they are mid-thought, one short line or wait.\n"
         )
     else:
-        prefix = f"{room} Live turn from {speaker}. Reply, then pause.\n"
+        prefix = f"{room} Live turn from {speaker}. Use THIS_SHOW. Reply, then pause.\n"
+    if howto:
+        prefix += (
+            "The room is asking how Little Nate / Sovereign Sanctuary works. "
+            "Teach the app for clients and coaches. Invite them to our app, not another product.\n"
+        )
+    prefix = prior_block + prefix
     reply = (
         "I'm here. Whenever you're ready."
         if kind == "open"
@@ -235,7 +323,7 @@ async def cohost_turn(
             prompt=prefix + blob,
             system=system,
             domain="general",
-            max_tokens=80,
+            max_tokens=160 if howto else 120,
         )
         gen = (out.get("text") or "").strip()
         if gen:
@@ -249,6 +337,14 @@ async def cohost_turn(
             "Host, take us to the next question for the room."
         )
         provider = "inv6_filter"
+    cleaned = sanitize_onair(reply)
+    if cleaned != reply:
+        reply = cleaned
+        provider = "onair_guard"
+    remember_line(session_id, speaker or "HOST", blob)
+    remember_line(session_id, "NATE", reply)
+    await _persist_line(db_pool, session_id, "host", speaker or "HOST", blob)
+    await _persist_line(db_pool, session_id, "cohost_ai", "NATE", reply)
     return {"ok": True, "text": reply, "provider": provider, "toss": bool(toss), "event": kind}
 
 
@@ -302,6 +398,8 @@ async def ingest_live_caption(
     speaker: str = "host",
     identity: str = "",
     content_type: str = "audio/webm",
+    session_id: str = "",
+    db_pool=None,
 ) -> Dict[str, Any]:
     role = "caller" if (speaker or "").strip().lower() == "caller" else "host"
     ctype = (content_type or "audio/webm").split(";")[0].strip() or "audio/webm"
@@ -317,6 +415,10 @@ async def ingest_live_caption(
     text = text.strip()
     if not text:
         return {"ok": False, "reason": "no_speech", "speaker": role}
+    who = "CALLER" if role == "caller" else "HOST"
+    if session_id:
+        remember_line(session_id, who, text)
+        await _persist_line(db_pool, session_id, "host", who, text)
     return {"ok": True, "text": text, "speaker": role, "identity": (identity or "").strip()}
 
 

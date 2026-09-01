@@ -720,6 +720,8 @@ async def cohost_caption_public(
         speaker=speaker,
         identity=identity,
         content_type=file.content_type or "audio/webm",
+        session_id=str(session_id),
+        db_pool=_pool(request),
     )
 
 

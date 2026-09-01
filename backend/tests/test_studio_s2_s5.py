@@ -271,6 +271,9 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "/avatar-modes/studio_portrait.html" in html
     assert "v=20260901e" in html
     assert "expression_viewer.html" not in html
+    assert "speakGen" in html
+    assert "pendingCaps.slice(-24)" in html
+    assert "pendingCaps.slice(-8)" not in html
     portrait = (ROOT / "mobile/web/avatar-modes/studio_portrait.html").read_text()
     assert "plates/exp_01_neutral.png" in portrait
     assert "plates/exp_03_jawopen.png" in portrait
@@ -344,6 +347,9 @@ def test_s4_apply_probe_egress_billing_autoscale():
     spoken = asyncio.run(_sess.synthesize_cohost_line(""))
     assert spoken == b""
     src_sess = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "PRODUCT_BRIEF" in src_sess
+    assert "remember_line" in src_sess
+    assert "THIS_SHOW" in src_sess
     assert "synthesize_studio_voice" in src_sess
     assert 'tts_provider="azure_premium"' in src_sess
     assert 'voice="onyx"' in src_sess
@@ -374,3 +380,35 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "/egress" in dart
     pin = (ROOT / "scripts/cf_pin_ln_observer_lb.sh").read_text()
     assert "/livekit" in pin
+
+
+def test_studio_product_thread_and_onair_guards():
+    from app.services.studio_product_brief import (
+        PRODUCT_BRIEF,
+        asks_app_howto,
+        blocks_competitor,
+        blocks_ip_leak,
+        sanitize_onair,
+    )
+
+    assert asks_app_howto("tell us how it works") is True
+    assert asks_app_howto("what can Little Nate do for coaches") is True
+    assert asks_app_howto("good morning everyone") is False
+    assert "app.sovereignsanctuary.net" in PRODUCT_BRIEF
+    assert "Coach Command" in PRODUCT_BRIEF
+    assert "Family Sanctuary" in PRODUCT_BRIEF
+    assert "grok" not in PRODUCT_BRIEF.lower()
+    assert "azure" not in PRODUCT_BRIEF.lower()
+    assert "crystal" not in PRODUCT_BRIEF.lower()
+    assert "patent" not in PRODUCT_BRIEF.lower()
+    assert blocks_competitor("try BetterHelp instead") is True
+    assert blocks_ip_leak("we run this on Azure and Grok") is True
+    clean = sanitize_onair("You should download Calm or BetterHelp tonight")
+    assert "betterhelp" not in clean.lower()
+    assert "calm" not in clean.lower()
+    assert "Sovereign Sanctuary" in clean
+    _sess.remember_line("sid-thread", "HOST", "we are talking about the Little Nate app")
+    _sess.remember_line("sid-thread", "HOST", "tell us how it works")
+    prior = _sess.thread_text("sid-thread")
+    assert "Little Nate app" in prior
+    assert "how it works" in prior
