@@ -228,12 +228,16 @@ async def test_coach_callback_persists_per_hardware_id(monkeypatch):
     assert persisted["coach_id"] == "COACH_A_ID"
     assert persisted["token"] == "tok-a"
     loc = resp.headers.get("location") or resp.headers.get("Location", "")
-    assert "linkedin=connected" in loc
-    assert "command.sovereignsanctuary.net" not in loc
+    body = (resp.body or b"").decode() if getattr(resp, "body", None) else ""
+    flag = loc + body
+    assert "linkedin=connected" in flag
+    assert "LinkedIn connected" in body
+    assert "command.sovereignsanctuary.net" not in flag
     none_resp = await try_complete_coach_linkedin_callback(_Req(), "code", "skyeye-admin")
     assert none_resp is None
     bad = await try_complete_coach_linkedin_callback(_Req(), "code", "coach1.forged.deadbeef")
     assert bad is not None
     bad_loc = bad.headers.get("location") or bad.headers.get("Location", "")
-    assert "coach.sovereignsanctuary.net" in bad_loc
-    assert "command.sovereignsanctuary.net" not in bad_loc
+    bad_body = (bad.body or b"").decode() if getattr(bad, "body", None) else ""
+    assert "coach.sovereignsanctuary.net" in (bad_loc + bad_body)
+    assert "command.sovereignsanctuary.net" not in (bad_loc + bad_body)

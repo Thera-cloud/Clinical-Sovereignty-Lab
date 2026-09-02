@@ -39,7 +39,7 @@ class CoachIntegrationsHub extends StatefulWidget {
 }
 
 class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final TabController _tabs;
   Map<String, dynamic>? _hub;
   String? _error;
@@ -47,6 +47,8 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   final _chatCtrl = TextEditingController();
   final _campaignTitleCtrl = TextEditingController(text: 'Campaign');
   int _lengthDays = 7;
+  Timer? _liPoll;
+  DateTime? _liWatchStarted;
 
   static const _gold = Color(0xFFC9A962);
   static const _goldDim = Color(0xFF8B7355);
@@ -62,16 +64,77 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabs = TabController(length: 8, vsync: this);
-    _load();
+    _tabs.addListener(() {
+      if (_tabs.indexIsChanging) return;
+      if (_tabs.index == 2) _load();
+    });
+    _load().then((_) {
+      if (!mounted) return;
+      _maybeLinkedInQuery();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _liPoll?.cancel();
     _tabs.dispose();
     _chatCtrl.dispose();
     _campaignTitleCtrl.dispose();
     super.dispose();
+  }
+
+  void _maybeLinkedInQuery() {
+    final q = Uri.base.queryParameters['linkedin'];
+    if (q == 'connected') {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('LinkedIn connected')));
+    } else if (q == 'error') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('LinkedIn did not connect. Tap Connect again.')));
+    }
+  }
+
+  void _watchLinkedInOAuth() {
+    _liPoll?.cancel();
+    _liWatchStarted = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
+    var left = 45;
+    _liPoll = Timer.periodic(const Duration(seconds: 2), (t) async {
+      left -= 1;
+      if (left <= 0 || !mounted) {
+        t.cancel();
+        return;
+      }
+      try {
+        final r = await http.get(
+          Uri.parse(
+              '${AppConfig.apiBaseUrl}/api/coach/integrations/linkedin/status'),
+          headers: _h,
+        );
+        if (r.statusCode != 200) return;
+        final j = json.decode(r.body);
+        if (j is! Map || j['connected'] != true) return;
+        final updated = DateTime.tryParse((j['updated_at'] ?? '').toString());
+        final started = _liWatchStarted;
+        if (started != null &&
+            updated != null &&
+            updated.toUtc().isBefore(started)) {
+          return;
+        }
+        t.cancel();
+        await _load();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('LinkedIn connected')));
+      } catch (_) {}
+    });
   }
 
   Future<void> _load() async {
@@ -400,6 +463,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
     if (url.isNotEmpty) {
       await launchUrl(Uri.parse(url),
           mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+      _watchLinkedInOAuth();
     }
   }
 

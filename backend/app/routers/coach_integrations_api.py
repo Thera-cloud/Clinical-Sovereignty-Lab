@@ -103,18 +103,18 @@ async def linkedin_connect(request: Request, user: Dict = Depends(require_coach)
 @oauth_router.get("/linkedin/callback")
 async def linkedin_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     from app.services.coach_linkedin_oauth import (
-        coach_post_auth_url,
+        coach_oauth_done_response,
         try_complete_coach_linkedin_callback,
     )
 
     if error:
-        return RedirectResponse(coach_post_auth_url(ok=False))
+        return coach_oauth_done_response(ok=False)
     if not code or not state:
-        return RedirectResponse(coach_post_auth_url(ok=False))
+        return coach_oauth_done_response(ok=False)
     resp = await try_complete_coach_linkedin_callback(request, code, state)
     if resp is not None:
         return resp
-    return RedirectResponse(coach_post_auth_url(ok=False))
+    return coach_oauth_done_response(ok=False)
 
 
 @router.get("/clients")

@@ -96,6 +96,34 @@ def coach_post_auth_url(ok: bool = True) -> str:
     return post.replace("=connected", "=error")
 
 
+def coach_oauth_done_response(ok: bool = True):
+    """Popup-safe finish page. Coach Command polls /linkedin/status — do not dump the coach onto login."""
+    from fastapi.responses import HTMLResponse
+
+    status = "connected" if ok else "error"
+    title = "LinkedIn connected" if ok else "LinkedIn did not connect"
+    body = (
+        "You can close this window. Coach Command will show Connected."
+        if ok
+        else "Close this window and tap Connect LinkedIn again."
+    )
+    href = coach_post_auth_url(ok=ok)
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "<style>body{background:#050505;color:#E8D5A3;font-family:system-ui;"
+        "padding:48px;text-align:center}h1{color:#C9A962}"
+        "a{color:#C9A962}</style></head><body>"
+        f"<h1>{title}</h1><p>{body}</p>"
+        f"<p><a href='{href}'>Back to Coach Command</a></p>"
+        "<script>try{if(window.opener)window.opener.postMessage("
+        f"{{linkedin:'{status}'}},'https://coach.sovereignsanctuary.net');"
+        "}catch(e){}setTimeout(function(){window.close();},900);</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
 def mint_coach_linkedin_state(hardware_id: str, username: str) -> str:
     payload = {
         "hw": hardware_id,
@@ -219,11 +247,9 @@ async def _coach_meta_from_redis(state: str) -> Optional[Dict[str, str]]:
 async def try_complete_coach_linkedin_callback(request, code: str, state: str) -> Optional[Any]:
     """Complete per-coach LinkedIn OAuth. Never writes skyeye_platform_tokens (NG19).
 
-    Returns RedirectResponse to coach.sovereignsanctuary.net for coach states.
+    Returns HTML done page for coach states (Coach Command polls status).
     Returns None only for SkyEye admin OAuth (no coach1. prefix / no Redis coach key).
     """
-    from fastapi.responses import RedirectResponse
-
     if not state:
         return None
     meta = parse_coach_linkedin_state(state)
@@ -231,24 +257,22 @@ async def try_complete_coach_linkedin_callback(request, code: str, state: str) -
         meta = await _coach_meta_from_redis(state)
     if meta is None:
         if is_coach_linkedin_state(state):
-            return RedirectResponse(url=coach_post_auth_url(ok=False))
+            return coach_oauth_done_response(ok=False)
         return None
     hw = (meta.get("hardware_id") or "").strip()
-    err = coach_post_auth_url(ok=False)
-    post = coach_post_auth_url(ok=True)
     if not hw:
-        return RedirectResponse(url=err)
+        return coach_oauth_done_response(ok=False)
     pool = getattr(request.app.state, "db_pool", None)
     try:
         tokens = await exchange_coach_linkedin_code(code)
         if not tokens.get("access_token"):
             logger.warning("Coach LinkedIn token exchange returned no access_token")
-            return RedirectResponse(url=err)
+            return coach_oauth_done_response(ok=False)
         await persist_coach_linkedin(pool, hw, tokens)
-        return RedirectResponse(url=post)
+        return coach_oauth_done_response(ok=True)
     except Exception as exc:
         logger.warning("Coach LinkedIn callback failed: %s", exc)
-        return RedirectResponse(url=err)
+        return coach_oauth_done_response(ok=False)
 
 
 async def persist_coach_linkedin(db_pool, coach_id: str, tokens: Dict[str, Any]) -> None:
@@ -280,11 +304,12 @@ async def persist_coach_linkedin(db_pool, coach_id: str, tokens: Dict[str, Any])
 async def coach_linkedin_status(db_pool, coach_id: str) -> Dict[str, Any]:
     connected = False
     person_urn = ""
+    updated_at = ""
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT person_urn, revoked_at FROM coach_linkedin_connection
+                SELECT person_urn, revoked_at, updated_at FROM coach_linkedin_connection
                 WHERE coach_id = $1
                 """,
                 coach_id,
@@ -292,11 +317,15 @@ async def coach_linkedin_status(db_pool, coach_id: str) -> Dict[str, Any]:
         if row and row["revoked_at"] is None:
             connected = True
             person_urn = row["person_urn"] or ""
+            ts = row["updated_at"]
+            if ts is not None:
+                updated_at = ts.isoformat()
     cid, secret, _ = coach_linkedin_credentials()
     configured = bool(cid and secret)
     return {
         "connected": connected,
         "person_urn": person_urn,
+        "updated_at": updated_at,
         "oauth_enabled": _flag_on("ENABLE_COACH_LINKEDIN"),
         "connect_visible": True,
         "oauth_configured": configured,
