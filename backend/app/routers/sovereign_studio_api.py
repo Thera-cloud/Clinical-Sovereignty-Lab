@@ -822,6 +822,25 @@ async def cohost_caption_public(
     )
 
 
+@public_router.post("/sessions/{session_id}/cohost/share-frame")
+async def cohost_share_frame_public(
+    session_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Host-only still of the live share so Nate can read the page. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    _require_host_jwt(request, session_id)
+    raw = await file.read()
+    from app.services.studio_cohost_share import describe_share_frame, remember_share_frame
+
+    out = await describe_share_frame(raw)
+    if not out.get("ok"):
+        return _raise(out)
+    remember_share_frame(str(session_id), out.get("note") or "", out.get("jpeg") or "")
+    return {"ok": True, "seen": bool(out.get("seen")), "note": out.get("note") or ""}
+
+
 @public_router.post("/sessions/{session_id}/cohost/share")
 async def cohost_share_public(session_id: UUID, body: CohostShareBody, request: Request):
     """Host-only lookup or URL card for the share pane. QUANTUM-CRYSTAL-ARCH"""

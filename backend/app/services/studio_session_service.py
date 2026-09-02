@@ -252,11 +252,24 @@ async def cohost_turn(
     if toss:
         kind = "toss"
     from app.services.studio_listen_hold import prime_clear, prime_store, prime_take
+    from app.services.studio_cohost_share import (
+        merge_share_note,
+        note_has_seen_content,
+        share_seen,
+    )
 
     sid = str(session_id)
+    share_k = (share_kind or "").strip()[:40]
+    share_n = (share_note or "").strip()[:800]
+    seen = share_seen(sid)
+    share_n = merge_share_note(share_n, seen.get("note") or "")
+    jpeg = seen.get("jpeg") or ""
+    needs_eyes = share_k.lower() in {"screen", "image", "file", "window"}
+    can_see = note_has_seen_content(share_n) or bool(jpeg)
     if kind in ("toss", "open", "caller_join"):
         prime_clear(sid)
-    cached_reply = None if kind == "prime" else prime_take(sid, blob)
+    # Screen shares change every second. A primed line without the still is fiction.
+    cached_reply = None if kind == "prime" or needs_eyes else prime_take(sid, blob)
     if cached_reply:
         remember_line(session_id, speaker or "HOST", blob)
         remember_line(session_id, "NATE", cached_reply)
@@ -318,17 +331,24 @@ async def cohost_turn(
         room += f" Realm: {realm_name}."
         if realm_shift:
             room += " The realm just shifted in behind you this second."
-    share_k = (share_kind or "").strip()[:40]
-    share_n = (share_note or "").strip()[:800]
     if share_k:
         room += f" On screen: {share_k}."
-        system += (
-            f"\n\nON SCREEN: The host has {share_k} up in the share pane. "
-            f"{share_n} "
-            "Talk about what is on screen when they ask. "
-            "You look things up and bring stings only when the host asks — "
-            "never when a caller asks. Do not invent page contents beyond this note."
-        )
+        if can_see:
+            system += (
+                f"\n\nON SCREEN ({share_k}): {share_n or 'current screenshot attached'}\n"
+                "A still of the share is attached. Quote only text that is actually on screen. "
+                "If a label is blurry, say you cannot read that part. "
+                "Do not invent titles, quotes, code, or layout. "
+                "You look things up and bring stings only when the host asks — "
+                "never when a caller asks.\n"
+            )
+        else:
+            system += (
+                "\n\nON SCREEN: a share is up, but you have no read on the page yet. "
+                "Say you cannot see the page yet. Do not invent titles, quotes, code, or layout. "
+                "You look things up and bring stings only when the host asks — "
+                "never when a caller asks.\n"
+            )
     prior = thread_text(session_id)
     prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
     if kind == "open":
@@ -381,6 +401,7 @@ async def cohost_turn(
             system=system,
             domain="culture",
             max_tokens=400 if howto else 280,
+            images=[jpeg] if jpeg else None,
         )
         gen = (out.get("text") or "").strip()
         if gen:

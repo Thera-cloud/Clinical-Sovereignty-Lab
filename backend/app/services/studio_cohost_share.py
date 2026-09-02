@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import logging
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+
+logger = logging.getLogger("studio_cohost_share")
 
 SOUND_CATALOG: Dict[str, Dict[str, str]] = {
     "sting": {"label": "Sting", "hint": "short brass hit"},
@@ -14,6 +19,8 @@ SOUND_CATALOG: Dict[str, Dict[str, str]] = {
 }
 
 _IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+_SEEN: Dict[str, Dict[str, Any]] = {}
+_SEEN_TTL = 90.0
 
 
 def is_studio_host_identity(identity: str) -> bool:
@@ -25,6 +32,85 @@ def is_studio_host_identity(identity: str) -> bool:
     if ident.startswith("guest") or ident.startswith("caller"):
         return False
     return True
+
+
+def note_has_seen_content(note: str) -> bool:
+    """True when the share note is a real page read, not a generic picker line."""
+    n = (note or "").strip()
+    if len(n) < 28:
+        return False
+    low = n.lower()
+    if low.startswith("host is sharing"):
+        return False
+    if low.startswith("host opened "):
+        return False
+    return True
+
+
+def remember_share_frame(session_id: str, note: str, jpeg_b64: str = "") -> None:
+    sid = (session_id or "").strip()
+    if not sid:
+        return
+    _SEEN[sid] = {
+        "note": (note or "")[:800],
+        "jpeg": (jpeg_b64 or "")[:900_000],
+        "at": time.time(),
+    }
+
+
+def forget_share_frame(session_id: str) -> None:
+    sid = (session_id or "").strip()
+    if sid:
+        _SEEN.pop(sid, None)
+
+
+def share_seen(session_id: str) -> Dict[str, str]:
+    sid = (session_id or "").strip()
+    row = _SEEN.get(sid) or {}
+    if not row:
+        return {}
+    if time.time() - float(row.get("at") or 0) > _SEEN_TTL:
+        _SEEN.pop(sid, None)
+        return {}
+    return {"note": str(row.get("note") or ""), "jpeg": str(row.get("jpeg") or "")}
+
+
+def merge_share_note(posted: str, seen_note: str) -> str:
+    if note_has_seen_content(posted):
+        return (posted or "").strip()
+    return ((seen_note or posted) or "").strip()
+
+
+async def describe_share_frame(image_bytes: bytes) -> Dict[str, Any]:
+    raw = image_bytes or b""
+    if len(raw) < 80:
+        return {"ok": False, "reason": "empty_frame", "code": 422}
+    if len(raw) > 500_000:
+        return {"ok": False, "reason": "frame_too_large", "code": 413}
+    jpeg = base64.b64encode(raw).decode("ascii")
+    note = ""
+    try:
+        from app.services.nate_inference_router import NateInferenceRouter
+
+        out = await NateInferenceRouter().generate(
+            prompt=(
+                "Read this live screenshare. List only visible titles, headings, "
+                "quotes, and UI labels. If you cannot read it, reply exactly: unread"
+            ),
+            system="OCR only. No guesses. No invented page titles.",
+            domain="culture",
+            max_tokens=220,
+            images=[jpeg],
+        )
+        note = (out.get("text") or "").strip()
+        if note.lower() in {"unread", "unable to process images"}:
+            note = ""
+        if "temporarily unable" in note.lower():
+            note = ""
+    except Exception as exc:
+        logger.warning("studio share-frame describe skipped: %s", exc)
+        note = ""
+    return {"ok": True, "note": note[:800], "seen": bool(note), "jpeg": jpeg}
 
 
 def resolve_sound(sound_id: str) -> Dict[str, Any]:

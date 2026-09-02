@@ -349,7 +349,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260902t" in url
+    assert "v=20260902u" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -585,6 +585,9 @@ def test_studio_realm_rotation():
         assert "function playStudioSfx" in room, rel
         assert "function doLookup" in room, rel
         assert "share_kind" in room, rel
+        assert "function grabShareJpeg" in room, rel
+        assert "function pushShareFrame" in room, rel
+        assert "cohost/share-frame" in room, rel
 
 
 def test_studio_share_host_only():
@@ -605,8 +608,23 @@ def test_studio_share_host_only():
     note = share.share_note("search", "Nevedal", [{"title": "One"}])
     assert "One" in note and "Nevedal" in note
 
+    assert share.note_has_seen_content("Host is sharing a window.") is False
+    assert share.note_has_seen_content("Host opened notes.pdf") is False
+    assert share.note_has_seen_content("On screen: Clinical Sovereignty Lab patent claims") is True
+    share.remember_share_frame("sess-vis", "Patent title visible on the page", "abc")
+    seen = share.share_seen("sess-vis")
+    assert seen["note"].startswith("Patent")
+    assert share.merge_share_note("Host is sharing a window.", seen["note"]).startswith("Patent")
+    share.forget_share_frame("sess-vis")
+    assert share.share_seen("sess-vis") == {}
+    import asyncio
+
+    empty = asyncio.run(share.describe_share_frame(b""))
+    assert empty["ok"] is False
+
     api_src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
     assert '/sessions/{session_id}/cohost/share' in api_src
+    assert '/sessions/{session_id}/cohost/share-frame' in api_src
     assert '/sessions/{session_id}/cohost/sound' in api_src
     assert "host_only" in api_src
     assert "_require_host_jwt" in api_src
@@ -615,3 +633,6 @@ def test_studio_share_host_only():
     assert "ON SCREEN" in sess_src
     assert "share_kind" in sess_src
     assert "never when a caller asks" in sess_src
+    assert "cannot see the page yet" in sess_src
+    assert "images=[jpeg] if jpeg else None" in sess_src
+    assert "needs_eyes" in sess_src

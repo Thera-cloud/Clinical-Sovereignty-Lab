@@ -146,6 +146,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var turnQ = [], turnBusy = false, speakGen = 0;
   var shareState = {on:false, kind:'', note:''};
   var sharePub = null, shareStream = null, shareObjUrl = '', sfxCtx = null;
+  var shareFrameTimer = 0, shareFrameArmed = false;
   function holdFloorMs(text){
     var t = (text || '').replace(/\s+/g, ' ').trim();
     if (!t) return LISTEN_SILENCE_MS;
@@ -186,6 +187,55 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       share_note: shareState.note || ''
     };
   }
+  function grabShareJpeg(){
+    try {
+      var v = document.getElementById('shareVid');
+      var img = document.querySelector('#shareTile .share-img');
+      var src = null, w = 0, h = 0;
+      if (v && v.videoWidth){ src = v; w = v.videoWidth; h = v.videoHeight; }
+      if ((!src || !w) && img && img.naturalWidth){ src = img; w = img.naturalWidth; h = img.naturalHeight; }
+      if (!src || !w || !h) return null;
+      var scale = Math.min(1, 1280 / Math.max(w, h));
+      var c = document.createElement('canvas');
+      c.width = Math.max(2, Math.round(w * scale));
+      c.height = Math.max(2, Math.round(h * scale));
+      c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+      var data = c.toDataURL('image/jpeg', 0.72);
+      var raw = atob((data.split(',')[1] || ''));
+      var u8 = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+      if (u8.length < 80 || u8.length > 380000) return null;
+      return new Blob([u8], {type:'image/jpeg'});
+    } catch (e) { return null; }
+  }
+  function pushShareFrame(){
+    if (guest || !shareState.on || shareState.kind === 'search' || !cfg.session || !cfg.token) return Promise.resolve();
+    var blob = grabShareJpeg();
+    if (!blob) return Promise.resolve();
+    var fd = new FormData();
+    fd.append('file', blob, 'share.jpg');
+    return fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/share-frame', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      body: fd
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (j && j.ok && j.note) shareState.note = j.note;
+      if (j && j.ok && !shareFrameArmed){
+        shareFrameArmed = true;
+        setStatus(j.seen ? 'On screen — Nate can see the page.' : 'On screen — Nate has the still.');
+      }
+    }).catch(function(){});
+  }
+  function armShareFrames(){
+    if (guest) return;
+    if (shareFrameTimer) clearInterval(shareFrameTimer);
+    pushShareFrame();
+    shareFrameTimer = setInterval(function(){ pushShareFrame(); }, 7000);
+  }
+  function disarmShareFrames(){
+    if (shareFrameTimer){ clearInterval(shareFrameTimer); shareFrameTimer = 0; }
+    shareFrameArmed = false;
+  }
   function persistPrime(text){
     if (!cfg.session || !cfg.token || !text) return;
     fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
@@ -204,6 +254,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       return;
     }
     if (holdDraft.reply && !holdDraft.abort) {
+      if (shareState.on && shareState.kind !== 'search') {
+        abortHoldDraft();
+        nateTurn(text, false, event || 'line');
+        return;
+      }
       var reply = holdDraft.reply;
       var blob = holdDraft.blob;
       var persistText = text || holdDraft.text;
@@ -224,6 +279,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     nateTurn(text, false, event || 'line');
   }
   function primeHold(text, event){
+    if (!guest && shareState.on && shareState.kind !== 'search') return;
     var t = (text || '').replace(/\s+/g, ' ').trim();
     if (!t || t.length < 12 || lnPaused || !cfg.session || !cfg.token) return;
     if (holdDraft.inflight && holdDraft.text === t) return;
@@ -708,8 +764,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var ctx = roomCtx();
     var kind = event || (toss ? 'toss' : 'line');
     lnAvatar(toss || kind === 'caller_join' ? 'encouraging' : 'attentive', 'listening');
-    setStatus(kind === 'toss' ? 'Little Nate taking the floor…' : 'Little Nate listening…');
-    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
+    setStatus(shareState.on && shareState.kind !== 'search' ? 'Little Nate is reading the share…' : (kind === 'toss' ? 'Little Nate taking the floor…' : 'Little Nate listening…'));
+    pushShareFrame().then(function(){
+    return fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
       body: JSON.stringify({
@@ -725,6 +782,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         share_kind: shareState.kind || '',
         share_note: shareState.note || ''
       })
+    });
     }).then(function(r){ return r.json(); }).then(function(j){
       var t = (j && (j.text || j.reason)) || '';
       if (!j || !j.ok){ lnAvatar('thoughtful', 'idle'); setStatus('Little Nate: ' + (t || 'turn failed')); return; }
@@ -875,6 +933,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
   }
   function stopShare(){
+    disarmShareFrames();
     unpublishShare();
     shareState.on = false; shareState.kind = ''; shareState.note = '';
     clearSharePane();
@@ -904,6 +963,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       document.getElementById('btnShare').textContent = 'Stop share';
       document.getElementById('btnShare').classList.add('on');
       broadcastShare();
+      armShareFrames();
     }).catch(function(){ setStatus('Could not publish the share track.'); });
   }
   function startScreenShare(){
@@ -916,7 +976,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     navigator.mediaDevices.getDisplayMedia({video:true, audio:true}).then(function(ms){
       return publishShareStream(ms, 'screen', 'Host is sharing a window.');
     }).then(function(){
-      setStatus('On screen — Nate can talk about what you are sharing.');
+      setStatus('On screen — sending Nate a still of the page.');
     }).catch(function(e){
       if (e && e.name === 'NotAllowedError') setStatus('Screen share cancelled.');
       else setStatus('Screen share failed.');
