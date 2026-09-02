@@ -27,6 +27,7 @@ mint_livekit_jwt = _lk.mint_livekit_jwt
 room_embed_url = _lk.room_embed_url
 egress_plan = _lk.egress_plan
 join_token = _lk.join_token
+verify_livekit_jwt = _lk.verify_livekit_jwt
 session_minutes = _meter.session_minutes
 sip_join_allowed = _sip.sip_join_allowed
 sip_ingress_twiml = _sip.sip_ingress_twiml
@@ -221,6 +222,9 @@ def test_s4_room_meter_sip():
     minted = join_token("abc", "guest", identity="g1")
     assert minted["room_url"]
     assert minted["allow_video"] is False
+    host_mint = join_token("abc", "host")
+    if host_mint.get("jwt"):
+        assert verify_livekit_jwt(host_mint["token"]).get("identity", "").startswith("host-")
     start = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
     end = datetime(2026, 8, 18, 12, 30, tzinfo=timezone.utc)
     assert session_minutes(start, end) == 30.0
@@ -345,7 +349,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260901q" in url
+    assert "v=20260902s" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -391,12 +395,19 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "2025-04-01-preview" in voice_src
     assert 'voice": "onyx"' in voice_src
     assert "trusted older brother" in voice_src
-    assert "nateTurn(blob, false, 'caption')" in html
-    assert "var CAP_FRESH_MS = 6000;" in html
+    assert "deliverHold(blob, 'caption')" in html
+    assert "var CAP_FRESH_MS = 20000;" in html
     assert "function freshCaps" in html
     assert "if (!fresh.length) return;" in html
     assert "capQueue.push({at: capAt, line: who + ': ' + j.text})" in html
-    assert "}, 1200);" in html
+    assert "var LISTEN_SILENCE_MS = 6000;" in html
+    assert "function holdFloorMs" in html
+    assert "function primeHold" in html
+    assert "function deliverHold" in html
+    assert "holdTurnBody(t, 'prime')" in html
+    assert "rec.continuous = true;" in html
+    assert "function releaseCapSoon" in html
+    assert "}, 1200);" not in html
     assert "}, 2800);" not in html
     assert "event:'open')" not in html
     assert "caller_join" in html
@@ -561,6 +572,9 @@ def test_studio_realm_rotation():
         assert "function applyRealm" in room, rel
         assert "type:'setRealm'" in room, rel
         assert "realm_shift" in room, rel
+        assert "function holdFloorMs" in room, rel
+        assert "function primeHold" in room, rel
+        assert "var LISTEN_SILENCE_MS = 6000;" in room, rel
         # The wait badge cannot be squeezed by the rail flex, or the count clips.
         assert "flex:0 0 auto;margin-top:auto" in room, rel
         assert "line-height:1.3;color:#C9A962" in room, rel

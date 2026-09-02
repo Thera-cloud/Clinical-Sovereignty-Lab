@@ -121,8 +121,134 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var audioTracks = {}, capRecs = {}, pendingCaps = [], capQueue = [], capPauseTimer = null;
   // Transcripts older than this are dropped instead of answered: STT rate limits once
   // produced 40-127s gaps, and a reply that late lands on top of a finished topic.
-  var CAP_FRESH_MS = 6000;
+  var CAP_FRESH_MS = 20000;
+  var LISTEN_SILENCE_MS = 6000;
+  var LISTEN_HOLD_MS = 14000;
+  var listenOn = false, listenBuf = '', listenInterim = '', listenTimer = null;
+  var capHold = {};
+  var holdDraft = {id:0, text:'', event:'', reply:'', blob:null, abort:false, release:false, inflight:false, releaseText:'', releaseEvent:''};
   var turnQ = [], turnBusy = false, speakGen = 0;
+  function holdFloorMs(text){
+    var t = (text || '').replace(/\s+/g, ' ').trim();
+    if (!t) return LISTEN_SILENCE_MS;
+    var low = t.toLowerCase();
+    if (/\b(let me (pause|think|say more|finish|collect|sit)|talk a moment|think deeper|think about (this|that)|i(?:'m| am) (thinking|not done|not finished)|more about this|need a (sec|second|moment)|pause for|say more|hold that thought|give me a (sec|second|moment)|one (sec|second|moment))\b/.test(low))
+      return LISTEN_HOLD_MS;
+    var words = low.split(/\s+/);
+    if (words.length <= 10 && /\b(let me|hold on|hang on|wait|give me|one sec|one moment)\b/.test(low))
+      return LISTEN_HOLD_MS;
+    if (/\.\.\.$|…$/.test(t)) return LISTEN_HOLD_MS;
+    var last = (words[words.length - 1] || '').replace(/[^a-z']+$/i, '');
+    if (/^(and|but|or|so|because|if|when|that|the|a|an|to|for|with|of|my|our|just|like|um|uh|ah|er|well|then|about|this|is|are|was|were|have|has|had|been|can|will|would|could|should)$/.test(last))
+      return LISTEN_HOLD_MS;
+    return LISTEN_SILENCE_MS;
+  }
+  function abortHoldDraft(){
+    holdDraft.abort = true;
+    holdDraft.release = false;
+    holdDraft.inflight = false;
+    holdDraft.reply = '';
+    holdDraft.blob = null;
+    holdDraft.text = '';
+    holdDraft.id += 1;
+  }
+  function holdTurnBody(text, event){
+    var ctx = roomCtx();
+    return {
+      text: text,
+      speaker: guest ? 'caller' : 'host',
+      toss: false,
+      callers: ctx.callers,
+      waiting: ctx.waiting,
+      event: event,
+      realm: realmName,
+      realm_blurb: realmBlurb,
+      realm_shift: realmShift
+    };
+  }
+  function persistPrime(text){
+    if (!cfg.session || !cfg.token || !text) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify(holdTurnBody(text, 'commit'))
+    }).catch(function(){});
+  }
+  function deliverHold(text, event){
+    if (holdDraft.inflight) {
+      holdDraft.release = true;
+      holdDraft.releaseText = text;
+      holdDraft.releaseEvent = event || holdDraft.event || 'line';
+      lnAvatar('thoughtful', 'listening');
+      setStatus('Little Nate is already on this…');
+      return;
+    }
+    if (holdDraft.reply && !holdDraft.abort) {
+      var reply = holdDraft.reply;
+      var blob = holdDraft.blob;
+      var persistText = text || holdDraft.text;
+      abortHoldDraft();
+      addLine('Nate', reply);
+      pendingCaps.push('NATE: ' + reply);
+      if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
+      sendData({op:'nate_line', text: reply});
+      persistPrime(persistText);
+      setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
+      if (blob && blob.size >= 80) {
+        var gen = ++speakGen;
+        nateSpeaking = true;
+        playNateBlob(blob, gen);
+      } else speakNate(reply);
+      return;
+    }
+    nateTurn(text, false, event || 'line');
+  }
+  function primeHold(text, event){
+    var t = (text || '').replace(/\s+/g, ' ').trim();
+    if (!t || t.length < 12 || lnPaused || !cfg.session || !cfg.token) return;
+    if (holdDraft.inflight && holdDraft.text === t) return;
+    if (holdDraft.reply && holdDraft.text === t && !holdDraft.abort) return;
+    var id = ++holdDraft.id;
+    holdDraft.abort = false;
+    holdDraft.release = false;
+    holdDraft.text = t;
+    holdDraft.event = event || 'line';
+    holdDraft.reply = '';
+    holdDraft.blob = null;
+    holdDraft.inflight = true;
+    lnAvatar('thoughtful', 'listening');
+    setStatus('Little Nate is holding for you…');
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify(holdTurnBody(t, 'prime'))
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (id !== holdDraft.id || holdDraft.abort) return;
+      var reply = (j && j.ok && (j.text || '')) || '';
+      if (!reply) { holdDraft.inflight = false; return; }
+      holdDraft.reply = reply;
+      return fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+        body: JSON.stringify({text: reply})
+      }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){
+        if (id !== holdDraft.id || holdDraft.abort) return;
+        if (b && b.size >= 80) holdDraft.blob = b;
+      });
+    }).catch(function(){}).then(function(){
+      if (id !== holdDraft.id) return;
+      holdDraft.inflight = false;
+      if (holdDraft.release) deliverHold(holdDraft.releaseText || holdDraft.text, holdDraft.releaseEvent || holdDraft.event);
+    });
+  }
+  function maybePrime(text, event){
+    var t = (text || '').replace(/\s+/g, ' ').trim();
+    if (t.length < 12) return;
+    if (event === 'caption' && !shouldAskCaps(t)) return;
+    if (holdDraft.inflight && holdDraft.text && t.indexOf(holdDraft.text) === 0 && t.length - holdDraft.text.length < 28)
+      return;
+    primeHold(t, event);
+  }
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
     var q = new URLSearchParams(location.search);
@@ -455,18 +581,36 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function armCaptionTurn(){
     if (capPauseTimer) clearTimeout(capPauseTimer);
-    capPauseTimer = setTimeout(function(){
+    var last = capQueue.length ? capQueue[capQueue.length - 1].line : '';
+    var wait = holdFloorMs(last.replace(/^(HOST|CALLER):\s*/i, ''));
+    maybePrime(capQueue.map(function(c){ return c.line; }).join('\n'), 'caption');
+    function fireCaps(){
       capPauseTimer = null;
       if (lnPaused || guest) { pendingCaps = []; capQueue = []; return; }
-      if (nateSpeaking || turnBusy || Object.keys(capRecs).length) { armCaptionTurn(); return; }
+      if (nateSpeaking || turnBusy || Object.keys(capRecs).length) {
+        capPauseTimer = setTimeout(fireCaps, 400);
+        return;
+      }
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       var fresh = freshCaps();
       capQueue = [];
       if (!fresh.length) return;
       var blob = fresh.map(function(c){ return c.line; }).join('\n');
       if (!shouldAskCaps(blob)) return;
-      nateTurn(blob, false, 'caption');
-    }, 1200);
+      deliverHold(blob, 'caption');
+    }
+    capPauseTimer = setTimeout(fireCaps, wait);
+  }
+  function keepCap(id){
+    if (capHold[id]) { clearTimeout(capHold[id]); delete capHold[id]; }
+    startCap(id);
+  }
+  function releaseCapSoon(id){
+    if (capHold[id]) clearTimeout(capHold[id]);
+    capHold[id] = setTimeout(function(){
+      delete capHold[id];
+      stopCap(id);
+    }, LISTEN_SILENCE_MS);
   }
   function postCaption(id, blob){
     if (guest || lnPaused || !cfg.session || !cfg.token) return;
@@ -530,6 +674,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function nateTurn(text, toss, event){
     if (!cfg.session || !cfg.token){ setStatus('Nate chat needs a live session token.'); return; }
+    if (event !== 'commit') abortHoldDraft();
     if (lnPaused && !toss && event !== 'caller_join') return;
     var kind = event || (toss ? 'toss' : 'line');
     if (toss) turnQ = [];
@@ -676,7 +821,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   });
   room.on(LK.RoomEvent.ParticipantDisconnected, function(participant){
     var id = participant && participant.identity;
-    if (id) { stopCap(id); delete audioTracks[id]; }
+    if (id) {
+      if (capHold[id]) { clearTimeout(capHold[id]); delete capHold[id]; }
+      stopCap(id);
+      delete audioTracks[id];
+    }
     var wasActive = id && id === activeId;
     removeFromLine(id);
     if (wasActive) promoteNext();
@@ -690,8 +839,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var localId = room.localParticipant && room.localParticipant.identity;
     if (!guest) {
       Object.keys(audioTracks).forEach(function(id){
-        if (ids[id] && !(nateSpeaking && id === localId)) startCap(id);
-        else stopCap(id);
+        if (ids[id] && !(nateSpeaking && id === localId)) keepCap(id);
+        else releaseCapSoon(id);
       });
     }
     var remoteTalk = (speakers || []).some(function(p){
@@ -784,30 +933,80 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
     nateTurn(text, false, 'line');
   };
-  document.getElementById('btnTalk').onclick = function(){
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR){ setStatus('Talk needs Chrome speech recognition — type instead.'); return; }
-    if (rec){ rec.stop(); rec = null; this.classList.remove('on'); this.textContent = 'Talk'; return; }
-    rec = new SR();
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.lang = 'en-US';
-    var btn = this;
-    rec.onresult = function(ev){
-      var text = (ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript) || '';
+  function armListenCommit(){
+    if (listenTimer) clearTimeout(listenTimer);
+    var live = ((listenBuf || '') + ' ' + (listenInterim || '')).replace(/\s+/g, ' ').trim();
+    maybePrime(live, 'line');
+    listenTimer = setTimeout(function(){
+      listenTimer = null;
+      var text = ((listenBuf || '') + ' ' + (listenInterim || '')).replace(/\s+/g, ' ').trim();
+      listenBuf = '';
+      listenInterim = '';
       if (!text) return;
+      if (nateSpeaking || turnBusy) {
+        listenBuf = text;
+        if (listenOn) armListenCommit();
+        return;
+      }
       lastHeard = text;
       stopNateVoice();
       addLine(guest ? 'Caller' : 'Host', text);
       pendingCaps.push((guest ? 'CALLER' : 'HOST') + ': ' + text);
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
-      nateTurn(text, false, 'line');
+      deliverHold(text, 'line');
+    }, holdFloorMs(live));
+  }
+  function startListenRec(btn){
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR || !listenOn) return;
+    try { if (rec) rec.stop(); } catch (e) {}
+    rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+    rec.onresult = function(ev){
+      var mid = '';
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        var piece = (ev.results[i][0] && ev.results[i][0].transcript) || '';
+        if (!piece) continue;
+        if (ev.results[i].isFinal) listenBuf = (listenBuf + ' ' + piece).replace(/\s+/g, ' ').trim();
+        else mid += ' ' + piece;
+      }
+      listenInterim = mid.replace(/\s+/g, ' ').trim();
+      lastHeard = (listenBuf + ' ' + listenInterim).replace(/\s+/g, ' ').trim();
+      if (!lastHeard) return;
+      armListenCommit();
     };
-    rec.onend = function(){ rec = null; btn.classList.remove('on'); btn.textContent = 'Talk'; };
-    rec.start();
+    rec.onerror = function(ev){
+      if (ev && ev.error === 'no-speech') return;
+    };
+    rec.onend = function(){
+      rec = null;
+      if (listenOn) {
+        try { startListenRec(btn); } catch (e) { setTimeout(function(){ startListenRec(btn); }, 250); }
+      }
+    };
+    try { rec.start(); } catch (e) {}
+  }
+  document.getElementById('btnTalk').onclick = function(){
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR){ setStatus('Talk needs Chrome speech recognition — type instead.'); return; }
+    var btn = this;
+    if (listenOn){
+      listenOn = false;
+      if (listenTimer) { clearTimeout(listenTimer); listenTimer = null; }
+      try { if (rec) rec.stop(); } catch (e) {}
+      rec = null;
+      btn.classList.remove('on');
+      btn.textContent = 'Talk';
+      return;
+    }
+    listenOn = true;
+    listenBuf = '';
     btn.classList.add('on');
     btn.textContent = 'Listening';
+    startListenRec(btn);
   };
   document.getElementById('btnMute').onclick = function(){
     if (!room) return;

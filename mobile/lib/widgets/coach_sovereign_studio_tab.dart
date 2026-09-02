@@ -755,15 +755,13 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             onPressed: _busy
                 ? null
                 : () async {
+                    final tab = openStudioRoomPlaceholder();
                     await _joinRoom();
                     if (!mounted || _roomUrl.isEmpty) return;
-                    await launchUrl(Uri.parse(_roomUrl),
-                        mode: LaunchMode.externalApplication,
-                        webOnlyWindowName: '_blank');
+                    navigateStudioRoomTab(tab, _roomUrl);
                   },
             child: const Text('Open studio room'),
           ),
-          StudioLiveKitRoomEmbed(key: ValueKey(_roomUrl), src: _roomUrl),
         ],
         const SizedBox(height: 16),
         const Text('CALLER MEMORY (counts only)',

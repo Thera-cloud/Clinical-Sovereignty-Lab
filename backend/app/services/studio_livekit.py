@@ -8,6 +8,7 @@ import hmac
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
@@ -35,7 +36,7 @@ def room_embed_url(lk_url: str, token: str, role: str, session_id: str = "") -> 
             "api": api,
         }
     )
-    return f"{room_origin()}/studio_nate_room.html?v=20260901q#{q}"
+    return f"{room_origin()}/studio_nate_room.html?v=20260902s#{q}"
 
 
 def verify_livekit_jwt(token: str) -> Dict[str, Any]:
@@ -271,12 +272,13 @@ def join_token(session_id: str, role: str, identity: str = "") -> Dict[str, Any]
     secret = os.getenv("LIVEKIT_API_SECRET", "")
     url = os.getenv("LIVEKIT_URL", "")
     token = ""
+    rid = (identity or "").strip() or f"{role}-{uuid.uuid4().hex[:10]}"
     if key and secret:
         token = mint_livekit_jwt(
             api_key=key,
             api_secret=secret,
             room=f"studio-{session_id}",
-            identity=identity or role,
+            identity=rid,
             role=role,
         )
         out["token"] = token

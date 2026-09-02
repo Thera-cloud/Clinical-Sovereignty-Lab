@@ -249,6 +249,25 @@ async def cohost_turn(
     kind = (event or "line").strip().lower()
     if toss:
         kind = "toss"
+    from app.services.studio_listen_hold import prime_clear, prime_store, prime_take
+
+    sid = str(session_id)
+    if kind in ("toss", "open", "caller_join"):
+        prime_clear(sid)
+    cached_reply = None if kind == "prime" else prime_take(sid, blob)
+    if cached_reply:
+        remember_line(session_id, speaker or "HOST", blob)
+        remember_line(session_id, "NATE", cached_reply)
+        await _persist_line(db_pool, session_id, "host", speaker or "HOST", blob)
+        await _persist_line(db_pool, session_id, "cohost_ai", "NATE", cached_reply)
+        return {
+            "ok": True,
+            "text": cached_reply,
+            "provider": "prime",
+            "toss": bool(toss),
+            "event": kind,
+            "primed": True,
+        }
     live = max(0, int(callers or 0))
     hold = max(0, int(waiting or 0))
     await _hydrate_thread(db_pool, session_id)
@@ -311,7 +330,10 @@ async def cohost_turn(
             f"{room} TOSS — host handed you the floor. Follow THIS_SHOW. "
             "React, then say what you actually think. Do not default to the app.\n"
         )
-    elif kind == "caption":
+    elif kind == "caption" or (
+        kind == "prime"
+        and ("caller:" in blob.lower() or blob.lower().lstrip().startswith("host:"))
+    ):
         prefix = (
             f"{room} Live captions. If this is aimed at you, finish a take in 4–8 sentences. "
             "If they are mid-thought, one short reaction is fine. Never trail off mid-idea. "
@@ -368,6 +390,16 @@ async def cohost_turn(
             provider = "onair_guard"
     if not (reply or "").strip():
         reply = "Yeah, man — that tracks."
+    if kind == "prime":
+        prime_store(sid, blob, reply)
+        return {
+            "ok": True,
+            "text": reply,
+            "provider": provider,
+            "toss": False,
+            "event": "prime",
+            "primed": True,
+        }
     remember_line(session_id, speaker or "HOST", blob)
     remember_line(session_id, "NATE", reply)
     await _persist_line(db_pool, session_id, "host", speaker or "HOST", blob)

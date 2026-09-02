@@ -2,6 +2,21 @@ import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 
+/// Open a real browser tab on the click (before any await) so JWT refresh
+/// cannot get popup-blocked. QUANTUM-CRYSTAL-ARCH
+Object? openStudioRoomPlaceholder() => html.window.open('about:blank', '_blank');
+
+void navigateStudioRoomTab(Object? win, String url) {
+  if (url.isEmpty) return;
+  if (win is html.WindowBase) {
+    try {
+      win.location.href = url;
+      return;
+    } catch (_) {}
+  }
+  html.window.open(url, '_blank');
+}
+
 class StudioLiveKitRoomEmbed extends StatefulWidget {
   final String src;
   const StudioLiveKitRoomEmbed({super.key, required this.src});
