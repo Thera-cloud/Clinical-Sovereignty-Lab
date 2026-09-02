@@ -269,7 +269,23 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260901k" in html
+    assert "v=20260901m" in html
+    assert "}, 2500);" in html
+    assert "}, 450);" not in html
+    assert "function waitLabel" in html
+    assert "n > 10 ? '10+'" in html
+    assert "ACTIVE CALLER" in html
+    assert "CALLER ID 1" in html
+    assert "JOIN THE CALL" in html
+    assert 'id="rail"' in html
+    assert 'id="hosts"' in html
+    assert "grid-template-columns:1fr 1fr 1fr" not in html
+    sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "max_tokens=400 if howto else 280" in sess_src
+    assert "max_tokens=160 if howto else 120" not in sess_src
+    voice_src = (ROOT / "backend/app/services/studio_phone_voice.py").read_text()
+    assert "time() + 28.0" in voice_src
+    assert "time() + 10.0" not in voice_src
     assert "expression_viewer.html" not in html
     assert "speakGen" in html
     assert "pendingCaps.slice(-24)" in html
@@ -304,7 +320,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "speakBrowser(text)" not in html
     assert "ActiveSpeakersChanged" in html
     assert "caller_join" in html
-    assert "grid-template-columns:1fr 1fr 1fr" in html
+    assert "grid-template-columns:1fr 1fr" in html
+    assert "grid-template-columns:1fr 1fr 1fr" not in html
     assert "object-fit:cover" in html
     tok = _lk.mint_livekit_jwt(
         api_key="k",
@@ -322,7 +339,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260901k" in url
+    assert "v=20260901m" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]

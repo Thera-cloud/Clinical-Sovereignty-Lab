@@ -53,7 +53,7 @@ async def _ws_connect(url: str, headers: dict):
 
     try:
         return await websockets.connect(
-            url, additional_headers=headers, max_size=None, open_timeout=8
+            url, additional_headers=headers, max_size=None, open_timeout=12
         )
     except TypeError:
         return await websockets.connect(url, extra_headers=headers, max_size=None)
@@ -79,7 +79,7 @@ async def synthesize_rex_wav(text: str) -> Optional[bytes]:
                 XAI_REALTIME_URL,
                 {"Authorization": f"Bearer {key}"},
             ),
-            timeout=8.0,
+            timeout=12.0,
         )
         await ws.send(
             json.dumps(
@@ -122,9 +122,9 @@ async def synthesize_rex_wav(text: str) -> Optional[bytes]:
                 {"type": "response.create", "response": {"modalities": ["audio"]}}
             )
         )
-        deadline = asyncio.get_event_loop().time() + 10.0
+        deadline = asyncio.get_event_loop().time() + 28.0
         while asyncio.get_event_loop().time() < deadline:
-            raw = await asyncio.wait_for(ws.recv(), timeout=8.0)
+            raw = await asyncio.wait_for(ws.recv(), timeout=12.0)
             ev = json.loads(raw)
             et = ev.get("type") or ""
             if et == "error":
@@ -182,7 +182,7 @@ async def synthesize_onyx_wav(text: str) -> Optional[bytes]:
         ),
     }
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=24.0) as client:
             resp = await client.post(
                 url,
                 json=payload,

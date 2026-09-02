@@ -7,10 +7,29 @@
 <style>
 html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;min-height:100vh;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif}
-#bar{padding:10px 16px;border-bottom:1px solid #222;color:#C9A962;letter-spacing:1px;font-size:12px;flex:0 0 auto}
+#bar{padding:10px 16px;border-bottom:1px solid #222;color:#C9A962;letter-spacing:1px;font-size:12px;flex:0 0 auto;display:flex;align-items:center;gap:12px}
+#bar .live{color:#EF4444;letter-spacing:2px}
+#bar .title{flex:1;text-align:center;color:#E8D5A3}
+#btnChat{background:#111;color:#C9A962;border:1px solid #8B7355;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
 #status{padding:6px 16px;color:#8B7355;font-size:12px;flex:0 0 auto}
-#stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;padding:12px;min-height:0}
-#board{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;min-height:0;align-items:stretch}
+#stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px;grid-template-rows:minmax(0,1fr) auto;gap:12px;padding:12px;min-height:0}
+#hosts{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;align-items:stretch}
+#rail{display:flex;flex-direction:column;gap:8px;min-height:0;background:#111;border:1px solid #222;border-radius:8px;padding:8px}
+#joinCall{text-align:center;font-size:11px;letter-spacing:1px;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px}
+#activeCard{flex:1.1;min-height:110px;background:#0A0A0A;border:1px solid #C9A962;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+#activeCard h4,#prompt0 h4,#prompt1 h4,#prompt2 h4{margin:0;padding:6px 8px;font-size:10px;color:#C9A962;letter-spacing:1px}
+#activeMedia{flex:1;position:relative;min-height:72px;background:#050505}
+#activeMedia video,#activeMedia audio{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#activeMedia audio{top:auto;height:28px}
+#activeEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8B7355;font-size:11px;padding:8px;text-align:center}
+#activeName{padding:6px 8px;font-size:11px;color:#E8D5A3}
+.prompt{flex:0 0 auto;min-height:64px;background:#0A0A0A;border:1px solid #222;border-radius:8px;padding:0 0 6px}
+.prompt.empty{opacity:.55}
+.prompt .pname{padding:0 8px;font-size:12px;color:#E8D5A3}
+.prompt .ploc{padding:2px 8px 0;font-size:10px;color:#8B7355}
+#waitBadge{margin-top:auto;text-align:center;border:1px dashed #8B7355;border-radius:6px;padding:8px}
+#waitCount{display:block;font-size:22px;color:#C9A962;letter-spacing:1px}
+#waitHint{display:block;font-size:10px;color:#8B7355;margin-top:2px}
 .tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
 .tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto}
 .tile .box{flex:1;position:relative;min-height:220px;background:#0A0A0A;overflow:hidden}
@@ -19,8 +38,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 .tile .box iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#050505}
 .tile .box audio{position:absolute;left:8px;right:8px;bottom:8px;top:auto;height:32px;width:auto}
 .tile .box .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8B7355;font-size:12px}
-#chat{display:flex;flex-direction:column;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
-#chat h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px}
+#holdMedia{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
+#transcript{grid-column:1 / -1;display:flex;flex-direction:column;min-height:160px;max-height:28vh;background:#111;border:1px solid #222;border-radius:8px}
+#transcript.collapsed{min-height:0;max-height:42px}
+#transcript.collapsed #chatLog,#transcript.collapsed #chatForm{display:none}
+#chat h3,#transcript h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px}
 #chatLog{flex:1;overflow:auto;padding:8px 10px;font-size:12px;line-height:1.45}
 #chatLog .ln{color:#4ECDC4}
 #chatLog .host{color:#E8D5A3}
@@ -28,30 +50,45 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #chatForm{display:flex;gap:6px;padding:8px;border-top:1px solid #222}
 #chatIn{flex:1;background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px}
 #chatForm button{background:#111;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px 10px;font-size:12px;cursor:pointer}
-#wait{padding:0 12px 8px;color:#8B7355;font-size:12px;flex:0 0 auto}
 #dock{flex:0 0 auto;padding:10px 12px;border-top:1px solid #222;background:#0A0A0A;display:flex;flex-wrap:wrap;gap:8px}
 #dock button{background:#111;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer}
 #dock button.on{border-color:#C9A962;color:#C9A962}
 #dock button.warn{border-color:#EF4444;color:#EF4444}
 #dock .meta{color:#8B7355;font-size:11px;align-self:center}
 @media (max-width:960px){
-  #stage{grid-template-columns:1fr}
-  #board{grid-template-columns:1fr;min-height:420px}
+  #stage{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+  #hosts{grid-template-columns:1fr;min-height:280px}
   .tile .box{min-height:160px}
-  #chat{min-height:220px}
+  #rail{min-height:220px}
+  #transcript{max-height:34vh}
 }
 </style>
 </head>
 <body>
-<div id="bar">SOVEREIGN STUDIO · Little Nate (co-host)</div>
+<div id="bar">
+  <span class="live">● LIVE</span>
+  <span class="title">SOVEREIGN STUDIO LIVE</span>
+  <button id="btnChat" type="button">Transcript</button>
+</div>
 <div id="status">Connecting…</div>
 <div id="stage">
-  <div id="board">
+  <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901k" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
-    <div class="tile" id="callerTile"><h3>CALLERS (audio)</h3><div class="box" id="callers"><span id="callerEmpty" class="empty">No live callers</span></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901m" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
   </div>
-  <aside id="chat">
+  <aside id="rail">
+    <div id="joinCall">JOIN THE CALL</div>
+    <div id="activeCard">
+      <h4>ACTIVE CALLER</h4>
+      <div id="activeMedia"><span id="activeEmpty" class="empty">No one on air — Bring on the next line</span></div>
+      <div id="activeName">No active caller</div>
+    </div>
+    <div class="prompt empty" id="prompt0"><h4>CALLER ID 1</h4><div class="pname">Open slot</div><div class="ploc">Next on the line fills this seat</div></div>
+    <div class="prompt empty" id="prompt1"><h4>CALLER ID 2</h4><div class="pname">Open slot</div><div class="ploc">Next on the line fills this seat</div></div>
+    <div class="prompt empty" id="prompt2"><h4>CALLER ID 3</h4><div class="pname">Open slot</div><div class="ploc">Next on the line fills this seat</div></div>
+    <div id="waitBadge"><span id="waitCount">0</span><span id="waitHint">No additional wait</span></div>
+  </aside>
+  <section id="transcript">
     <h3>LIVE WITH LITTLE NATE</h3>
     <div id="chatLog"></div>
     <form id="chatForm">
@@ -59,9 +96,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       <button id="btnSend" type="submit">Send</button>
       <button id="btnTalk" type="button">Talk</button>
     </form>
-  </aside>
+  </section>
 </div>
-<div id="wait">Waiting room: none</div>
+<div id="holdMedia" aria-hidden="true"></div>
 <div id="dock">
   <button id="btnMute" type="button">Mute</button>
   <button id="btnCam" type="button">Camera</button>
@@ -78,6 +115,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <script>
 (function(){
   var room = null, micOn = true, camOn = false, lnPaused = false, waiting = [];
+  var activeId = '';
+  var PROMPT_N = 3;
   var lastHeard = '', greeted = false, rec = null, nateSpeaking = false, bargeTimer = null;
   var audioTracks = {}, capRecs = {}, pendingCaps = [], capPauseTimer = null;
   var turnQ = [], turnBusy = false, speakGen = 0;
@@ -95,6 +134,124 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   var cfg = params();
   var guest = cfg.role === 'guest';
+  function waitLabel(n){
+    n = Math.max(0, parseInt(n, 10) || 0);
+    return n > 10 ? '10+' : String(n);
+  }
+  function callerName(id){
+    var s = String(id || 'caller');
+    var cut = s.replace(/^(guest|caller)[-_]?/i, '').replace(/[_-]+/g, ' ').trim();
+    return cut || s;
+  }
+  function promptedIds(){ return waiting.slice(0, PROMPT_N); }
+  function hiddenWaitCount(){ return Math.max(0, waiting.length - promptedIds().length); }
+  function renderWait(){
+    var prompts = promptedIds();
+    for (var i = 0; i < PROMPT_N; i++){
+      var card = document.getElementById('prompt' + i);
+      var id = prompts[i];
+      if (!card) continue;
+      if (!id){
+        card.classList.add('empty');
+        card.querySelector('.pname').textContent = 'Open slot';
+        card.querySelector('.ploc').textContent = 'Next on the line fills this seat';
+      } else {
+        card.classList.remove('empty');
+        card.querySelector('.pname').textContent = callerName(id);
+        card.querySelector('.ploc').textContent = 'On the line';
+      }
+    }
+    var hid = hiddenWaitCount();
+    document.getElementById('waitCount').textContent = waitLabel(hid);
+    document.getElementById('waitHint').textContent = hid === 0
+      ? 'No additional wait'
+      : (waitLabel(hid) + (hid === 1 ? ' waiting' : ' waiting'));
+    var act = document.getElementById('activeName');
+    var empty = document.getElementById('activeEmpty');
+    if (activeId){
+      act.textContent = callerName(activeId);
+      if (empty) empty.style.display = 'none';
+    } else {
+      act.textContent = 'No active caller';
+      if (empty) empty.style.display = '';
+    }
+  }
+  function syncCallerAudio(){
+    var box = document.getElementById('activeMedia');
+    var hold = document.getElementById('holdMedia');
+    var nodes = document.querySelectorAll('[data-caller]');
+    for (var i = 0; i < nodes.length; i++){
+      var el = nodes[i];
+      var id = el.getAttribute('data-caller');
+      var live = !!(id && id === activeId);
+      el.muted = !live;
+      if (live && box && el.parentElement !== box) box.appendChild(el);
+      if (!live && hold && el.parentElement !== hold) hold.appendChild(el);
+      if (live) try { el.play(); } catch (e) {}
+    }
+  }
+  function broadcastQueue(){
+    if (guest) return;
+    sendData({op:'queue', active: activeId, waiting: waiting.slice()});
+  }
+  function applyQueue(msg){
+    if (!msg) return;
+    activeId = msg.active || '';
+    waiting = Array.isArray(msg.waiting) ? msg.waiting.slice() : waiting;
+    syncCallerAudio();
+    renderWait();
+  }
+  function enqueue(id){
+    if (!id || id === activeId) return;
+    if (waiting.indexOf(id) >= 0) return;
+    waiting.push(id);
+    renderWait();
+    syncCallerAudio();
+    broadcastQueue();
+  }
+  function removeFromLine(id){
+    waiting = waiting.filter(function(n){ return n !== id; });
+    if (activeId === id) activeId = '';
+  }
+  function promoteNext(){
+    if (activeId || !waiting.length){
+      syncCallerAudio();
+      renderWait();
+      broadcastQueue();
+      return;
+    }
+    activeId = waiting.shift();
+    syncCallerAudio();
+    renderWait();
+    broadcastQueue();
+    if (!guest && activeId){
+      setStatus(callerName(activeId) + ' is on air.');
+      nateTurn(callerName(activeId) + ' just came on.', false, 'caller_join');
+    }
+  }
+  function bringOn(){
+    if (activeId){ setStatus('Drop or Hold the active caller first.'); return; }
+    if (!waiting.length){ setStatus('Waiting room empty.'); return; }
+    promoteNext();
+  }
+  function holdActive(){
+    if (!activeId){ setStatus('No active caller to hold.'); return; }
+    waiting.unshift(activeId);
+    activeId = '';
+    syncCallerAudio();
+    renderWait();
+    broadcastQueue();
+    setStatus('Caller held — back on Caller ID.');
+  }
+  function dropActive(){
+    if (!activeId){ setStatus('No active caller to drop.'); return; }
+    var gone = activeId;
+    activeId = '';
+    waiting = waiting.filter(function(n){ return n !== gone; });
+    if (!guest) nateTurn(callerName(gone) + ' left the line. Next up if anyone is waiting.', false, 'line');
+    promoteNext();
+    setStatus('Dropped ' + callerName(gone) + ' — next on the line fills in.');
+  }
   function sizeEnv(){
     var c = document.getElementById('env');
     var box = c.parentElement;
@@ -120,17 +277,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     ctx.closePath(); ctx.stroke();
   }
   function setStatus(t){ document.getElementById('status').textContent = t; }
-  function renderWait(){
-    document.getElementById('wait').textContent = waiting.length
-      ? ('Waiting room: ' + waiting.join(', ')) : 'Waiting room: none';
-  }
   function addLine(who, text){
     if (!text) return;
     var log = document.getElementById('chatLog');
     var d = document.createElement('div');
-    var cls = who === 'Nate' ? 'ln' : (who === 'Caller' ? 'caller' : 'host');
+    var key = String(who || '');
+    var cls = (key === 'Nate' || key === 'Little Nate') ? 'ln'
+      : (key === 'Caller' || key === 'CALLER') ? 'caller' : 'host';
     d.className = cls;
-    d.textContent = (who === 'Nate' ? 'Little Nate' : who) + ': ' + text;
+    d.textContent = (key === 'Nate' ? 'Little Nate' : who) + ': ' + text;
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
   }
@@ -254,11 +409,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     } catch (e) {}
   }
   function roomCtx(){
-    var live = 0;
-    try {
-      if (room && room.remoteParticipants) live = room.remoteParticipants.size || 0;
-    } catch (e) { live = 0; }
-    return {callers: live, waiting: waiting.length};
+    return {callers: activeId ? 1 : 0, waiting: waiting.length};
   }
   function speakerRole(identity){
     if (room && room.localParticipant && identity === room.localParticipant.identity) {
@@ -403,7 +554,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   window.addEventListener('resize', function(){ drawEnv(0.35); });
   drawEnv(0.35);
+  renderWait();
   if (guest) document.getElementById('btnCam').style.display = 'none';
+  document.getElementById('btnChat').onclick = function(){
+    document.getElementById('transcript').classList.toggle('collapsed');
+  };
   if (!cfg.url || !cfg.token){
     setStatus('LiveKit pending — set LIVEKIT_URL + JWT, then Start session.');
     return;
@@ -443,35 +598,35 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
   });
   room.on(LK.RoomEvent.TrackSubscribed, function(track, pub, participant){
-    var empty = document.getElementById('callerEmpty');
-    if (empty) empty.remove();
+    var id = (participant && participant.identity) || 'caller';
+    var name = (pub && (pub.trackName || pub.name)) || '';
+    if (name === 'ln-envelope') return;
+    if (track.kind === 'video') return;
     var el = track.attach();
     el.autoplay = true;
+    el.muted = id !== activeId;
+    el.volume = 1;
+    el.controls = false;
+    el.setAttribute('data-caller', id);
+    document.getElementById('holdMedia').appendChild(el);
     if (track.kind === 'audio'){
-      el.muted = false;
-      el.volume = 1;
-      el.controls = true;
+      rememberAudio(participant, track);
       el.play().catch(function(){});
-    } else {
-      fitMedia(el);
     }
-    document.getElementById('callers').appendChild(el);
-    if (track.kind === 'audio') rememberAudio(participant, track);
-    waiting = waiting.filter(function(n){ return n !== participant.identity; });
-    renderWait();
+    enqueue(id);
+    syncCallerAudio();
   });
   room.on(LK.RoomEvent.ParticipantConnected, function(participant){
-    waiting.push(participant.identity || 'caller');
-    renderWait();
-    if (!guest) {
-      setStatus('Caller joined — tap Toss or Talk when you want Little Nate.');
-    }
+    enqueue(participant.identity || 'caller');
+    if (!guest) setStatus('Caller in line — first three show on Caller ID. Bring on when ready.');
   });
   room.on(LK.RoomEvent.ParticipantDisconnected, function(participant){
     var id = participant && participant.identity;
     if (id) { stopCap(id); delete audioTracks[id]; }
-    waiting = waiting.filter(function(n){ return n !== participant.identity; });
-    renderWait();
+    var wasActive = id && id === activeId;
+    removeFromLine(id);
+    if (wasActive) promoteNext();
+    else { renderWait(); broadcastQueue(); }
   });
   room.on(LK.RoomEvent.ActiveSpeakersChanged, function(speakers){
     var ids = {};
@@ -498,7 +653,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (!nateSpeaking) return;
       stopNateVoice();
       setStatus('Little Nate yielded — host or caller has the floor.');
-    }, 450);
+    }, 2500);
   });
   room.on(LK.RoomEvent.DataReceived, function(payload){
     try {
@@ -509,6 +664,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       }
       if (msg.op === 'caption' && msg.text){ addLine(msg.speaker || 'HOST', msg.text); lastHeard = msg.text; }
       if (msg.op === 'chat' && msg.text){ addLine(msg.who || 'Host', msg.text); lastHeard = msg.text; }
+      if (msg.op === 'queue') applyQueue(msg);
+      if (msg.op === 'bring_on' && !guest) bringOn();
+      if (msg.op === 'hold' && !guest) holdActive();
+      if (msg.op === 'drop' && !guest) dropActive();
     } catch (e) {}
   });
   room.on(LK.RoomEvent.LocalTrackPublished, function(pub){
@@ -547,7 +706,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   }).then(function(){
     rememberLocalMic();
-    setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat, Talk, or Toss. Voice matches the phone call.');
+    if (room && room.remoteParticipants){
+      room.remoteParticipants.forEach(function(p){
+        if (p && p.identity) enqueue(p.identity);
+      });
+    }
+    setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — Bring on moves Caller ID 1 to air.');
     greeted = true;
   }).catch(function(e){
     setStatus('Connect failed: ' + tidyErr(e));
@@ -617,12 +781,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     lnAvatar(lnPaused ? 'neutral' : 'attentive', lnPaused ? 'idle' : 'idle');
     sendData({op: lnPaused ? 'pause_ln' : 'resume_ln'});
   };
-  document.getElementById('btnBring').onclick = function(){
-    if (!waiting.length){ setStatus('Waiting room empty.'); return; }
-    sendData({op:'bring_on', who: waiting[0]});
-  };
-  document.getElementById('btnHold').onclick = function(){ sendData({op:'hold'}); };
-  document.getElementById('btnDrop').onclick = function(){ sendData({op:'drop'}); };
+  document.getElementById('btnBring').onclick = function(){ bringOn(); };
+  document.getElementById('btnHold').onclick = function(){ holdActive(); };
+  document.getElementById('btnDrop').onclick = function(){ dropActive(); };
   document.getElementById('btnEnd').onclick = function(){
     if (room) room.disconnect();
     setStatus('Session ended. Close this tab or End → review in Studio.');

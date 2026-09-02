@@ -263,7 +263,9 @@ async def cohost_turn(
         f"You are Little Nate, {LN_COHOST_ONAIR}, live with Big Nate the host. "
         "Radio co-host energy, not therapy. "
         "Track THIS_SHOW moment to moment and answer the latest line. "
-        "2–5 short spoken sentences. Land on a take more often than a question. "
+        "Finish the thought — do not stop mid-idea. "
+        "4–8 spoken sentences when the topic is live; shorter only for a one-liner toss. "
+        "Land on a take more often than a question. "
         "No mirroring their words back, no interviewing.\n\n"
         + SHOW_VOICE
     )
@@ -290,8 +292,9 @@ async def cohost_turn(
         )
     elif kind == "caption":
         prefix = (
-            f"{room} Live captions. If this is aimed at you, answer in 2–5 sentences. "
-            "If they are mid-thought, one short reaction. No product pitch unless they asked.\n"
+            f"{room} Live captions. If this is aimed at you, finish a take in 4–8 sentences. "
+            "If they are mid-thought, one short reaction is fine. Never trail off mid-idea. "
+            "No product pitch unless they asked.\n"
         )
     else:
         prefix = (
@@ -321,7 +324,7 @@ async def cohost_turn(
             prompt=prefix + blob,
             system=system,
             domain="culture",
-            max_tokens=160 if howto else 120,
+            max_tokens=400 if howto else 280,
         )
         gen = (out.get("text") or "").strip()
         if gen:
@@ -370,7 +373,7 @@ async def synthesize_cohost_line(text: str, voice_router=None) -> bytes:
             voice_router.process_text_to_speech(
                 line, tts_provider="azure_premium", voice="onyx"
             ),
-            timeout=8.0,
+            timeout=24.0,
         )
         if audio:
             return audio
