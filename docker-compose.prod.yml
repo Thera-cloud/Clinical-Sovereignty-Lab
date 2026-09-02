@@ -202,6 +202,8 @@ services:
       - ENABLE_VOICE_EMOTION_PACE=${ENABLE_VOICE_EMOTION_PACE:-true}
       - ENABLE_VOICE_GUEST_INTRO=${ENABLE_VOICE_GUEST_INTRO:-true}
       - ENABLE_VOICE_CAMPAIGN=${ENABLE_VOICE_CAMPAIGN:-false}
+      # STUDIO phone hop: Twilio/Zoom → LiveKit SIP (from .env; empty = pending)
+      - LIVEKIT_SIP_URI=${LIVEKIT_SIP_URI:-}
       # QUANTUM-CRYSTAL-ARCH: high-risk occupational crisis engine flags (pinned)
       - ENABLE_POPULATION_CRISIS_RESOURCES=${ENABLE_POPULATION_CRISIS_RESOURCES:-true}
       - ENABLE_NIGHT_REGISTER=${ENABLE_NIGHT_REGISTER:-true}
