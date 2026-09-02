@@ -573,6 +573,13 @@ async def sip_health():
     return _sip()
 
 
+@public_router.get("/voice/zoom-health")
+async def zoom_phone_health():
+    from app.services.studio_sip import zoom_phone_health as _zoom
+
+    return _zoom()
+
+
 @public_router.post("/voice/sip-join")
 async def sip_join(request: Request):
     token = (request.headers.get("X-Studio-Screener-Token") or "").strip()

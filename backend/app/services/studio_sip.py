@@ -18,6 +18,20 @@ def sip_health() -> Dict[str, Any]:
     }
 
 
+def zoom_phone_health() -> Dict[str, Any]:
+    """Google Workspace / Zoom Phone uses the same SIP gate as studio guests."""
+    h = sip_health()
+    return {
+        "status": h["status"],
+        "carrier": "zoom_phone",
+        "path": "sip",
+        "allow_video": False,
+        "join_requires_token": True,
+        "ingress": h["ingress"],
+        "installed": h["installed"],
+    }
+
+
 def sip_join_allowed(token: str) -> Dict[str, Any]:
     if not (token or "").strip():
         return {"ok": False, "reason": "screener token required", "code": 403}

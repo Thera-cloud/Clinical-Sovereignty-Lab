@@ -22,6 +22,15 @@ def test_sip_join_403_without_token():
     assert "/voice/sip-join" in SRC
 
 
+def test_zoom_phone_shares_sip_gate():
+    zoom = load_svc("studio_sip").zoom_phone_health()
+    assert zoom["carrier"] == "zoom_phone"
+    assert zoom["path"] == "sip"
+    assert zoom["allow_video"] is False
+    assert zoom["join_requires_token"] is True
+    assert '@public_router.get("/voice/zoom-health")' in SRC
+
+
 def test_dump_tier2_locked():
     assert dump_allowed(0) is False
     assert "studio_tier2" in SRC
