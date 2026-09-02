@@ -99,10 +99,22 @@ class CohostTurnBody(BaseModel):
     realm: str = ""
     realm_blurb: str = ""
     realm_shift: bool = False
+    share_kind: str = ""
+    share_note: str = ""
 
 
 class CohostSpeakBody(BaseModel):
     text: str = ""
+
+
+class CohostShareBody(BaseModel):
+    kind: str = "search"
+    query: str = ""
+    url: str = ""
+
+
+class CohostSoundBody(BaseModel):
+    sound_id: str = ""
 
 
 def _hw(user: Dict) -> str:
@@ -116,6 +128,28 @@ def _pool(request: Request):
 def _flag() -> None:
     if not studio_flag_on():
         raise HTTPException(403, "temporarily unavailable")
+
+
+def _livekit_session(request: Request, session_id: UUID) -> Dict[str, Any]:
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    from app.services.studio_livekit import verify_livekit_jwt
+
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "livekit_jwt")
+    if checked.get("session_id") != str(session_id):
+        raise HTTPException(403, "room_mismatch")
+    return checked
+
+
+def _require_host_jwt(request: Request, session_id: UUID) -> Dict[str, Any]:
+    checked = _livekit_session(request, session_id)
+    from app.services.studio_cohost_share import is_studio_host_identity
+
+    if not is_studio_host_identity(str(checked.get("identity") or "")):
+        raise HTTPException(403, "host_only")
+    return checked
 
 
 def _raise(out: Dict[str, Any]) -> Dict[str, Any]:
@@ -674,6 +708,8 @@ async def cohost_turn_public(session_id: UUID, body: CohostTurnBody, request: Re
             realm=(body.realm or "")[:120],
             realm_blurb=(body.realm_blurb or "")[:240],
             realm_shift=bool(body.realm_shift),
+            share_kind=(body.share_kind or "")[:40],
+            share_note=(body.share_note or "")[:800],
         )
     )
 
@@ -784,6 +820,43 @@ async def cohost_caption_public(
         session_id=str(session_id),
         db_pool=_pool(request),
     )
+
+
+@public_router.post("/sessions/{session_id}/cohost/share")
+async def cohost_share_public(session_id: UUID, body: CohostShareBody, request: Request):
+    """Host-only lookup or URL card for the share pane. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_cohost_share import host_search, host_url_card
+
+    kind = (body.kind or "search").strip().lower()
+    if kind == "url":
+        return _raise(host_url_card(body.url or body.query))
+    if kind != "search":
+        raise HTTPException(422, "kind")
+    proxy = getattr(request.app.state, "search_proxy", None)
+    return _raise(
+        await host_search(proxy, body.query or body.url, str(checked.get("identity") or ""))
+    )
+
+
+@public_router.get("/sessions/{session_id}/cohost/sounds")
+async def cohost_sounds_public(session_id: UUID, request: Request):
+    _flag()
+    _require_host_jwt(request, session_id)
+    from app.services.studio_cohost_share import sound_catalog
+
+    return {"ok": True, "sounds": sound_catalog()}
+
+
+@public_router.post("/sessions/{session_id}/cohost/sound")
+async def cohost_sound_public(session_id: UUID, body: CohostSoundBody, request: Request):
+    """Host-only SFX arm. Room plays the catalog id locally. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    _require_host_jwt(request, session_id)
+    from app.services.studio_cohost_share import resolve_sound
+
+    return _raise(resolve_sound(body.sound_id))
 
 
 @public_router.get("/livekit/health")

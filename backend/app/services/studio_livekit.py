@@ -36,7 +36,7 @@ def room_embed_url(lk_url: str, token: str, role: str, session_id: str = "") -> 
             "api": api,
         }
     )
-    return f"{room_origin()}/studio_nate_room.html?v=20260902s#{q}"
+    return f"{room_origin()}/studio_nate_room.html?v=20260902t#{q}"
 
 
 def verify_livekit_jwt(token: str) -> Dict[str, Any]:

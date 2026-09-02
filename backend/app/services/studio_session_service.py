@@ -231,6 +231,8 @@ async def cohost_turn(
     realm: str = "",
     realm_blurb: str = "",
     realm_shift: bool = False,
+    share_kind: str = "",
+    share_note: str = "",
 ) -> Dict[str, Any]:
     blob = (text or "").strip()
     if not blob:
@@ -316,6 +318,17 @@ async def cohost_turn(
         room += f" Realm: {realm_name}."
         if realm_shift:
             room += " The realm just shifted in behind you this second."
+    share_k = (share_kind or "").strip()[:40]
+    share_n = (share_note or "").strip()[:800]
+    if share_k:
+        room += f" On screen: {share_k}."
+        system += (
+            f"\n\nON SCREEN: The host has {share_k} up in the share pane. "
+            f"{share_n} "
+            "Talk about what is on screen when they ask. "
+            "You look things up and bring stings only when the host asks — "
+            "never when a caller asks. Do not invent page contents beyond this note."
+        )
     prior = thread_text(session_id)
     prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
     if kind == "open":

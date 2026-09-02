@@ -349,7 +349,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260902s" in url
+    assert "v=20260902t" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -578,3 +578,40 @@ def test_studio_realm_rotation():
         # The wait badge cannot be squeezed by the rail flex, or the count clips.
         assert "flex:0 0 auto;margin-top:auto" in room, rel
         assert "line-height:1.3;color:#C9A962" in room, rel
+        assert 'id="shareTile"' in room, rel
+        assert "#hosts.sharing" in room, rel
+        assert 'id="btnShare"' in room, rel
+        assert "getDisplayMedia" in room, rel
+        assert "function playStudioSfx" in room, rel
+        assert "function doLookup" in room, rel
+        assert "share_kind" in room, rel
+
+
+def test_studio_share_host_only():
+    share = load_svc("studio_cohost_share")
+    assert share.is_studio_host_identity("COACH_COACHN_ID")
+    assert share.is_studio_host_identity("host-abc123")
+    assert not share.is_studio_host_identity("guest-xyz")
+    assert not share.is_studio_host_identity("caller-1")
+    assert not share.is_studio_host_identity("egress")
+    assert share.resolve_sound("sting")["ok"]
+    assert share.resolve_sound("sting hit")["ok"]
+    assert share.resolve_sound("explode")["ok"] is False
+    assert share.safe_https_url("https://example.com/a") 
+    assert share.safe_https_url("http://example.com") is None
+    assert share.safe_https_url("https://127.0.0.1/x") is None
+    card = share.host_url_card("https://example.com/pic.png")
+    assert card["ok"] and card["image"]
+    note = share.share_note("search", "Nevedal", [{"title": "One"}])
+    assert "One" in note and "Nevedal" in note
+
+    api_src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
+    assert '/sessions/{session_id}/cohost/share' in api_src
+    assert '/sessions/{session_id}/cohost/sound' in api_src
+    assert "host_only" in api_src
+    assert "_require_host_jwt" in api_src
+
+    sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "ON SCREEN" in sess_src
+    assert "share_kind" in sess_src
+    assert "never when a caller asks" in sess_src

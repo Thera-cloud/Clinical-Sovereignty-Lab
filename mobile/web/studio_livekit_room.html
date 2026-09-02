@@ -14,6 +14,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #status{padding:6px 16px;color:#8B7355;font-size:12px;flex:0 0 auto}
 #stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px;grid-template-rows:minmax(0,1fr) auto;gap:12px;padding:12px;min-height:0}
 #hosts{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;align-items:stretch}
+#shareTile{display:none}
+#hosts.sharing{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+#hosts.sharing #lnTile{grid-row:1;grid-column:1}
+#hosts.sharing #hostTile{grid-row:2;grid-column:1}
+#hosts.sharing #shareTile{display:flex;grid-row:1 / -1;grid-column:2}
+#shareBox .cards{position:absolute;inset:0;overflow:auto;padding:10px;z-index:2}
+#shareBox .card{background:#111;border:1px solid #333;border-radius:6px;padding:8px;margin:0 0 8px;color:#E8D5A3;font-size:12px}
+#shareBox .card a{color:#4ECDC4}
+#shareBox img.share-img,#shareBox object.share-doc,#shareBox iframe.share-doc{position:absolute;inset:0;width:100%;height:100%;border:0;object-fit:contain;background:#050505;z-index:1}
 #rail{display:flex;flex-direction:column;gap:8px;min-height:0;background:#111;border:1px solid #222;border-radius:8px;padding:8px}
 #joinCall{text-align:center;font-size:11px;letter-spacing:1px;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px}
 #activeCard{flex:1.1;min-height:110px;background:#0A0A0A;border:1px solid #C9A962;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
@@ -58,6 +67,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 @media (max-width:960px){
   #stage{grid-template-columns:1fr;grid-template-rows:auto auto auto}
   #hosts{grid-template-columns:1fr;min-height:280px}
+  #hosts.sharing{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr);min-height:280px}
   .tile .box{min-height:160px}
   #rail{min-height:220px}
   #transcript{max-height:34vh}
@@ -75,6 +85,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
     <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901q" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="shareTile"><h3>ON SCREEN</h3><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or ask Nate to look it up</div></div></div>
   </div>
   <aside id="rail">
     <div id="joinCall">JOIN THE CALL</div>
@@ -102,6 +113,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="dock">
   <button id="btnMute" type="button">Mute</button>
   <button id="btnCam" type="button">Camera</button>
+  <button id="btnShare" type="button">Share</button>
+  <button id="btnFile" type="button">File</button>
+  <button id="btnLookup" type="button">Look up</button>
+  <button id="btnSfx" type="button">Sound</button>
+  <input id="shareFile" type="file" accept="image/*,.pdf,.txt,.doc,.docx" hidden/>
   <button id="btnToss" type="button">Toss to Nate</button>
   <button id="btnPause" type="button">Pause LN</button>
   <button id="btnBring" type="button">Bring on</button>
@@ -128,6 +144,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var capHold = {};
   var holdDraft = {id:0, text:'', event:'', reply:'', blob:null, abort:false, release:false, inflight:false, releaseText:'', releaseEvent:''};
   var turnQ = [], turnBusy = false, speakGen = 0;
+  var shareState = {on:false, kind:'', note:''};
+  var sharePub = null, shareStream = null, shareObjUrl = '', sfxCtx = null;
   function holdFloorMs(text){
     var t = (text || '').replace(/\s+/g, ' ').trim();
     if (!t) return LISTEN_SILENCE_MS;
@@ -163,7 +181,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       event: event,
       realm: realmName,
       realm_blurb: realmBlurb,
-      realm_shift: realmShift
+      realm_shift: realmShift,
+      share_kind: shareState.kind || '',
+      share_note: shareState.note || ''
     };
   }
   function persistPrime(text){
@@ -701,7 +721,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         event: kind,
         realm: realmName,
         realm_blurb: realmBlurb,
-        realm_shift: realmShift
+        realm_shift: realmShift,
+        share_kind: shareState.kind || '',
+        share_note: shareState.note || ''
       })
     }).then(function(r){ return r.json(); }).then(function(j){
       var t = (j && (j.text || j.reason)) || '';
@@ -717,6 +739,332 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       turnBusy = false;
       drainTurns();
     });
+  }
+  function isGuestIdent(id){
+    var s = String(id || '').toLowerCase();
+    return !s || s === 'egress' || s.indexOf('guest') === 0 || s.indexOf('caller') === 0;
+  }
+  function shareLayout(on){
+    document.getElementById('hosts').classList.toggle('sharing', !!on);
+  }
+  function clearSharePane(){
+    var vid = document.getElementById('shareVid');
+    var cards = document.getElementById('shareCards');
+    var empty = document.getElementById('shareEmpty');
+    if (vid){ try { vid.srcObject = null; } catch (e) {} vid.removeAttribute('src'); }
+    var box = document.getElementById('shareBox');
+    if (box){
+      var extras = box.querySelectorAll('.share-img, .share-doc');
+      for (var i = 0; i < extras.length; i++) extras[i].remove();
+    }
+    if (shareObjUrl){ try { URL.revokeObjectURL(shareObjUrl); } catch (e) {} shareObjUrl = ''; }
+    if (cards){ cards.innerHTML = ''; cards.hidden = true; }
+    if (empty) empty.style.display = '';
+  }
+  function showShareEmpty(hide){
+    var empty = document.getElementById('shareEmpty');
+    if (empty) empty.style.display = hide ? 'none' : '';
+  }
+  function applyShareMeta(msg){
+    if (!msg) return;
+    if (!msg.on){
+      shareState.on = false; shareState.kind = ''; shareState.note = '';
+      if (!shareStream) { clearSharePane(); shareLayout(false); }
+      return;
+    }
+    shareState.on = true;
+    shareState.kind = msg.kind || 'share';
+    shareState.note = msg.note || '';
+    shareLayout(true);
+    if (msg.kind === 'search' && msg.results) renderShareCards(msg.results, msg.query || '');
+    else if (msg.kind === 'url' && msg.url) renderShareUrl(msg);
+    else if (msg.kind === 'file') {
+      showShareEmpty(true);
+      var cards = document.getElementById('shareCards');
+      if (cards && msg.name){
+        cards.hidden = false;
+        cards.innerHTML = '<div class="card">Host opened ' + String(msg.name).replace(/[<>]/g,'') + '</div>';
+      }
+    }
+  }
+  function renderShareCards(rows, query){
+    var cards = document.getElementById('shareCards');
+    if (!cards) return;
+    cards.hidden = false;
+    cards.innerHTML = '';
+    showShareEmpty(true);
+    if (query){
+      var h = document.createElement('div');
+      h.className = 'card';
+      h.textContent = 'Nate looked up: ' + query;
+      cards.appendChild(h);
+    }
+    (rows || []).forEach(function(r){
+      var d = document.createElement('div');
+      d.className = 'card';
+      var t = document.createElement('div');
+      t.textContent = r.title || 'Result';
+      d.appendChild(t);
+      if (r.snippet){
+        var s = document.createElement('div');
+        s.style.color = '#8B7355';
+        s.textContent = r.snippet;
+        d.appendChild(s);
+      }
+      if (r.url){
+        var a = document.createElement('a');
+        a.href = r.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.textContent = r.domain || r.url;
+        d.appendChild(a);
+      }
+      if (r.image && r.url){
+        var img = document.createElement('img');
+        img.className = 'share-img';
+        img.src = r.url;
+        document.getElementById('shareBox').appendChild(img);
+      }
+      cards.appendChild(d);
+    });
+  }
+  function renderShareUrl(msg){
+    showShareEmpty(true);
+    var box = document.getElementById('shareBox');
+    if (msg.image){
+      var img = document.createElement('img');
+      img.className = 'share-img';
+      img.src = msg.url;
+      box.appendChild(img);
+      return;
+    }
+    var cards = document.getElementById('shareCards');
+    cards.hidden = false;
+    cards.innerHTML = '<div class="card"><a target="_blank" rel="noopener noreferrer" href="' +
+      String(msg.url).replace(/"/g,'') + '">' + String(msg.url).replace(/[<>]/g,'') + '</a></div>';
+  }
+  function broadcastShare(extra){
+    var msg = {op:'share', on:!!shareState.on, kind:shareState.kind || '', note:shareState.note || ''};
+    if (extra){ for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) msg[k] = extra[k]; }
+    sendData(msg);
+  }
+  function attachShareTrack(track){
+    if (!track) return;
+    var el = track.attach ? track.attach() : null;
+    if (!el) return;
+    fitMedia(el);
+    el.muted = true;
+    var box = document.getElementById('shareBox');
+    var vid = document.getElementById('shareVid');
+    if (vid && vid.parentElement === box) box.removeChild(vid);
+    el.id = 'shareVid';
+    box.insertBefore(el, box.firstChild);
+    shareLayout(true);
+    showShareEmpty(true);
+    shareState.on = true;
+    if (!shareState.kind) shareState.kind = 'screen';
+  }
+  function unpublishShare(){
+    if (sharePub && room && room.localParticipant && sharePub.unpublishTrack) {
+      try { room.localParticipant.unpublishTrack(sharePub.track || sharePub); } catch (e) {}
+    } else if (sharePub && room && room.localParticipant && room.localParticipant.unpublishTrack) {
+      try { room.localParticipant.unpublishTrack(sharePub); } catch (e) {}
+    }
+    sharePub = null;
+    if (shareStream){
+      shareStream.getTracks().forEach(function(t){ try { t.stop(); } catch (e) {} });
+      shareStream = null;
+    }
+  }
+  function stopShare(){
+    unpublishShare();
+    shareState.on = false; shareState.kind = ''; shareState.note = '';
+    clearSharePane();
+    shareLayout(false);
+    var btn = document.getElementById('btnShare');
+    if (btn){ btn.textContent = 'Share'; btn.classList.remove('on'); }
+    if (!guest) broadcastShare();
+    setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Share closed — hosts side by side.');
+  }
+  function publishShareStream(stream, kind, note){
+    if (!room || !room.localParticipant || !stream) return Promise.resolve();
+    unpublishShare();
+    shareStream = stream;
+    var track = stream.getVideoTracks()[0];
+    if (!track) return Promise.resolve();
+    track.onended = function(){ stopShare(); };
+    var opts = {name:'studio-share'};
+    return room.localParticipant.publishTrack(track, opts).then(function(pub){
+      sharePub = pub || track;
+      var vid = document.getElementById('shareVid');
+      if (vid){ vid.srcObject = stream; fitMedia(vid); }
+      shareState.on = true;
+      shareState.kind = kind || 'screen';
+      shareState.note = note || 'Host is sharing a window.';
+      shareLayout(true);
+      showShareEmpty(true);
+      document.getElementById('btnShare').textContent = 'Stop share';
+      document.getElementById('btnShare').classList.add('on');
+      broadcastShare();
+    }).catch(function(){ setStatus('Could not publish the share track.'); });
+  }
+  function startScreenShare(){
+    if (guest) return;
+    if (shareState.on && shareState.kind === 'screen'){ stopShare(); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+      setStatus('This browser cannot share a screen — try Chrome or the File button.');
+      return;
+    }
+    navigator.mediaDevices.getDisplayMedia({video:true, audio:true}).then(function(ms){
+      return publishShareStream(ms, 'screen', 'Host is sharing a window.');
+    }).then(function(){
+      setStatus('On screen — Nate can talk about what you are sharing.');
+    }).catch(function(e){
+      if (e && e.name === 'NotAllowedError') setStatus('Screen share cancelled.');
+      else setStatus('Screen share failed.');
+    });
+  }
+  function openShareFile(file){
+    if (guest || !file) return;
+    var type = file.type || '';
+    var name = file.name || 'file';
+    if (type.indexOf('image/') === 0){
+      var url = URL.createObjectURL(file);
+      shareObjUrl = url;
+      var img = new Image();
+      img.onload = function(){
+        var c = document.createElement('canvas');
+        c.width = Math.max(16, img.naturalWidth);
+        c.height = Math.max(16, img.naturalHeight);
+        c.getContext('2d').drawImage(img, 0, 0);
+        var shown = document.createElement('img');
+        shown.className = 'share-img';
+        shown.src = url;
+        document.getElementById('shareBox').appendChild(shown);
+        var stream = c.captureStream(6);
+        publishShareStream(stream, 'image', 'Host opened image ' + name);
+      };
+      img.src = url;
+      return;
+    }
+    shareState.on = true;
+    shareState.kind = 'file';
+    shareState.note = 'Host opened ' + name;
+    shareLayout(true);
+    showShareEmpty(true);
+    if (type === 'application/pdf'){
+      shareObjUrl = URL.createObjectURL(file);
+      var obj = document.createElement('object');
+      obj.className = 'share-doc';
+      obj.type = 'application/pdf';
+      obj.data = shareObjUrl;
+      document.getElementById('shareBox').appendChild(obj);
+    } else {
+      var cards = document.getElementById('shareCards');
+      cards.hidden = false;
+      cards.textContent = '';
+      var d = document.createElement('div');
+      d.className = 'card';
+      d.textContent = name + ' is on the host pane.';
+      cards.appendChild(d);
+    }
+    document.getElementById('btnShare').textContent = 'Stop share';
+    document.getElementById('btnShare').classList.add('on');
+    broadcastShare({kind:'file', name:name});
+    setStatus(name + ' is on screen.');
+  }
+  function doLookup(query){
+    if (guest || !cfg.session || !cfg.token) return;
+    var q = (query || '').replace(/\s+/g, ' ').trim();
+    if (!q || /^(this|that|it)$/i.test(q)) q = (lastHeard || '').replace(/^(HOST|CALLER):\s*/i, '').trim();
+    if (!q){ q = window.prompt('What should Nate look up?') || ''; q = q.trim(); }
+    if (!q) return;
+    setStatus('Nate is looking that up…');
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/share', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({kind:'search', query:q})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (!j || !j.ok){ setStatus('Lookup failed: ' + ((j && j.detail) || (j && j.reason) || 'unavailable')); return; }
+      clearSharePane();
+      shareState.on = true;
+      shareState.kind = 'search';
+      shareState.note = j.note || '';
+      shareLayout(true);
+      renderShareCards(j.results || [], j.query || q);
+      document.getElementById('btnShare').textContent = 'Stop share';
+      document.getElementById('btnShare').classList.add('on');
+      broadcastShare({kind:'search', query:j.query || q, results:j.results || [], note:j.note || ''});
+      setStatus('On screen — Nate brought the lookup in.');
+      nateTurn('I asked you to look up: ' + q + '. Bring the room onto what you found.', false, 'line');
+    }).catch(function(){ setStatus('Lookup failed.'); });
+  }
+  function playStudioSfx(id){
+    var key = String(id || 'sting').toLowerCase();
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      sfxCtx = sfxCtx || new AC();
+      if (sfxCtx.state === 'suspended') sfxCtx.resume();
+    } catch (e) { return; }
+    var ctx = sfxCtx, t0 = ctx.currentTime, osc, gain;
+    gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    function tone(type, freq, dur, vol, start){
+      var o = ctx.createOscillator();
+      var g = ctx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, start);
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(vol, start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(start); o.stop(start + dur + 0.02);
+    }
+    if (key === 'whoosh'){
+      osc = ctx.createOscillator(); gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, t0);
+      osc.frequency.exponentialRampToValueAtTime(880, t0 + 0.35);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.08, t0 + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(t0); osc.stop(t0 + 0.42);
+    } else if (key === 'chime'){
+      tone('sine', 880, 0.7, 0.09, t0);
+      tone('sine', 1320, 0.55, 0.06, t0 + 0.04);
+    } else if (key === 'bed'){
+      tone('sine', 110, 3.2, 0.04, t0);
+      tone('sine', 164, 3.2, 0.03, t0);
+      tone('triangle', 220, 3.2, 0.02, t0);
+    } else if (key === 'hit'){
+      tone('square', 140, 0.18, 0.1, t0);
+      tone('sawtooth', 70, 0.22, 0.08, t0);
+    } else {
+      tone('sawtooth', 196, 0.28, 0.08, t0);
+      tone('triangle', 392, 0.32, 0.06, t0 + 0.02);
+    }
+  }
+  function doSfx(soundId){
+    if (guest || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/sound', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({sound_id: soundId || 'sting'})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (!j || !j.ok){ setStatus('Sound is host-only.'); return; }
+      playStudioSfx(j.sound_id);
+      sendData({op:'sfx', sound_id:j.sound_id});
+      setStatus('Nate hit the ' + (j.label || j.sound_id) + '.');
+    }).catch(function(){});
+  }
+  function hostShareIntent(text){
+    if (guest) return null;
+    var raw = (text || '').trim();
+    var look = raw.match(/^(?:nate[,.]?\s+)?(?:look(?:\s+that)?\s+up|search(?:\s+for)?|pull up|bring up|google)\s+(?:this\s+)?[:\-–]?\s*(.+)$/i);
+    if (look) return {kind:'search', q: look[1]};
+    var sfx = raw.match(/\b(?:play|hit|bring in|drop)\b(?:\s+a|\s+the|\s+in)?\s+(sting hit|sting|whoosh|chime|bed|sound|sfx)\b/i);
+    if (sfx) return {kind:'sound', id: sfx[1]};
+    return null;
   }
   window.addEventListener('resize', function(){ drawEnv(0.35); });
   drawEnv(0.35);
@@ -754,7 +1102,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   pollRealm();
   setInterval(pollRealm, 20000);
   renderWait();
-  if (guest) document.getElementById('btnCam').style.display = 'none';
+  if (guest) {
+    ['btnCam','btnShare','btnFile','btnLookup','btnSfx'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
   document.getElementById('btnChat').onclick = function(){
     document.getElementById('transcript').classList.toggle('collapsed');
   };
@@ -800,7 +1153,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var id = (participant && participant.identity) || 'caller';
     var name = (pub && (pub.trackName || pub.name)) || '';
     if (name === 'ln-envelope') return;
-    if (track.kind === 'video') return;
+    if (track.kind === 'video'){
+      if (name === 'studio-share') attachShareTrack(track);
+      return;
+    }
     var el = track.attach();
     el.autoplay = true;
     el.muted = id !== activeId;
@@ -858,9 +1214,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       setStatus('Little Nate yielded — host or caller has the floor.');
     }, 2500);
   });
-  room.on(LK.RoomEvent.DataReceived, function(payload){
+  room.on(LK.RoomEvent.DataReceived, function(payload, participant){
     try {
       var msg = JSON.parse(new TextDecoder().decode(payload));
+      var fromGuest = isGuestIdent(participant && participant.identity);
+      if (fromGuest && (msg.op === 'share' || msg.op === 'sfx')) return;
       if (msg.op === 'nate_line' && msg.text){
         addLine('Nate', msg.text);
         if (guest) speakNate(msg.text);
@@ -871,6 +1229,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (msg.op === 'bring_on' && !guest) bringOn();
       if (msg.op === 'hold' && !guest) holdActive();
       if (msg.op === 'drop' && !guest) dropActive();
+      if (msg.op === 'share') applyShareMeta(msg);
+      if (msg.op === 'sfx' && msg.sound_id) playStudioSfx(msg.sound_id);
     } catch (e) {}
   });
   room.on(LK.RoomEvent.LocalTrackPublished, function(pub){
@@ -912,6 +1272,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (room && room.remoteParticipants){
       room.remoteParticipants.forEach(function(p){
         if (p && p.identity) enqueue(p.identity);
+        var pubs = p.trackPublications || p.tracks;
+        if (pubs && pubs.forEach) pubs.forEach(function(pub){
+          var tn = (pub && (pub.trackName || pub.name)) || '';
+          if (pub && pub.track && pub.track.kind === 'video' && tn === 'studio-share')
+            attachShareTrack(pub.track);
+        });
       });
     }
     setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — Bring on moves Caller ID 1 to air.');
@@ -931,7 +1297,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     pendingCaps.push((guest ? 'CALLER' : 'HOST') + ': ' + text);
     if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
     sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
-    nateTurn(text, false, 'line');
+    var intent = hostShareIntent(text);
+    if (intent && intent.kind === 'search') doLookup(intent.q);
+    else if (intent && intent.kind === 'sound') { doSfx(intent.id); nateTurn(text, false, 'line'); }
+    else nateTurn(text, false, 'line');
   };
   function armListenCommit(){
     if (listenTimer) clearTimeout(listenTimer);
@@ -954,7 +1323,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       pendingCaps.push((guest ? 'CALLER' : 'HOST') + ': ' + text);
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
-      deliverHold(text, 'line');
+      var intent = hostShareIntent(text);
+      if (intent && intent.kind === 'search') doLookup(intent.q);
+      else {
+        if (intent && intent.kind === 'sound') doSfx(intent.id);
+        deliverHold(text, 'line');
+      }
     }, holdFloorMs(live));
   }
   function startListenRec(btn){
@@ -1021,6 +1395,32 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     room.localParticipant.setCameraEnabled(camOn).then(attachLocalCam);
     this.classList.toggle('on', camOn);
   };
+  document.getElementById('btnShare').onclick = function(){ startScreenShare(); };
+  document.getElementById('btnFile').onclick = function(){
+    if (guest) return;
+    document.getElementById('shareFile').click();
+  };
+  document.getElementById('shareFile').onchange = function(){
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (f) openShareFile(f);
+  };
+  document.getElementById('btnLookup').onclick = function(){ doLookup(''); };
+  document.getElementById('btnSfx').onclick = function(){
+    if (guest) return;
+    var pick = window.prompt('Sound: sting, hit, whoosh, chime, bed', 'sting');
+    if (pick) doSfx(pick);
+  };
+  (function(){
+    var box = document.getElementById('shareBox');
+    if (!box || guest) return;
+    box.addEventListener('dragover', function(ev){ ev.preventDefault(); });
+    box.addEventListener('drop', function(ev){
+      ev.preventDefault();
+      var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (f) openShareFile(f);
+    });
+  })();
   document.getElementById('btnToss').onclick = function(){
     var tossCtx = pendingCaps.slice(-24).join('\n') || lastHeard
       || 'Host tossed the floor to you. Address the room and take the next question.';
@@ -1038,6 +1438,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   document.getElementById('btnHold').onclick = function(){ holdActive(); };
   document.getElementById('btnDrop').onclick = function(){ dropActive(); };
   document.getElementById('btnEnd').onclick = function(){
+    stopShare();
     if (room) room.disconnect();
     setStatus('Session ended. Close this tab or End → review in Studio.');
   };
