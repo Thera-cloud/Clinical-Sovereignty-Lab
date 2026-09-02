@@ -43,6 +43,7 @@ paths = (
     "livekit-client.umd.min.js",
     "avatar-modes/expression_viewer.html",
     "avatar-modes/studio_portrait.html",
+    "avatar-modes/thera_world_bg.jpg",
     "avatar-modes/plates/exp_01_neutral.png",
     "avatar-modes/plates/exp_02_blink.png",
     "avatar-modes/plates/exp_03_jawopen.png",

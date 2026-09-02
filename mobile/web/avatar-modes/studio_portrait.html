@@ -7,17 +7,26 @@
 <meta http-equiv="Content-Security-Policy"
       content="connect-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self'" />
 <style>
-  html,body{margin:0;height:100%;background:#0A0A0A;overflow:hidden}
-  #stage{position:absolute;inset:0}
-  #stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-             object-position:center 22%;opacity:0;transition:opacity .22s ease}
-  #stage img.on{opacity:1}
-  #stage img.jaw{z-index:2;opacity:0;transition:opacity .04s linear;pointer-events:none}
-  #status{position:fixed;left:10px;bottom:8px;color:#C9A96266;font:11px DM Sans,system-ui,sans-serif;z-index:3}
+  html,body{margin:0;height:100%;background:#050505;overflow:hidden}
+  #stage{position:absolute;inset:0;background:#050505}
+  #world{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:0}
+  #face{position:absolute;inset:0;width:100%;height:100%;z-index:2}
+  #stage img.plate{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  #scan{position:absolute;inset:0;z-index:4;pointer-events:none;
+        background:repeating-linear-gradient(180deg,transparent 0 2px,rgba(5,5,5,.16) 2px 3px);
+        box-shadow:inset 0 0 90px rgba(5,5,5,.55),inset 0 0 28px rgba(78,205,196,.08)}
+  #bezel{position:absolute;inset:0;z-index:5;pointer-events:none;
+         box-shadow:inset 0 0 0 2px rgba(201,169,98,.42),inset 0 0 18px rgba(201,169,98,.12)}
+  #status{position:fixed;left:10px;bottom:8px;color:#C9A96266;font:11px DM Sans,system-ui,sans-serif;z-index:6}
 </style>
 </head>
 <body>
-<div id="stage"></div>
+<div id="stage">
+  <img id="world" alt="" src="thera_world_bg.jpg"/>
+  <canvas id="face"></canvas>
+  <div id="scan"></div>
+  <div id="bezel"></div>
+</div>
 <div id="status">loading…</div>
 <script>
 (function(){
@@ -39,14 +48,87 @@
   var LISTEN = 'plates/exp_06_brow_up.png';
   var KEYS = Object.keys(PLATES);
   var stage = document.getElementById('stage');
+  var face = document.getElementById('face');
   var status = document.getElementById('status');
   var imgs = {};
+  var keyed = {};
   var current = 'neutral';
   var voiceState = 'idle';
   var shown = null;
+  var jawAmt = 0;
   var blinkTimer = null;
   var talkRaf = null;
   var talkT0 = 0;
+
+  function keyPlate(img){
+    var c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    var ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    var d = ctx.getImageData(0, 0, c.width, c.height);
+    var p = d.data, W = c.width, H = c.height;
+    function luma(i){ return (p[i] + p[i + 1] + p[i + 2]) / 3; }
+    function sat(i){ return Math.max(p[i], p[i + 1], p[i + 2]) - Math.min(p[i], p[i + 1], p[i + 2]); }
+    function isBg(i){ return luma(i) > 168 && sat(i) < 28; }
+    var seen = new Uint8Array(W * H);
+    var q = [];
+    function push(x, y){
+      if (x < 0 || y < 0 || x >= W || y >= H) return;
+      var idx = y * W + x;
+      if (seen[idx]) return;
+      if (!isBg(idx * 4)) return;
+      seen[idx] = 1;
+      q.push(idx);
+    }
+    for (var x = 0; x < W; x++){ push(x, 0); push(x, H - 1); }
+    for (var y = 0; y < H; y++){ push(0, y); push(W - 1, y); }
+    var qi = 0;
+    while (qi < q.length){
+      var idx = q[qi++];
+      var x0 = idx % W, y0 = (idx / W) | 0;
+      push(x0 - 1, y0); push(x0 + 1, y0); push(x0, y0 - 1); push(x0, y0 + 1);
+    }
+    for (var i = 0; i < seen.length; i++){
+      if (!seen[i]) continue;
+      var off = i * 4;
+      var L = luma(off);
+      p[off + 3] = L > 200 ? 0 : Math.max(0, Math.round((200 - L) * 1.6));
+    }
+    var fadeFrom = H * 0.76;
+    for (var fy = 0; fy < H; fy++){
+      if (fy < fadeFrom) continue;
+      var fade = 1 - (fy - fadeFrom) / (H - fadeFrom);
+      for (var fx = 0; fx < W; fx++){
+        var fo = (fy * W + fx) * 4;
+        p[fo + 3] = Math.round(p[fo + 3] * fade);
+      }
+    }
+    ctx.putImageData(d, 0, 0);
+    return c;
+  }
+
+  function paint(){
+    var w = stage.clientWidth || 1;
+    var h = stage.clientHeight || 1;
+    if (face.width !== w || face.height !== h){ face.width = w; face.height = h; }
+    var ctx = face.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    var src = keyed[shown];
+    if (!src) return;
+    var aspect = src.width / src.height;
+    var fh = h * 0.42;
+    var fw = fh * aspect;
+    if (fw > w * 0.40){ fw = w * 0.40; fh = fw / aspect; }
+    var x = (w - fw) / 2;
+    var y = h * 0.46 - fh / 2;
+    ctx.drawImage(src, x, y, fw, fh);
+    if (jawAmt > 0.02 && keyed[JAW]){
+      ctx.globalAlpha = jawAmt;
+      ctx.drawImage(keyed[JAW], x, y, fw, fh);
+      ctx.globalAlpha = 1;
+    }
+  }
 
   function restPlate(){
     if (voiceState === 'speaking') return PLATES.neutral;
@@ -56,19 +138,15 @@
 
   function show(src){
     if (!src) return;
-    Object.keys(imgs).forEach(function(k){
-      if (k === JAW) return;
-      imgs[k].classList.toggle('on', k === src);
-    });
     shown = src;
+    paint();
   }
 
   function apply(){ show(restPlate()); }
 
   function setJawMix(amt){
-    var jaw = imgs[JAW];
-    if (!jaw) return;
-    jaw.style.opacity = String(Math.max(0, Math.min(1, amt)));
+    jawAmt = Math.max(0, Math.min(1, amt));
+    paint();
   }
 
   function stopTalk(){
@@ -138,8 +216,9 @@
     var img = document.createElement('img');
     img.alt = 'Little Nate';
     img.src = src;
-    if (src === JAW) img.className = 'jaw';
+    img.className = 'plate';
     img.onload = function(){
+      keyed[src] = keyPlate(img);
       left -= 1;
       if (!left){
         status.textContent = '';
@@ -156,6 +235,7 @@
     imgs[src] = img;
   });
 
+  addEventListener('resize', paint);
   addEventListener('message', function(e){
     var d = e.data || {};
     if (d.type === 'setExpression' && typeof d.expression === 'string') setExpression(d.expression);
