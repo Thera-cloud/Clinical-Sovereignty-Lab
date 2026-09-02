@@ -228,6 +228,9 @@ async def cohost_turn(
     callers: int = 0,
     waiting: int = 0,
     event: str = "line",
+    realm: str = "",
+    realm_blurb: str = "",
+    realm_shift: bool = False,
 ) -> Dict[str, Any]:
     blob = (text or "").strip()
     if not blob:
@@ -275,7 +278,25 @@ async def cohost_turn(
             "Then return to conversation.\n"
             + PRODUCT_BRIEF
         )
+    # The backdrop behind Nate rotates through Thera-world realms during the
+    # show. He always knows where he is standing; he only says it out loud when
+    # the moment actually wants it.
+    realm_name = (realm or "").strip()
+    if realm_name:
+        where = f"You are broadcasting from {realm_name}"
+        if (realm_blurb or "").strip():
+            where += f" — {realm_blurb.strip()}"
+        system += (
+            f"\n\nWHERE YOU ARE: {where}. "
+            "The realm behind you shifts on its own during the show. "
+            "Know it, let it color your mood, and only name it out loud when it "
+            "genuinely fits the moment. Never announce it as a status update."
+        )
     room = f"Room: {live} live caller(s), {hold} waiting."
+    if realm_name:
+        room += f" Realm: {realm_name}."
+        if realm_shift:
+            room += " The realm just shifted in behind you this second."
     prior = thread_text(session_id)
     prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
     if kind == "open":

@@ -269,7 +269,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260901p" in html
+    assert "v=20260901q" in html
     assert "}, 2500);" in html
     assert "}, 450);" not in html
     assert "function waitLabel" in html
@@ -345,7 +345,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260901p" in url
+    assert "v=20260901q" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -484,3 +484,83 @@ def test_studio_product_thread_and_onair_guards():
     prior = _sess.thread_text("sid-thread")
     assert "Little Nate app" in prior
     assert "how it works" in prior
+
+def test_studio_realm_rotation():
+    """Thera-world realms rotate behind Nate: catalog, frame serve, slide, context."""
+    rot = load_svc("studio_realm_rotator")
+
+    # Rotation walks the catalog in order and wraps, so a long show tours
+    # realms instead of landing on the same one twice.
+    assert rot.REALM_ROTATE_SECONDS == 180
+    slugs = [r["slug"] for r in rot.REALMS]
+    assert len(slugs) == len(set(slugs)) >= 8
+    assert rot.next_slug("") == slugs[0]
+    assert rot.next_slug(slugs[0]) == slugs[1]
+    assert rot.next_slug(slugs[-1]) == slugs[0]
+    for r in rot.REALMS:
+        assert r["name"] and r["blurb"] and r["prompt"]
+
+    # Every prompt carries the composite style so the center third stays open
+    # for Nate and no stray people or text land in the backdrop.
+    p = rot.realm_prompt(slugs[0])
+    assert "no people" in p and "no text" in p
+    assert "center must stay open" in p
+
+    # Realm zero is the static plate, so the room is never blank on join.
+    assert rot.BASELINE_REALM["image_url"] == "thera_world_bg.jpg"
+    assert rot.BASELINE_REALM["frame_id"] == 0
+
+    # Frames are served with their real format, not a hardcoded jpeg claim.
+    assert rot.image_media_type(b"\xff\xd8\xffsomething") == "image/jpeg"
+    assert rot.image_media_type(b"\x89PNG\r\n\x1a\nrest") == "image/png"
+    assert rot.image_media_type(b"RIFF____WEBPVP8 ") == "image/webp"
+    assert rot.image_media_type(b"nope") == "application/octet-stream"
+
+    # No DB pool means no frame table and no image spend.
+    import asyncio
+
+    assert asyncio.run(rot.realm_image_bytes(None, "sid-realm", 7)) is None
+
+    api_src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
+    assert '@public_router.get("/sessions/{session_id}/realm")' in api_src
+    assert '@public_router.get("/sessions/{session_id}/realm/{frame_id}")' in api_src
+    # Frames are per-room, so the shared edge must not cache them publicly.
+    assert "private, max-age=86400, immutable" in api_src
+    assert "realm_blurb" in api_src and "realm_shift" in api_src
+
+    assert (ROOT / "backend/migrations/430_studio_realm_frames.sql").exists()
+    mig = (ROOT / "backend/migrations/430_studio_realm_frames.sql").read_text()
+    assert "CREATE TABLE IF NOT EXISTS studio_realm_frames" in mig
+    assert "ALTER TABLE" not in mig and "DROP " not in mig
+
+    # Nate always knows the realm; he is told to work it in, never announce it.
+    sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
+    assert "WHERE YOU ARE" in sess_src
+    assert "Never announce it as a status update." in sess_src
+    assert "The realm just shifted in behind you this second." in sess_src
+
+    # Horizontal wipe: old realm exits left, new realm lands. Nate never moves.
+    portrait = (ROOT / "mobile/web/avatar-modes/studio_portrait.html").read_text()
+    assert 'id="worldNext"' in portrait
+    assert "translateX(-100%)" in portrait
+    assert "img-src 'self' blob:" in portrait
+    assert "revokeObjectURL" in portrait
+    assert "function setRealm" in portrait
+
+    # All six room copies poll and hand the frame over as a Blob.
+    for rel in (
+        "mobile/web/studio_nate_room.html",
+        "mobile/web/studio_livekit_room.html",
+        "backend/app/services/studio_nate_room.html",
+        "backend/app/services/studio_livekit_room.html",
+        "dashboard/studio_nate_room.html",
+        "dashboard/studio_livekit_room.html",
+    ):
+        room = (ROOT / rel).read_text()
+        assert "function pollRealm" in room, rel
+        assert "function applyRealm" in room, rel
+        assert "type:'setRealm'" in room, rel
+        assert "realm_shift" in room, rel
+        # The wait badge cannot be squeezed by the rail flex, or the count clips.
+        assert "flex:0 0 auto;margin-top:auto" in room, rel
+        assert "line-height:1.3;color:#C9A962" in room, rel

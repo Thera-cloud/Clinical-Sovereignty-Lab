@@ -96,6 +96,9 @@ class CohostTurnBody(BaseModel):
     callers: int = 0
     waiting: int = 0
     event: str = "line"
+    realm: str = ""
+    realm_blurb: str = ""
+    realm_shift: bool = False
 
 
 class CohostSpeakBody(BaseModel):
@@ -661,6 +664,9 @@ async def cohost_turn_public(session_id: UUID, body: CohostTurnBody, request: Re
             callers=int(body.callers or 0),
             waiting=int(body.waiting or 0),
             event=body.event or "line",
+            realm=(body.realm or "")[:120],
+            realm_blurb=(body.realm_blurb or "")[:240],
+            realm_shift=bool(body.realm_shift),
         )
     )
 
@@ -690,6 +696,54 @@ async def cohost_speak_public(session_id: UUID, body: CohostSpeakBody, request: 
     from app.services.studio_phone_voice import studio_audio_media_type
 
     return Response(content=audio, media_type=studio_audio_media_type(audio))
+
+
+@public_router.get("/sessions/{session_id}/realm")
+async def studio_realm_current(session_id: UUID, request: Request):
+    """The Thera-world realm on air, rotating every REALM_ROTATE_SECONDS.
+
+    Polling this is what drives rotation, so realms only advance while a room
+    is actually watching.
+    """
+    _flag()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    from app.services.studio_livekit import verify_livekit_jwt
+
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "livekit_jwt")
+    if checked.get("session_id") != str(session_id):
+        raise HTTPException(403, "room_mismatch")
+    from app.services.studio_realm_rotator import current_realm
+
+    return await current_realm(_pool(request), str(session_id))
+
+
+@public_router.get("/sessions/{session_id}/realm/{frame_id}")
+async def studio_realm_image(session_id: UUID, frame_id: int, request: Request):
+    """One stored realm frame. Scoped to its own session so a room token can
+    only pull the backdrops that played in that room."""
+    _flag()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    from app.services.studio_livekit import verify_livekit_jwt
+
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "livekit_jwt")
+    if checked.get("session_id") != str(session_id):
+        raise HTTPException(403, "room_mismatch")
+    from app.services.studio_realm_rotator import image_media_type, realm_image_bytes
+
+    raw = await realm_image_bytes(_pool(request), str(session_id), int(frame_id))
+    if not raw:
+        raise HTTPException(404, "realm_frame")
+    return Response(
+        content=raw,
+        media_type=image_media_type(raw),
+        headers={"Cache-Control": "private, max-age=86400, immutable"},
+    )
 
 
 @public_router.post("/sessions/{session_id}/cohost/caption")

@@ -27,8 +27,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 .prompt.empty{opacity:.55}
 .prompt .pname{padding:0 8px;font-size:12px;color:#E8D5A3}
 .prompt .ploc{padding:2px 8px 0;font-size:10px;color:#8B7355}
-#waitBadge{margin-top:auto;text-align:center;border:1px dashed #8B7355;border-radius:6px;padding:8px}
-#waitCount{display:block;font-size:22px;color:#C9A962;letter-spacing:1px}
+#waitBadge{flex:0 0 auto;margin-top:auto;text-align:center;border:1px dashed #8B7355;border-radius:6px;padding:8px}
+#waitCount{display:block;font-size:22px;line-height:1.3;color:#C9A962;letter-spacing:1px;padding-left:1px}
 #waitHint{display:block;font-size:10px;color:#8B7355;margin-top:2px}
 .tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
 .tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto}
@@ -74,7 +74,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901p" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901q" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
   </div>
   <aside id="rail">
     <div id="joinCall">JOIN THE CALL</div>
@@ -553,7 +553,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         toss: !!toss,
         callers: ctx.callers,
         waiting: ctx.waiting,
-        event: kind
+        event: kind,
+        realm: realmName,
+        realm_blurb: realmBlurb,
+        realm_shift: realmShift
       })
     }).then(function(r){ return r.json(); }).then(function(j){
       var t = (j && (j.text || j.reason)) || '';
@@ -565,12 +568,46 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
       return speakNate(t);
     }).catch(function(e){ setStatus('Nate chat failed: ' + e); }).then(function(){
+      realmShift = false;
       turnBusy = false;
       drainTurns();
     });
   }
   window.addEventListener('resize', function(){ drawEnv(0.35); });
   drawEnv(0.35);
+  // Thera-world realm rotation. Polling is what advances the realm, so
+  // backdrops only regenerate while a room is actually open. The frame is
+  // fetched with the room token and handed to the portrait iframe as a Blob,
+  // which mints its own object URL inside the iframe origin.
+  var realmName = '', realmBlurb = '', realmShift = false, realmFrame = -1;
+  function applyRealm(j){
+    if (!j || typeof j.frame_id === 'undefined') return;
+    var id = Number(j.frame_id);
+    if (id === realmFrame) return;
+    var first = realmFrame < 0;
+    realmFrame = id;
+    realmName = j.name || realmName;
+    realmBlurb = j.blurb || '';
+    if (!first && realmName) realmShift = true;
+    if (!j.image_url || !id) return;
+    fetch(cfg.api + j.image_url, {headers:{'Authorization':'Bearer ' + cfg.token}})
+      .then(function(r){ return r.ok ? r.blob() : null; })
+      .then(function(b){
+        if (!b) return;
+        var f = document.getElementById('lnAvatar');
+        if (f && f.contentWindow)
+          f.contentWindow.postMessage({type:'setRealm', blob:b, name:realmName}, '*');
+      }).catch(function(){});
+  }
+  function pollRealm(){
+    if (!cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/realm',
+          {headers:{'Authorization':'Bearer ' + cfg.token}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(applyRealm).catch(function(){});
+  }
+  pollRealm();
+  setInterval(pollRealm, 20000);
   renderWait();
   if (guest) document.getElementById('btnCam').style.display = 'none';
   document.getElementById('btnChat').onclick = function(){
