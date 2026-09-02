@@ -269,7 +269,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260901n" in html
+    assert "v=20260901p" in html
     assert "}, 2500);" in html
     assert "}, 450);" not in html
     assert "function waitLabel" in html
@@ -345,7 +345,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260901n" in url
+    assert "v=20260901p" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -391,7 +391,13 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "2025-04-01-preview" in voice_src
     assert 'voice": "onyx"' in voice_src
     assert "trusted older brother" in voice_src
-    assert "nateTurn(blob, false, 'caption')" not in html
+    assert "nateTurn(blob, false, 'caption')" in html
+    assert "var CAP_FRESH_MS = 6000;" in html
+    assert "function freshCaps" in html
+    assert "if (!fresh.length) return;" in html
+    assert "capQueue.push({at: capAt, line: who + ': ' + j.text})" in html
+    assert "}, 1200);" in html
+    assert "}, 2800);" not in html
     assert "event:'open')" not in html
     assert "caller_join" in html
     from app.services.studio_phone_voice import studio_audio_media_type

@@ -74,7 +74,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901n" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901p" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
   </div>
   <aside id="rail">
     <div id="joinCall">JOIN THE CALL</div>
@@ -118,7 +118,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var activeId = '';
   var PROMPT_N = 3;
   var lastHeard = '', greeted = false, rec = null, nateSpeaking = false, bargeTimer = null;
-  var audioTracks = {}, capRecs = {}, pendingCaps = [], capPauseTimer = null;
+  var audioTracks = {}, capRecs = {}, pendingCaps = [], capQueue = [], capPauseTimer = null;
+  // Transcripts older than this are dropped instead of answered: STT rate limits once
+  // produced 40-127s gaps, and a reply that late lands on top of a finished topic.
+  var CAP_FRESH_MS = 6000;
   var turnQ = [], turnBusy = false, speakGen = 0;
   function params(){
     var h = new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -443,19 +446,31 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (blob.indexOf('?') !== -1) return true;
     if (low.indexOf('nate') !== -1 || low.indexOf('co-host') !== -1 || low.indexOf('cohost') !== -1) return true;
     if (blob.length < 24) return false;
-    return blob.length >= 80;
+    return blob.length >= 40;
+  }
+  function freshCaps(){
+    var cutoff = Date.now() - CAP_FRESH_MS;
+    capQueue = capQueue.filter(function(c){ return c.at >= cutoff; });
+    return capQueue;
   }
   function armCaptionTurn(){
     if (capPauseTimer) clearTimeout(capPauseTimer);
     capPauseTimer = setTimeout(function(){
       capPauseTimer = null;
-      if (lnPaused || guest) { pendingCaps = []; return; }
+      if (lnPaused || guest) { pendingCaps = []; capQueue = []; return; }
       if (nateSpeaking || turnBusy || Object.keys(capRecs).length) { armCaptionTurn(); return; }
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
-    }, 2800);
+      var fresh = freshCaps();
+      capQueue = [];
+      if (!fresh.length) return;
+      var blob = fresh.map(function(c){ return c.line; }).join('\n');
+      if (!shouldAskCaps(blob)) return;
+      nateTurn(blob, false, 'caption');
+    }, 1200);
   }
   function postCaption(id, blob){
     if (guest || lnPaused || !cfg.session || !cfg.token) return;
+    var capAt = Date.now();
     var fd = new FormData();
     fd.append('file', blob, 'cap.webm');
     fd.append('speaker', speakerRole(id));
@@ -473,6 +488,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       sendData({op:'caption', speaker: who, text: j.text});
       pendingCaps.push(who + ': ' + j.text);
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
+      capQueue.push({at: capAt, line: who + ': ' + j.text});
+      if (capQueue.length > 8) capQueue = capQueue.slice(-8);
       armCaptionTurn();
     }).catch(function(){});
   }
