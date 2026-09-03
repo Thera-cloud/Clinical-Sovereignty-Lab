@@ -597,14 +597,22 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
 
   Widget _studio() {
     final studio = Map<String, dynamic>.from(_hub?['studio'] ?? {});
-    return ListView(
+    return Padding(
       padding: const EdgeInsets.all(16),
-      children: [
-        CoachSovereignStudioTab(
-          key: const ValueKey('coach_sovereign_studio'),
-          token: widget.token,
-        ),
-        const SizedBox(height: 16),
+      child: Column(
+        children: [
+          Expanded(
+            child: CoachSovereignStudioTab(
+              key: const ValueKey('coach_sovereign_studio'),
+              token: widget.token,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('STUDIO WEBHOOK SECRET',
+                style: TextStyle(color: _gold, fontSize: 12, letterSpacing: 1)),
+            children: [
         _panel(
           'STUDIO WEBHOOK SECRET',
           Icons.key,
@@ -660,7 +668,10 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
             ),
           ],
         ),
-      ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 

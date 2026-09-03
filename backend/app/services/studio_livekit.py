@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 from app.services.studio_invariants import guest_video_allowed
 
 DELAY_S = 45
+EGRESS_HTTP_TIMEOUT_S = 30
+_EGRESS_ACTIVE = {0, 1, 2, "0", "1", "2", "EGRESS_STARTING", "EGRESS_ACTIVE", "EGRESS_ENDING"}
 
 _ROOM_FILE = Path(__file__).with_name("studio_livekit_room.html")
 ROOM_HTML = _ROOM_FILE.read_text(encoding="utf-8") if _ROOM_FILE.is_file() else ""
@@ -115,6 +117,157 @@ def _probe_internal() -> Dict[str, Any]:
         return {"reachable": False, "reason": str(exc)[:80]}
 
 
+def mint_api_jwt(*, api_key: str, api_secret: str, room: str = "", ttl_s: int = 120) -> str:
+    """Server Twirp grants (List/Record). Distinct from participant join JWTs."""
+    now = int(time.time())
+    video: Dict[str, Any] = {
+        "roomCreate": True,
+        "roomList": True,
+        "roomRecord": True,
+        "roomAdmin": True,
+        "roomJoin": True,
+    }
+    if room:
+        video["room"] = room
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "iss": api_key,
+        "nbf": now - 10,
+        "exp": now + ttl_s,
+        "video": video,
+    }
+    h = _b64(json.dumps(header, separators=(",", ":")).encode())
+    p = _b64(json.dumps(payload, separators=(",", ":")).encode())
+    sig = hmac.new(api_secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
+    return f"{h}.{p}.{_b64(sig)}"
+
+
+def verify_livekit_webhook(auth_header: str, raw_body: bytes) -> Dict[str, Any]:
+    secret = os.getenv("LIVEKIT_API_SECRET", "")
+    key = os.getenv("LIVEKIT_API_KEY", "")
+    if not secret or not key:
+        return {"ok": False, "reason": "livekit_not_configured"}
+    token = (auth_header or "").strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    if not token:
+        return {"ok": False, "reason": "missing_auth"}
+    checked = verify_livekit_jwt(token)
+    if not checked.get("ok"):
+        return {"ok": False, "reason": checked.get("reason") or "bad_token"}
+
+    def _pad(raw: str) -> str:
+        return raw + "=" * (-len(raw) % 4)
+
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(_pad(token.split(".")[1])))
+    except Exception:
+        return {"ok": False, "reason": "bad_payload"}
+    claimed = str(payload.get("sha256") or payload.get("sha_256") or "").strip()
+    if claimed:
+        digest = hashlib.sha256(raw_body or b"").hexdigest()
+        if not hmac.compare_digest(claimed.lower(), digest.lower()):
+            return {"ok": False, "reason": "bad_body_hash"}
+    return {"ok": True}
+
+
+def _lk_creds() -> tuple[str, str, str]:
+    return (
+        (os.getenv("LIVEKIT_INTERNAL_URL") or "").rstrip("/"),
+        os.getenv("LIVEKIT_API_KEY", ""),
+        os.getenv("LIVEKIT_API_SECRET", ""),
+    )
+
+
+async def _twirp(path: str, body: Dict[str, Any], *, room: str = "", timeout: float = 8.0) -> Dict[str, Any]:
+    internal, key, secret = _lk_creds()
+    if not internal or not key or not secret:
+        return {"ok": False, "reason": "livekit_not_configured", "http": 0}
+    token = mint_api_jwt(api_key=key, api_secret=secret, room=room)
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{internal}{path}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+        data: Any = {}
+        try:
+            data = resp.json() if resp.content else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"raw": (resp.text or "")[:240]}
+        return {
+            "ok": resp.status_code < 400,
+            "http": resp.status_code,
+            "data": data,
+            "text": (resp.text or "")[:240],
+        }
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)[:120], "http": 0}
+
+
+def _probe_egress_worker() -> bool:
+    internal, key, secret = _lk_creds()
+    if not internal or not key or not secret:
+        return False
+    try:
+        import urllib.request
+
+        token = mint_api_jwt(api_key=key, api_secret=secret)
+        req = urllib.request.Request(
+            f"{internal}/twirp/livekit.Egress/ListEgress",
+            data=b"{}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return int(resp.status) < 400
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        return bool(code and int(code) < 400)
+
+
+def _active_egress_id(data: Dict[str, Any]) -> str:
+    items = data.get("items") or data.get("egress_info") or data.get("egressInfo") or []
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list):
+        return ""
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        status = item.get("status")
+        status_s = str(status or "").upper()
+        if status in _EGRESS_ACTIVE or status_s in _EGRESS_ACTIVE:
+            return str(item.get("egress_id") or item.get("egressId") or "")
+    return ""
+
+
+def _publisher_count(data: Dict[str, Any]) -> int:
+    parts = data.get("participants") or []
+    if not isinstance(parts, list):
+        return 0
+    n = 0
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        ident = str(part.get("identity") or part.get("sid") or "")
+        if ident.startswith("egress") or ident == "egress":
+            continue
+        n += 1
+    return n
+
+
 def health() -> Dict[str, Any]:
     url = os.getenv("LIVEKIT_URL", "")
     internal = os.getenv("LIVEKIT_INTERNAL_URL", "")
@@ -132,6 +285,7 @@ def health() -> Dict[str, Any]:
         "internal_probe": probe,
         "room_origin": room_origin(),
         "sip_uri_set": bool(os.getenv("LIVEKIT_SIP_URI")),
+        "egress_worker": bool(_probe_egress_worker()),
     }
 
 
@@ -268,20 +422,51 @@ async def start_room_egress(
     session_id: str, rtmp_url: str = "", live_unlocked: bool = False
 ) -> Dict[str, Any]:
     plan = egress_plan(session_id, rtmp_url=rtmp_url, live_unlocked=live_unlocked)
-    internal = (os.getenv("LIVEKIT_INTERNAL_URL") or "").rstrip("/")
-    key = os.getenv("LIVEKIT_API_KEY", "")
-    secret = os.getenv("LIVEKIT_API_SECRET", "")
+    plan["started"] = False
+    internal, key, secret = _lk_creds()
     if not internal or not key or not secret:
-        plan["started"] = False
         plan["reason"] = "livekit_not_configured"
         return plan
-    token = mint_livekit_jwt(
-        api_key=key,
-        api_secret=secret,
-        room=f"studio-{session_id}",
-        identity="egress",
-        role="host",
+    room = f"studio-{session_id}"
+    listed = await _twirp(
+        "/twirp/livekit.Egress/ListEgress",
+        {"room": room},
+        room=room,
+        timeout=5.0,
     )
+    if listed.get("ok"):
+        existing = _active_egress_id(listed.get("data") or {})
+        if existing:
+            plan["started"] = True
+            plan["egress_id"] = existing
+            plan["http"] = listed.get("http")
+            plan["reason"] = "already"
+            plan["r2"] = bool(os.getenv("R2_ACCOUNT_ID") and os.getenv("R2_ACCESS_KEY_ID"))
+            return plan
+    elif listed.get("reason") == "livekit_not_configured":
+        plan["reason"] = "livekit_not_configured"
+        return plan
+    elif listed.get("http") in (500, 501, 502, 503) or "panic" in (
+        str(listed.get("text") or "")
+    ).lower():
+        plan["reason"] = "egress_worker_or_api"
+        plan["http"] = listed.get("http")
+        plan["egress_reply"] = listed.get("text") or ""
+        return plan
+    people = await _twirp(
+        "/twirp/livekit.RoomService/ListParticipants",
+        {"room": room},
+        room=room,
+        timeout=5.0,
+    )
+    if people.get("ok") and _publisher_count(people.get("data") or {}) < 1:
+        plan["reason"] = "room_empty"
+        plan["http"] = people.get("http")
+        return plan
+    if not people.get("ok") and people.get("http") in (400, 404):
+        plan["reason"] = "room_empty"
+        plan["http"] = people.get("http")
+        return plan
     file_out: Dict[str, Any] = {
         "file_type": "MP4",
         "filepath": f"studio/{session_id}.mp4",
@@ -301,41 +486,27 @@ async def start_room_egress(
         }
         plan["r2"] = True
     body: Dict[str, Any] = {
-        "room_name": f"studio-{session_id}",
+        "room_name": room,
         "layout": "speaker",
         "audio_only": False,
         "file_outputs": [file_out],
     }
     if rtmp_url and live_unlocked:
         body["stream_outputs"] = [{"protocol": "RTMP", "urls": [rtmp_url]}]
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.post(
-                f"{internal}/twirp/livekit.Egress/StartRoomCompositeEgress",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-        plan["http"] = resp.status_code
-        plan["started"] = resp.status_code < 400
-        plan["egress_reply"] = (resp.text or "")[:240]
-        try:
-            data = resp.json() if resp.content else {}
-            if isinstance(data, dict):
-                plan["egress_id"] = str(
-                    data.get("egress_id") or data.get("egressId") or ""
-                )
-        except Exception:
-            plan["egress_id"] = ""
-        if resp.status_code >= 400:
-            plan["reason"] = "egress_worker_or_api"
-    except Exception as exc:
-        plan["started"] = False
-        plan["reason"] = str(exc)[:120]
+    started = await _twirp(
+        "/twirp/livekit.Egress/StartRoomCompositeEgress",
+        body,
+        room=room,
+        timeout=float(EGRESS_HTTP_TIMEOUT_S),
+    )
+    plan["http"] = started.get("http")
+    plan["egress_reply"] = started.get("text") or ""
+    data = started.get("data") if isinstance(started.get("data"), dict) else {}
+    eid = str((data or {}).get("egress_id") or (data or {}).get("egressId") or "")
+    plan["egress_id"] = eid
+    plan["started"] = bool(started.get("ok") and eid)
+    if not plan["started"]:
+        plan["reason"] = started.get("reason") or "egress_worker_or_api"
     return plan
 
 
@@ -345,38 +516,45 @@ async def stop_room_egress(egress_id: str, session_id: str = "") -> Dict[str, An
     if not eid:
         out["reason"] = "no_egress_id"
         return out
-    internal = (os.getenv("LIVEKIT_INTERNAL_URL") or "").rstrip("/")
-    key = os.getenv("LIVEKIT_API_KEY", "")
-    secret = os.getenv("LIVEKIT_API_SECRET", "")
-    if not internal or not key or not secret:
-        out["reason"] = "livekit_not_configured"
-        return out
-    token = mint_livekit_jwt(
-        api_key=key,
-        api_secret=secret,
-        room=f"studio-{session_id}" if session_id else "studio",
-        identity="egress",
-        role="host",
+    room = f"studio-{session_id}" if session_id else ""
+    stopped = await _twirp(
+        "/twirp/livekit.Egress/StopEgress",
+        {"egress_id": eid},
+        room=room,
+        timeout=20.0,
     )
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.post(
-                f"{internal}/twirp/livekit.Egress/StopEgress",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={"egress_id": eid},
-            )
-        out["http"] = resp.status_code
-        out["stopped"] = resp.status_code < 400
-        if resp.status_code >= 400:
-            out["reason"] = "egress_stop"
-    except Exception as exc:
-        out["reason"] = str(exc)[:120]
+    out["http"] = stopped.get("http")
+    out["stopped"] = bool(stopped.get("ok"))
+    if not out["stopped"]:
+        out["reason"] = stopped.get("reason") or "egress_stop"
     return out
+
+
+async def stop_session_egress(session_id: str, egress_id: str = "") -> Dict[str, Any]:
+    sid = (session_id or "").strip()
+    ids: list[str] = []
+    if (egress_id or "").strip():
+        ids.append(egress_id.strip())
+    if sid:
+        room = f"studio-{sid}"
+        listed = await _twirp(
+            "/twirp/livekit.Egress/ListEgress",
+            {"room": room},
+            room=room,
+            timeout=5.0,
+        )
+        if listed.get("ok"):
+            found = _active_egress_id(listed.get("data") or {})
+            if found and found not in ids:
+                ids.append(found)
+    stopped = False
+    last: Dict[str, Any] = {"ok": True, "stopped": False, "reason": "no_egress_id"}
+    for eid in ids:
+        last = await stop_room_egress(eid, sid)
+        stopped = stopped or bool(last.get("stopped"))
+    last["stopped"] = stopped
+    last["egress_ids"] = ids
+    return last
 
 
 def join_token(session_id: str, role: str, identity: str = "") -> Dict[str, Any]:

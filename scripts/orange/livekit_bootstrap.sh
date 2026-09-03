@@ -79,6 +79,12 @@ rtc:
   use_external_ip: true
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+redis:
+  address: 127.0.0.1:6379
+webhook:
+  api_key: ${LIVEKIT_API_KEY}
+  urls:
+    - https://api.sovereignsanctuary.net/api/studio/livekit/events
 logging:
   level: info
 EOF

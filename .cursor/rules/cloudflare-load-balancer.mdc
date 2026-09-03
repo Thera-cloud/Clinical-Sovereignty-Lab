@@ -56,20 +56,20 @@ All monitors: Interval 60s, Retries 2, Expected Code 200, Follow Redirects off.
 
 | Field | Value |
 |---|---|
-| Condition | `(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer"))` — **live Jul 24 2026** (zone PUT) |
+| Condition | `(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer") or starts_with(http.request.uri.path, "/api/studio") or starts_with(http.request.uri.path, "/livekit"))` — **script ready; zone PUT pending `CLOUDFLARE_LB_TOKEN`.** Clone nginx `clone-pin-to-primary.conf` (Sep 3 2026) proxies those paths to GREEN `10.120.0.2:443`. |
 | Override: Terminates | On |
 | Override: Fallback Pool | `ws-primary` |
 | Override: Session Affinity | By Cloudflare cookie and Client IP fallback |
 
 Paths starting with `/ws` route exclusively to the primary VPS. This covers both `/ws` (bridge WebSocket) and `/ws/nate-media-stream` (Twilio voice media stream). The clone has no bridge and returns 503 for WebSocket connections.
 
-**LN-Observer (REQUIRED Jul 24, 2026):** `/api/ln-observer/*` (REST activate + `/api/ln-observer/ws/{id}`) must also pin to primary **or** the clone must run the same Observer router. Clone without Observer returns **404** on WS → sessions activate but `frame_count` stays 0 (no `ready`, no frames). Prefer both: LB pin + clone code sync.
+**LN-Observer + Studio (REQUIRED):** `/api/ln-observer/*` and `/api/studio/*` must pin to primary **or** the clone must proxy them to GREEN. Clone backend has no `studio_media_tape` / LiveKit env. Applied fallback: clone nginx snippet `clone-pin-to-primary.conf` → `https://10.120.0.2` (GREEN `:8000` is localhost-only). Still run `cf_pin_ln_observer_lb.sh` when an LB-edit token exists.
 
 **Dashboard pin (when API token lacks Load Balancing:Edit):**
 1. Cloudflare → Traffic → Load Balancing → `api.sovereignsanctuary.net`
 2. Custom Rules → edit **WebSocket to Primary**
 3. Condition →  
-   `(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer"))`
+    `(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer") or starts_with(http.request.uri.path, "/api/studio") or starts_with(http.request.uri.path, "/livekit"))`
 4. Keep Terminates + Fallback Pool `ws-primary`
 5. Or run `bash scripts/cf_pin_ln_observer_lb.sh` with `CLOUDFLARE_LB_TOKEN` (Account Load Balancing Edit)
 

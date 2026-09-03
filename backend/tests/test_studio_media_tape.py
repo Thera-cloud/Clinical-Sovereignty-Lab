@@ -20,6 +20,11 @@ add_cuts = _ep.add_cuts
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_tape_play_url_empty_without_key():
+    assert _tape.tape_play_url("") == ""
+    assert _tape.tape_play_url("   ") == ""
+
+
 def test_session_media_key_convention():
     assert session_media_r2_key("abc-1") == "studio/abc-1.mp4"
     assert session_cut_r2_key("abc-1") == "studio/abc-1/cut.mp4"
@@ -65,6 +70,41 @@ def test_empty_add_cuts_still_422():
     out = asyncio.run(add_cuts(None, "x", "coach", []))
     assert out["ok"] is False
     assert out["code"] == 422
+
+
+def test_webhook_jwt_and_stamp_gate():
+    import hashlib
+    import os
+
+    os.environ["LIVEKIT_API_KEY"] = "k"
+    os.environ["LIVEKIT_API_SECRET"] = "s"
+    raw = b'{"event":"egress_ended"}'
+    tok = _lk.mint_api_jwt(api_key="k", api_secret="s")
+    assert _lk.verify_livekit_webhook("", raw)["ok"] is False
+    assert _lk.verify_livekit_webhook(f"Bearer {tok}", raw)["ok"] is True
+    digest = hashlib.sha256(raw).hexdigest()
+    bad = _lk.mint_api_jwt(api_key="k", api_secret="s")
+    # Body hash, when present, must match.
+    import base64
+    import json
+    import hmac as _hmac
+
+    def _b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    header = _b64(b'{"alg":"HS256","typ":"JWT"}')
+    payload = _b64(json.dumps({"iss": "k", "nbf": 1, "exp": 4102444800, "sha256": digest}).encode())
+    sig = _hmac.new(b"s", f"{header}.{payload}".encode(), hashlib.sha256).digest()
+    good = f"{header}.{payload}.{_b64(sig)}"
+    assert _lk.verify_livekit_webhook(f"Bearer {good}", raw)["ok"] is True
+    payload_bad = _b64(json.dumps({"iss": "k", "nbf": 1, "exp": 4102444800, "sha256": "00"}).encode())
+    sig_bad = _hmac.new(b"s", f"{header}.{payload_bad}".encode(), hashlib.sha256).digest()
+    wrong = f"{header}.{payload_bad}.{_b64(sig_bad)}"
+    assert _lk.verify_livekit_webhook(f"Bearer {wrong}", raw).get("reason") == "bad_body_hash"
+    assert bad.count(".") == 2
+    src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
+    assert "plan.get(\"started\") and plan.get(\"egress_id\")" in src
+    assert "verify_livekit_webhook" in src
 
 
 def test_migration_431_and_routes():

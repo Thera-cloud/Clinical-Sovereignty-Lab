@@ -243,7 +243,7 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
             return {"ok": False, "reason": "not_found", "code": 404}
         rows = await conn.fetch(
             """
-            SELECT e.id, e.state, e.title, e.created_at,
+            SELECT e.id, e.state, e.title, e.created_at, e.cuts_json,
                    e.media_r2_key, e.media_cut_r2_key, e.youtube_video_id,
                    COALESCE(sess.media_ready, FALSE) AS media_ready,
               (SELECT COUNT(*) FROM studio_compliance_flags f
@@ -256,9 +256,18 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
             """,
             show_id,
         )
-    return {
-        "ok": True,
-        "episodes": [
+    from app.services.studio_media_tape import tape_play_url
+
+    episodes = []
+    for r in rows:
+        cuts = r.get("cuts_json")
+        if isinstance(cuts, str):
+            try:
+                cuts = json.loads(cuts)
+            except Exception:
+                cuts = []
+        key = (r.get("media_cut_r2_key") or r.get("media_r2_key") or "").strip()
+        episodes.append(
             {
                 "id": str(r["id"]),
                 "state": r["state"],
@@ -268,10 +277,11 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
                 "media_cut_r2_key": r.get("media_cut_r2_key") or "",
                 "media_ready": bool(r.get("media_ready")),
                 "youtube_video_id": r.get("youtube_video_id") or "",
+                "cuts": cuts if isinstance(cuts, list) else [],
+                "tape_url": tape_play_url(key),
             }
-            for r in rows
-        ],
-    }
+        )
+    return {"ok": True, "episodes": episodes}
 
 
 async def create_from_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]:
@@ -527,7 +537,20 @@ def _ep(row) -> Dict[str, Any]:
         "media_cut_r2_key": row.get("media_cut_r2_key") or "",
         "youtube_video_id": row.get("youtube_video_id") or "",
         "cuts": cuts if isinstance(cuts, list) else [],
+        "tape_url": _tape_url(row),
     }
+
+
+def _tape_url(row) -> str:
+    from app.services.studio_media_tape import tape_play_url
+
+    key = (
+        row.get("media_cut_r2_key")
+        or row.get("media_r2_key")
+        or row.get("media_master_r2_key")
+        or ""
+    )
+    return tape_play_url(str(key))
 
 
 def _flag(row) -> Dict[str, Any]:

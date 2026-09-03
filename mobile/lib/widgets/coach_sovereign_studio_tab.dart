@@ -46,10 +46,12 @@ class CoachSovereignStudioTab extends StatefulWidget {
   State<CoachSovereignStudioTab> createState() => _CoachSovereignStudioTabState();
 }
 
-class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
+class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
+    with SingleTickerProviderStateMixin {
   static const _gold = Color(0xFFC9A962);
   static const _muted = Color(0xFF8B7355);
   static const _text = Color(0xFFE8D5A3);
+  late final TabController _studioTabs;
 
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
@@ -76,7 +78,12 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   final _recorder = CoachWebRecorder();
   final _noteCtrl = TextEditingController();
   final _cutsCtrl = TextEditingController();
+  final List<_KeepRange> _keepRows = [];
+  String _editEid = '';
+  String _tapeUrl = '';
   Timer? _tick;
+  Timer? _egressRetry;
+  int _egressAttempts = 0;
   int _secs = 0;
   int _personaEpoch = 0;
   List<Map<String, dynamic>> _lastDiff = const [];
@@ -89,12 +96,14 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   @override
   void initState() {
     super.initState();
+    _studioTabs = TabController(length: 4, vsync: this);
     _refresh();
   }
 
   @override
   void dispose() {
     _tick?.cancel();
+    _egressRetry?.cancel();
     stopStudioPlayback();
     if (_recordingPart != null) {
       _recorder.stop();
@@ -104,7 +113,84 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     _hostCtrl.dispose();
     _noteCtrl.dispose();
     _cutsCtrl.dispose();
+    _studioTabs.dispose();
+    _clearKeepRows(disposeOnly: true);
     super.dispose();
+  }
+
+  void _clearKeepRows({bool disposeOnly = false}) {
+    for (final row in _keepRows) {
+      row.start.dispose();
+      row.end.dispose();
+    }
+    _keepRows.clear();
+    if (!disposeOnly && mounted) setState(() {});
+  }
+
+  void _addKeepRow([double? startS, double? endS]) {
+    setState(() {
+      _keepRows.add(_KeepRange(
+        start: TextEditingController(
+            text: startS == null ? '' : startS.toStringAsFixed(1)),
+        end: TextEditingController(
+            text: endS == null ? '' : endS.toStringAsFixed(1)),
+      ));
+    });
+  }
+
+  List<Map<String, double>> _cutsFromKeepRows() {
+    final out = <Map<String, double>>[];
+    for (final row in _keepRows) {
+      final a = double.tryParse(row.start.text.trim());
+      final b = double.tryParse(row.end.text.trim());
+      if (a == null || b == null || b <= a) continue;
+      out.add({'start_s': a, 'end_s': b});
+    }
+    return out;
+  }
+
+  void _loadCuts(dynamic raw) {
+    _clearKeepRows(disposeOnly: true);
+    final list = (raw is List) ? raw : const [];
+    for (final item in list) {
+      if (item is! Map) continue;
+      final a = (item['start_s'] ?? item['start']) as num?;
+      final b = (item['end_s'] ?? item['end']) as num?;
+      if (a == null || b == null) continue;
+      _keepRows.add(_KeepRange(
+        start: TextEditingController(text: a.toString()),
+        end: TextEditingController(text: b.toString()),
+      ));
+    }
+    if (_keepRows.isEmpty) {
+      _keepRows.add(_KeepRange(
+        start: TextEditingController(),
+        end: TextEditingController(),
+      ));
+    }
+  }
+
+  Future<void> _openEditor(Map<String, dynamic> episode) async {
+    final eid = (episode['id'] ?? '').toString();
+    if (eid.isEmpty) return;
+    _editEid = eid;
+    _tapeUrl = (episode['tape_url'] ?? '').toString();
+    _loadCuts(episode['cuts']);
+    setState(() {});
+    try {
+      final r = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/episodes/$eid'),
+        headers: _h,
+      );
+      if (!mounted || r.statusCode != 200) return;
+      final j = json.decode(r.body) as Map<String, dynamic>;
+      final ep = Map<String, dynamic>.from((j['episode'] ?? {}) as Map);
+      _loadCuts(ep['cuts']);
+      final url = (ep['tape_url'] ?? '').toString();
+      if (url.isNotEmpty) _tapeUrl = url;
+      setState(() {});
+    } catch (_) {}
+    _studioTabs.animateTo(2);
   }
 
   List<Map<String, dynamic>> get _displayParts {
@@ -244,6 +330,10 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   }
 
   Future<void> _post(String path, [Map<String, dynamic>? body]) async {
+    if (path.contains('/end')) {
+      _egressRetry?.cancel();
+      _studioTabs.animateTo(2);
+    }
     setState(() => _busy = true);
     final r = await http.post(
       Uri.parse('${AppConfig.apiBaseUrl}$path'),
@@ -275,11 +365,15 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     if (path == '/api/studio/sessions' && r.statusCode == 200) {
       final j = json.decode(r.body) as Map<String, dynamic>;
       _sessionId = (j['session']?['id'] ?? j['id'] ?? '').toString();
+      _studioTabs.animateTo(1);
       if ((_sessionId ?? '').isNotEmpty) {
         await _joinRoom();
       }
     }
     await _refresh();
+    if (path.contains('/end') && r.statusCode == 200 && _episodes.isNotEmpty) {
+      await _openEditor(_episodes.first);
+    }
   }
 
   Future<void> _connectYoutube() async {
@@ -320,28 +414,50 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     if (r.statusCode == 200) {
       final j = json.decode(r.body) as Map<String, dynamic>;
       final roomUrl = (j['room_url'] ?? '').toString();
-      String note = j['jwt'] == true
-          ? 'LiveKit JWT ready (guest audio-only).'
+      final note = j['jwt'] == true
+          ? 'LiveKit JWT ready (guest audio-only). Tape starts after you are in the room.'
           : 'LiveKit pending URL — envelope avatar local.';
-      try {
-        final eg = await http.post(
-          Uri.parse('${AppConfig.apiBaseUrl}/api/studio/sessions/$_sessionId/egress'),
-          headers: _h,
-          body: json.encode({}),
-        );
-        if (eg.statusCode == 200) {
-          final ej = json.decode(eg.body) as Map<String, dynamic>;
-          note += ej['started'] == true
-              ? ' Egress started.'
-              : ' Egress: ${ej['reason'] ?? 'pending'}.';
-        }
-      } catch (_) {}
-      if (!mounted) return;
       setState(() {
         _roomUrl = roomUrl;
         _lkNote = note;
       });
+      _egressAttempts = 0;
+      _scheduleEgress(const Duration(seconds: 8));
     }
+  }
+
+  void _scheduleEgress(Duration delay) {
+    _egressRetry?.cancel();
+    _egressRetry = Timer(delay, _startEgress);
+  }
+
+  Future<void> _startEgress() async {
+    final sid = _sessionId ?? '';
+    if (!mounted || sid.isEmpty) return;
+    try {
+      final eg = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/sessions/$sid/egress'),
+        headers: _h,
+        body: json.encode({}),
+      );
+      if (!mounted) return;
+      if (eg.statusCode == 200) {
+        final ej = json.decode(eg.body) as Map<String, dynamic>;
+        final started = ej['started'] == true;
+        final reason = (ej['reason'] ?? 'pending').toString();
+        setState(() {
+          _lkNote = started
+              ? 'LiveKit JWT ready. Egress started.'
+              : 'LiveKit JWT ready. Egress: $reason.';
+        });
+        if (started) return;
+        _egressAttempts += 1;
+        if (_egressAttempts < 3 &&
+            (reason == 'room_empty' || reason == 'egress_worker_or_api')) {
+          _scheduleEgress(Duration(seconds: _egressAttempts == 1 ? 12 : 25));
+        }
+      }
+    } catch (_) {}
   }
 
   List<Map<String, double>> _parseCuts(String raw) {
@@ -358,7 +474,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   }
 
   Future<void> _applyCuts(String eid) async {
-    final cuts = _parseCuts(_cutsCtrl.text);
+    var cuts = _cutsFromKeepRows();
+    if (cuts.isEmpty) cuts = _parseCuts(_cutsCtrl.text);
     if (cuts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Cuts required (e.g. 10-40,90-120)')));
@@ -664,7 +781,38 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
               : 'Live tier: $clean/1 clean published episode.',
           style: const TextStyle(color: _muted, fontSize: 12),
         ),
-        const SizedBox(height: 16),
+        TabBar(
+          controller: _studioTabs,
+          isScrollable: true,
+          indicatorColor: _gold,
+          labelColor: _gold,
+          unselectedLabelColor: _muted,
+          tabs: const [
+            Tab(text: 'SHOW'),
+            Tab(text: 'LIVE'),
+            Tab(text: 'EDIT'),
+            Tab(text: 'PERSONA'),
+          ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _studioTabs,
+            children: [
+              _showPane(),
+              _livePane(liveReady),
+              _editPane(),
+              _personaPane(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _showPane() {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
         const Text('SHOW SETUP',
             style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
         const SizedBox(height: 8),
@@ -781,6 +929,14 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             width: 80,
             child: CustomPaint(painter: _EnvelopePainter(_envelope)),
           ),
+      ],
+    );
+  }
+
+  Widget _livePane(bool liveReady) {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
         if (_lkNote.isNotEmpty)
           Text(_lkNote, style: const TextStyle(color: _muted, fontSize: 11)),
         if ((_sessionId ?? '').isNotEmpty) ...[
@@ -804,15 +960,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             child: const Text('Open studio room'),
           ),
         ],
-        const SizedBox(height: 16),
-        const Text('CALLER MEMORY (counts only)',
-            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
-        Text('logged $_callersLogged · opted-in $_callersOpted · no transcript browse',
-            style: const TextStyle(color: _muted, fontSize: 12)),
-        const SizedBox(height: 16),
-        const Text('EPISODE REVIEW',
-            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -821,8 +969,11 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
               style: ElevatedButton.styleFrom(backgroundColor: _gold),
               onPressed: _busy || _selected == null
                   ? null
-                  : () => _post('/api/studio/sessions',
-                      {'show_id': (_selected?['id'] ?? '').toString()}),
+                  : () {
+                      _studioTabs.animateTo(1);
+                      _post('/api/studio/sessions',
+                          {'show_id': (_selected?['id'] ?? '').toString()});
+                    },
               child: const Text('Start session',
                   style: TextStyle(color: Colors.black)),
             ),
@@ -845,6 +996,29 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             ),
           ],
         ),
+        const SizedBox(height: 16),
+        const Text('CALLER MEMORY (counts only)',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        Text(
+            'logged $_callersLogged · opted-in $_callersOpted · no transcript browse',
+            style: const TextStyle(color: _muted, fontSize: 12)),
+      ],
+    );
+  }
+
+  Widget _editPane() {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
+        const Text('EPISODE REVIEW',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        const Text(
+          'Keep-ranges stay. FFmpeg concatenates them into studio/{session}/cut.mp4. '
+          'Watch the tape, add start/end seconds, then Apply cuts.',
+          style: TextStyle(color: _muted, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
         TextField(
           controller: _noteCtrl,
           style: const TextStyle(color: _text, fontSize: 12),
@@ -861,6 +1035,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             hintStyle: TextStyle(color: _muted),
           ),
         ),
+        const SizedBox(height: 8),
+        if (_editEid.isNotEmpty) _keepEditor(),
         if (_episodes.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 8),
@@ -874,56 +1050,177 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
               ? 'tape ready'
               : (key.isNotEmpty ? 'tape pending' : 'no tape');
           final yt = (e['youtube_video_id'] ?? '').toString();
-          return ListTile(
-            dense: true,
-            title: Text('${e['title'] ?? 'Episode'} · ${e['state']}',
-                style: const TextStyle(color: _text, fontSize: 12)),
-            subtitle: Text(
-                '$tape · open flags ${e['open_flags'] ?? 0}${yt.isEmpty ? '' : ' · yt $yt'}',
-                style: const TextStyle(color: _muted, fontSize: 11)),
-            trailing: Wrap(
-              spacing: 4,
+          final selected = eid == _editEid;
+          return Card(
+            color: selected ? const Color(0xFF1A1A12) : const Color(0xFF111111),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('${e['title'] ?? 'Episode'} · ${e['state']}',
+                        style: const TextStyle(color: _text, fontSize: 12)),
+                    subtitle: Text(
+                        '$tape · open flags ${e['open_flags'] ?? 0}${yt.isEmpty ? '' : ' · yt $yt'}',
+                        style: const TextStyle(color: _muted, fontSize: 11)),
+                    onTap: _busy ? null : () => _openEditor(e),
+                    trailing: const Text('Edit',
+                        style: TextStyle(color: _gold, fontSize: 11)),
+                  ),
+                  Wrap(
+                    spacing: 4,
+                    children: [
+                      TextButton(
+                        onPressed: _busy ? null : () => _openTranscript(eid),
+                        child: const Text('Transcript',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                      if ((e['tape_url'] ?? '').toString().isNotEmpty ||
+                          _tapeUrl.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            final url = (e['tape_url'] ?? _tapeUrl).toString();
+                            if (url.isEmpty) return;
+                            launchUrl(Uri.parse(url),
+                                mode: LaunchMode.externalApplication,
+                                webOnlyWindowName: '_blank');
+                          },
+                          child: const Text('Watch tape',
+                              style: TextStyle(fontSize: 11)),
+                        ),
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _post(
+                                '/api/studio/episodes/$eid/youtube-upload'),
+                        child: const Text('YouTube',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                      TextButton(
+                        onPressed: _busy ? null : () => _applyCuts(eid),
+                        child: const Text('Apply cuts',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () =>
+                                _post('/api/studio/episodes/$eid/approve'),
+                        child: const Text('Approve',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () =>
+                                _post('/api/studio/episodes/$eid/publish'),
+                        child: const Text('Publish',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _post(
+                                    '/api/studio/episodes/$eid/regenerate', {
+                                  'segment_id': 'ln',
+                                  'coach_note': _noteCtrl.text.trim(),
+                                }),
+                        child: const Text('Regen LN',
+                            style: TextStyle(fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _keepEditor() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('KEEP RANGES (seconds)',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        ..._keepRows.asMap().entries.map((entry) {
+          final i = entry.key;
+          final row = entry.value;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
               children: [
-                TextButton(
-                  onPressed: _busy ? null : () => _openTranscript(eid),
-                  child: const Text('Transcript', style: TextStyle(fontSize: 11)),
+                Expanded(
+                  child: TextField(
+                    controller: row.start,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: _text, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'Start',
+                      labelStyle: TextStyle(color: _muted, fontSize: 11),
+                    ),
+                  ),
                 ),
-                TextButton(
-                  onPressed: _busy
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: row.end,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: _text, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'End',
+                      labelStyle: TextStyle(color: _muted, fontSize: 11),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove keep',
+                  onPressed: _keepRows.length <= 1
                       ? null
-                      : () => _post('/api/studio/episodes/$eid/youtube-upload'),
-                  child: const Text('YouTube', style: TextStyle(fontSize: 11)),
-                ),
-                TextButton(
-                  onPressed: _busy ? null : () => _applyCuts(eid),
-                  child: const Text('Apply cuts', style: TextStyle(fontSize: 11)),
-                ),
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _post('/api/studio/episodes/$eid/approve'),
-                  child: const Text('Approve', style: TextStyle(fontSize: 11)),
-                ),
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _post('/api/studio/episodes/$eid/publish'),
-                  child: const Text('Publish', style: TextStyle(fontSize: 11)),
-                ),
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _post('/api/studio/episodes/$eid/regenerate', {
-                            'segment_id': 'ln',
-                            'coach_note': _noteCtrl.text.trim(),
-                          }),
-                  child: const Text('Regen LN', style: TextStyle(fontSize: 11)),
+                      : () {
+                          setState(() {
+                            row.start.dispose();
+                            row.end.dispose();
+                            _keepRows.removeAt(i);
+                          });
+                        },
+                  icon: const Icon(Icons.remove_circle_outline,
+                      color: _muted, size: 18),
                 ),
               ],
             ),
           );
         }),
-        const SizedBox(height: 20),
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              onPressed: _addKeepRow,
+              icon: const Icon(Icons.add, color: _gold, size: 16),
+              label: const Text('Add keep range',
+                  style: TextStyle(color: _gold, fontSize: 12)),
+            ),
+            TextButton(
+              onPressed: _busy ? null : () => _applyCuts(_editEid),
+              child: const Text('Apply cuts',
+                  style: TextStyle(color: _gold, fontSize: 12)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _personaPane() {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
         Text('MIRROR CAPTURE  $_complete/7',
             style: const TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
         const SizedBox(height: 8),
@@ -1053,4 +1350,10 @@ class _EnvelopePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _EnvelopePainter old) => old.points != points;
+}
+
+class _KeepRange {
+  final TextEditingController start;
+  final TextEditingController end;
+  _KeepRange({required this.start, required this.end});
 }

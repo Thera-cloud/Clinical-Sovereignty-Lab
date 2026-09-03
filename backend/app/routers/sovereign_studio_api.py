@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -375,7 +376,7 @@ async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(
 
         unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
     plan = await start_room_egress(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
-    if plan.get("media_r2_key") and (plan.get("started") or plan.get("r2")):
+    if plan.get("started") and plan.get("egress_id") and plan.get("media_r2_key"):
         from app.services.studio_media_tape import stamp_session_tape
 
         await stamp_session_tape(
@@ -917,13 +918,23 @@ async def livekit_room_page():
 
 @public_router.post("/livekit/events")
 async def livekit_events(request: Request):
-    from app.services.studio_livekit import handle_event, parse_egress_event
+    from app.services.studio_livekit import (
+        handle_event,
+        parse_egress_event,
+        verify_livekit_webhook,
+    )
     from app.services.studio_media_tape import stamp_session_tape
 
+    raw = await request.body()
+    checked = verify_livekit_webhook(request.headers.get("authorization") or "", raw)
+    if not checked.get("ok"):
+        raise HTTPException(401, checked.get("reason") or "unauthorized")
     body: Dict[str, Any] = {}
     try:
-        body = await request.json()
+        body = json.loads(raw.decode("utf-8")) if raw else {}
     except Exception:
+        body = {}
+    if not isinstance(body, dict):
         body = {}
     parsed = parse_egress_event(body)
     if parsed.get("session_id") and parsed.get("media_r2_key"):

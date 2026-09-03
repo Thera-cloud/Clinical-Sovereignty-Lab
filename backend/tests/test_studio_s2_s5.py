@@ -135,6 +135,10 @@ def test_migration_407_and_api_routes():
     assert "EPISODE REVIEW" in dart
     assert "Apply cuts" in dart
     assert "tape ready" in dart
+    assert "Tab(text: 'EDIT')" in dart
+    assert "Add keep range" in dart
+    assert "Watch tape" in dart
+    assert "_KeepRange" in dart
     assert "Little Nate (co-host)" in dart
     assert "Dump locked" in dart
     assert "Connect YouTube" in dart
@@ -151,6 +155,8 @@ def test_migration_407_and_api_routes():
     assert "APPLY" in boot
     assert "11434" in boot
     assert "10.13.13.5" in boot
+    assert "redis:" in boot
+    assert "/api/studio/livekit/events" in boot
 
 
 def test_sms_reply_and_autoscale():
@@ -257,6 +263,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert h["node"] == "orange"
     assert h["allow_video_guest"] is False
     assert "internal_reachable" in h
+    assert "egress_worker" in h
+    assert h["egress_worker"] is False
     plan = asyncio.run(start_room_egress("sid-apply"))
     assert plan["delay_s"] == 45
     assert plan["started"] is False
@@ -431,6 +439,21 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "/egress" in dart
     pin = (ROOT / "scripts/cf_pin_ln_observer_lb.sh").read_text()
     assert "/livekit" in pin
+    assert "/api/studio" in pin
+    boot = (ROOT / "scripts/orange/livekit_egress_bootstrap.sh").read_text()
+    assert "livekit/egress" in boot
+    assert "APPLY" in boot
+    assert "/out/config.yaml" in boot
+    assert "chmod 644" in boot
+    clone_pin = (ROOT / "nginx/snippets/clone-pin-to-primary.conf").read_text()
+    assert "location /api/studio" in clone_pin
+    assert "10.120.0.2" in clone_pin
+    dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
+    assert "Duration(seconds: 8)" in dart
+    assert "_scheduleEgress" in dart
+    assert "stop_session_egress" in (
+        ROOT / "backend/app/services/studio_session_service.py"
+    ).read_text()
 
 
 def test_studio_product_thread_and_onair_guards():

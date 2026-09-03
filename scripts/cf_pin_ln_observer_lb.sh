@@ -20,7 +20,7 @@ if [[ -z "${TOKEN}" || -z "${ACCT}" ]]; then
   exit 1
 fi
 
-NEW_COND='(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer") or starts_with(http.request.uri.path, "/livekit"))'
+NEW_COND='(starts_with(http.request.uri.path, "/ws") or starts_with(http.request.uri.path, "/api/ln-observer") or starts_with(http.request.uri.path, "/api/studio") or starts_with(http.request.uri.path, "/livekit"))'
 export TOKEN ACCT ZONE NEW_COND
 
 python3 <<'PY'
@@ -137,5 +137,5 @@ if not d.get("success"):
     raise SystemExit(5)
 for r in (d.get("result") or {}).get("rules") or []:
     print("AFTER", r.get("name"), "|", r.get("condition"))
-print("DONE — LN-Observer + /ws pinned via custom rule (zone PUT)")
+print("DONE — /ws + LN-Observer + /api/studio + /livekit pinned via custom rule (zone PUT)")
 PY

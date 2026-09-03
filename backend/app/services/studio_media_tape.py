@@ -75,6 +75,19 @@ def _num(raw: Any) -> Optional[float]:
         return None
 
 
+def tape_play_url(key: str, expires_in: int = 3600) -> str:
+    """Presigned R2 GET for coach review player. Empty when R2/key missing."""
+    path = (key or "").strip()
+    if not path:
+        return ""
+    try:
+        from app.services.r2_storage import generate_presigned_url
+
+        return generate_presigned_url(key=path, expires_in=expires_in) or ""
+    except Exception:
+        return ""
+
+
 async def stamp_session_tape(
     db_pool,
     session_id: str,

@@ -93,13 +93,12 @@ async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]
             egress_id = (prior.get("egress_id") or "").strip()
     except Exception as exc:
         logger.warning("studio end egress lookup: %s", exc)
-    if egress_id:
-        try:
-            from app.services.studio_livekit import stop_room_egress
+    try:
+        from app.services.studio_livekit import stop_session_egress
 
-            await stop_room_egress(egress_id, session_id)
-        except Exception as exc:
-            logger.warning("studio stop egress: %s", exc)
+        await stop_session_egress(session_id, egress_id)
+    except Exception as exc:
+        logger.warning("studio stop egress: %s", exc)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """
