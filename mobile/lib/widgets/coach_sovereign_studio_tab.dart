@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
@@ -56,6 +57,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _hostCtrl = TextEditingController();
+  final _rtmpCtrl = TextEditingController();
   String _vertical = 'life_coaching';
   bool _ytConnected = false;
   bool _smsOptIn = false;
@@ -68,6 +70,11 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   List<Map<String, dynamic>> _episodes = [];
   int _callersLogged = 0;
   int _callersOpted = 0;
+  List<String> _recentTopics = [];
+  String _delayNote = '';
+  String _meterNote = '';
+  Map<String, dynamic>? _queueBoard;
+  List<Map<String, dynamic>> _episodeFlags = [];
   String? _sessionId;
   int _complete = 0;
   bool _cloneConsent = false;
@@ -83,6 +90,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   String _tapeUrl = '';
   Timer? _tick;
   Timer? _egressRetry;
+  Timer? _callerPoll;
   int _egressAttempts = 0;
   int _secs = 0;
   int _personaEpoch = 0;
@@ -104,6 +112,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   void dispose() {
     _tick?.cancel();
     _egressRetry?.cancel();
+    _callerPoll?.cancel();
     stopStudioPlayback();
     if (_recordingPart != null) {
       _recorder.stop();
@@ -111,6 +120,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     _nameCtrl.dispose();
     _descCtrl.dispose();
     _hostCtrl.dispose();
+    _rtmpCtrl.dispose();
     _noteCtrl.dispose();
     _cutsCtrl.dispose();
     _studioTabs.dispose();
@@ -186,6 +196,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       final j = json.decode(r.body) as Map<String, dynamic>;
       final ep = Map<String, dynamic>.from((j['episode'] ?? {}) as Map);
       _loadCuts(ep['cuts']);
+      _episodeFlags =
+          List<Map<String, dynamic>>.from((j['flags'] ?? []) as List);
       final url = (ep['tape_url'] ?? '').toString();
       if (url.isNotEmpty) _tapeUrl = url;
       setState(() {});
@@ -258,6 +270,243 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
       );
 
+  Future<void> _refreshCallerBoard() async {
+    final sid = _sessionId ?? '';
+    if (sid.isEmpty) return;
+    try {
+      final r = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/sessions/$sid/queue'),
+        headers: _h,
+      );
+      if (!mounted || r.statusCode != 200) return;
+      setState(() {
+        _queueBoard = json.decode(r.body) as Map<String, dynamic>;
+      });
+    } catch (_) {}
+  }
+
+  void _startCallerPoll() {
+    _callerPoll?.cancel();
+    if ((_sessionId ?? '').isEmpty) return;
+    _refreshCallerBoard();
+    _callerPoll = Timer.periodic(const Duration(seconds: 3), (_) {
+      if ((_sessionId ?? '').isEmpty) return;
+      _refreshCallerBoard();
+    });
+  }
+
+  void _stopCallerPoll() {
+    _callerPoll?.cancel();
+    _callerPoll = null;
+  }
+
+  Future<void> _queueOp(String op, {String? callerId}) async {
+    final sid = _sessionId ?? '';
+    if (sid.isEmpty) return;
+    setState(() => _busy = true);
+    final r = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/studio/sessions/$sid/queue'),
+      headers: _h,
+      body: json.encode({
+        'op': op,
+        if (callerId != null && callerId.isNotEmpty) 'caller_id': callerId,
+      }),
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (r.statusCode == 200) {
+      await _refreshCallerBoard();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Queue ${r.statusCode}')),
+      );
+    }
+  }
+
+  Future<void> _loadShowOps() async {
+    final sid = (_selected?['id'] ?? '').toString();
+    if (sid.isEmpty) return;
+    try {
+      final showR = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/shows/$sid'),
+        headers: _h,
+      );
+      final delayR = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/shows/$sid/delay'),
+        headers: _h,
+      );
+      final meterR = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/studio/shows/$sid/meter'),
+        headers: _h,
+      );
+      if (!mounted) return;
+      if (showR.statusCode == 200) {
+        final j = json.decode(showR.body) as Map<String, dynamic>;
+        final show = Map<String, dynamic>.from((j['show'] ?? j) as Map);
+        _rtmpCtrl.text = (show['rtmp_url'] ?? '').toString();
+        if (show.isNotEmpty) {
+          _selected = {...?_selected, ...show};
+        }
+      }
+      if (delayR.statusCode == 200) {
+        final j = json.decode(delayR.body) as Map<String, dynamic>;
+        final unlocked = j['live_unlocked'] == true;
+        final delay = j['delay_s'] ?? 45;
+        _delayNote = unlocked
+            ? 'Live unlocked · ${j['dump'] ?? 'armed'} · ${delay}s delay'
+            : 'Dump locked until tier unlock · ${delay}s delay when live';
+      }
+      if (meterR.statusCode == 200) {
+        final j = json.decode(meterR.body) as Map<String, dynamic>;
+        final days = (j['days'] as List?) ?? [];
+        if (days.isNotEmpty && days.first is Map) {
+          final d = days.first as Map;
+          _meterNote =
+              '${d['day']}: ${d['session_minutes']} min session · ${d['caller_minutes']} caller min';
+        } else {
+          _meterNote = 'No meter rows yet';
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _verifyHost() async {
+    final sid = (_selected?['id'] ?? '').toString();
+    if (sid.isEmpty) return;
+    await _post('/api/studio/shows/$sid/verify-host-number', {
+      'host_number': _hostCtrl.text.trim(),
+    });
+  }
+
+  Future<void> _saveRtmp() async {
+    final sid = (_selected?['id'] ?? '').toString();
+    if (sid.isEmpty) return;
+    await _post('/api/studio/shows/$sid/rtmp-key', {
+      'rtmp_url': _rtmpCtrl.text.trim(),
+    });
+  }
+
+  Future<void> _copyRss() async {
+    final sid = (_selected?['id'] ?? '').toString();
+    if (sid.isEmpty) return;
+    final url = '${AppConfig.apiBaseUrl}/api/studio/feeds/$sid/rss';
+    await Clipboard.setData(ClipboardData(text: url));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('RSS feed URL copied')),
+    );
+  }
+
+  Future<void> _resolveFlag(String flagId) async {
+    if (_editEid.isEmpty) return;
+    final reason = _noteCtrl.text.trim();
+    if (reason.length < 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Type an 8+ char reason in coach note')),
+      );
+      return;
+    }
+    await _post('/api/studio/episodes/$_editEid/flags/$flagId/resolve', {
+      'reason': reason,
+    });
+    await _openEditor({'id': _editEid});
+  }
+
+  Widget _callerBoard() {
+    final q = Map<String, dynamic>.from(
+        (_queueBoard?['queue'] ?? {}) as Map? ?? {});
+    final labels = Map<String, dynamic>.from(
+        (q['labels'] ?? {}) as Map? ?? {});
+    final active = (q['active'] ?? '').toString();
+    final waiting = List<String>.from((q['waiting'] as List?) ?? []);
+    String label(String id) =>
+        (labels[id] ?? id).toString().replaceAll('caller-', 'Caller ');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('CALLER BOARD',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Text(
+          active.isEmpty
+              ? 'On air: —'
+              : 'On air: ${label(active)}',
+          style: const TextStyle(color: _text, fontSize: 12),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            OutlinedButton(
+              onPressed: _busy || active.isNotEmpty
+                  ? null
+                  : () => _queueOp('bring_on'),
+              child: const Text('Bring on next', style: TextStyle(fontSize: 11)),
+            ),
+            OutlinedButton(
+              onPressed: _busy || active.isEmpty
+                  ? null
+                  : () => _queueOp('hold'),
+              child: const Text('Hold', style: TextStyle(fontSize: 11)),
+            ),
+            OutlinedButton(
+              onPressed: _busy || active.isEmpty
+                  ? null
+                  : () => _queueOp('drop'),
+              child: const Text('Drop', style: TextStyle(fontSize: 11)),
+            ),
+          ],
+        ),
+        if (waiting.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text('Waiting room empty',
+                style: TextStyle(color: _muted, fontSize: 11)),
+          ),
+        ...waiting.map((id) {
+          return Card(
+            color: const Color(0xFF111111),
+            margin: const EdgeInsets.only(top: 6),
+            child: ListTile(
+              dense: true,
+              title: Text(label(id),
+                  style: const TextStyle(color: _text, fontSize: 12)),
+              subtitle: Text(id,
+                  style: const TextStyle(color: _muted, fontSize: 10)),
+              trailing: Wrap(
+                spacing: 0,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_upward, size: 16),
+                    color: _gold,
+                    onPressed: _busy
+                        ? null
+                        : () => _queueOp('move_up', callerId: id),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_downward, size: 16),
+                    color: _gold,
+                    onPressed: _busy
+                        ? null
+                        : () => _queueOp('move_down', callerId: id),
+                  ),
+                  TextButton(
+                    onPressed: _busy || active.isNotEmpty
+                        ? null
+                        : () => _queueOp('bring_on', callerId: id),
+                    child: const Text('Air', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   Future<void> _refresh() async {
     try {
       final showsR = await http.get(
@@ -323,7 +572,13 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
           final j = json.decode(memR.body) as Map<String, dynamic>;
           _callersLogged = (j['logged'] as num?)?.toInt() ?? 0;
           _callersOpted = (j['opted_in'] as num?)?.toInt() ?? 0;
+          _recentTopics = List<String>.from(
+              (j['recent_topics'] as List?)?.map((e) => e.toString()) ?? []);
         }
+        await _loadShowOps();
+      }
+      if ((_sessionId ?? '').isNotEmpty) {
+        await _refreshCallerBoard();
       }
       setState(() {});
     } catch (_) {}
@@ -332,6 +587,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   Future<void> _post(String path, [Map<String, dynamic>? body]) async {
     if (path.contains('/end')) {
       _egressRetry?.cancel();
+      _stopCallerPoll();
       _studioTabs.animateTo(2);
     }
     setState(() => _busy = true);
@@ -368,6 +624,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       _studioTabs.animateTo(1);
       if ((_sessionId ?? '').isNotEmpty) {
         await _joinRoom();
+        _startCallerPoll();
       }
     }
     await _refresh();
@@ -858,6 +1115,18 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
           ),
         ),
         const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _busy || _selected == null ? null : _verifyHost,
+          child: const Text('Verify host number', style: TextStyle(fontSize: 11)),
+        ),
+        if ((_selected?['did_e164'] ?? '').toString().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Listener line: ${_selected?['did_e164']}',
+            style: const TextStyle(color: _muted, fontSize: 11),
+          ),
+        ],
+        const SizedBox(height: 8),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -892,6 +1161,46 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
                   _refresh();
                 },
               )),
+        ],
+        const SizedBox(height: 12),
+        const Text('STREAM / RSS',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        TextField(
+          controller: _rtmpCtrl,
+          style: const TextStyle(color: _text, fontSize: 12),
+          decoration: const InputDecoration(
+            hintText: 'RTMP ingest URL (YouTube/Facebook live)',
+            hintStyle: TextStyle(color: _muted),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: _busy || _selected == null ? null : _saveRtmp,
+              child: const Text('Save RTMP'),
+            ),
+            TextButton(
+              onPressed: _selected == null ? null : _copyRss,
+              child: const Text('Copy RSS feed URL'),
+            ),
+          ],
+        ),
+        if (_delayNote.isNotEmpty)
+          Text('Delay: $_delayNote',
+              style: const TextStyle(color: _muted, fontSize: 11)),
+        if (_meterNote.isNotEmpty)
+          Text('Meter: $_meterNote',
+              style: const TextStyle(color: _muted, fontSize: 11)),
+        if (_recentTopics.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const Text('Recent caller topics (de-identified)',
+              style: TextStyle(color: _muted, fontSize: 11)),
+          ..._recentTopics.map(
+            (t) => Text('• $t',
+                style: const TextStyle(color: _text, fontSize: 11)),
+          ),
         ],
         const SizedBox(height: 16),
         const Text('LN PERSONA (L1/L2 platform-locked)',
@@ -1002,6 +1311,10 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         Text(
             'logged $_callersLogged · opted-in $_callersOpted · no transcript browse',
             style: const TextStyle(color: _muted, fontSize: 12)),
+        if ((_sessionId ?? '').isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _callerBoard(),
+        ],
       ],
     );
   }
@@ -1037,6 +1350,31 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         ),
         const SizedBox(height: 8),
         if (_editEid.isNotEmpty) _keepEditor(),
+        if (_editEid.isNotEmpty && _episodeFlags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          const Text('COMPLIANCE FLAGS',
+              style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+          ..._episodeFlags.map((f) {
+            final fid = (f['id'] ?? '').toString();
+            final status = (f['status'] ?? 'open').toString();
+            return ListTile(
+              dense: true,
+              title: Text(
+                  '${f['severity'] ?? ''} · ${f['rule_id'] ?? f['kind'] ?? 'flag'}',
+                  style: const TextStyle(color: _text, fontSize: 11)),
+              subtitle: Text(
+                  '${f['detail'] ?? ''} · $status',
+                  style: const TextStyle(color: _muted, fontSize: 10)),
+              trailing: status == 'open'
+                  ? TextButton(
+                      onPressed: _busy ? null : () => _resolveFlag(fid),
+                      child: const Text('Resolve',
+                          style: TextStyle(fontSize: 11)),
+                    )
+                  : null,
+            );
+          }),
+        ],
         if (_episodes.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 8),
@@ -1112,6 +1450,15 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
                         child: const Text('Approve',
                             style: TextStyle(fontSize: 11)),
                       ),
+                      if ((e['state'] ?? '').toString() == 'in_review')
+                        TextButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _post(
+                                  '/api/studio/episodes/$eid/reject'),
+                          child: const Text('Reject',
+                              style: TextStyle(fontSize: 11, color: Colors.red)),
+                        ),
                       TextButton(
                         onPressed: _busy
                             ? null

@@ -10,7 +10,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 from app.services.studio_invariants import guest_video_allowed
@@ -555,6 +555,53 @@ async def stop_session_egress(session_id: str, egress_id: str = "") -> Dict[str,
     last["stopped"] = stopped
     last["egress_ids"] = ids
     return last
+
+
+async def list_room_participants(session_id: str) -> Dict[str, Any]:
+    from app.services.studio_cohost_share import is_studio_host_identity
+
+    sid = (session_id or "").strip()
+    if not sid:
+        return {"ok": False, "participants": []}
+    room = f"studio-{sid}"
+    resp = await _twirp(
+        "/twirp/livekit.RoomService/ListParticipants",
+        {"room": room},
+        room=room,
+        timeout=5.0,
+    )
+    out: List[Dict[str, Any]] = []
+    if resp.get("ok"):
+        for part in (resp.get("data") or {}).get("participants") or []:
+            if not isinstance(part, dict):
+                continue
+            ident = str(part.get("identity") or "").strip()
+            if not ident or ident.startswith("egress"):
+                continue
+            out.append(
+                {
+                    "identity": ident,
+                    "name": str(part.get("name") or ident),
+                    "is_host": bool(is_studio_host_identity(ident)),
+                }
+            )
+    return {"ok": bool(resp.get("ok")), "participants": out, "http": resp.get("http")}
+
+
+async def send_room_data(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    sid = (session_id or "").strip()
+    if not sid:
+        return {"ok": False, "reason": "no_session"}
+    room = f"studio-{sid}"
+    raw = json.dumps(payload or {}).encode("utf-8")
+    data_b64 = base64.b64encode(raw).decode("ascii")
+    sent = await _twirp(
+        "/twirp/livekit.RoomService/SendData",
+        {"room": room, "data": data_b64, "kind": "RELIABLE"},
+        room=room,
+        timeout=5.0,
+    )
+    return {"ok": bool(sent.get("ok")), "http": sent.get("http"), "reason": sent.get("reason")}
 
 
 def join_token(session_id: str, role: str, identity: str = "") -> Dict[str, Any]:

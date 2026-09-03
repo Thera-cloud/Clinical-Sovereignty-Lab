@@ -203,6 +203,14 @@ async def persist_screener(
             logger.info("studio autoscale %s", scale_hint(n))
         except Exception as exc:
             logger.warning("studio autoscale skipped: %s", exc)
+    if session_id and consented and not risk and caller:
+        try:
+            from app.services.studio_caller_queue import caller_identity, enqueue_db_caller
+
+            ident = caller_identity(str(caller["id"]))
+            await enqueue_db_caller(None, str(session_id), ident, topic or "Caller")
+        except Exception as exc:
+            logger.warning("studio queue enqueue skipped: %s", exc)
 
 
 async def lookup_show_by_did(db_pool, did: str) -> Optional[str]:

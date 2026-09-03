@@ -663,3 +663,22 @@ def test_studio_share_host_only():
     assert "cannot see the page yet" in sess_src
     assert "images=[jpeg] if jpeg else None" in sess_src
     assert "needs_eyes" in sess_src
+
+
+def test_studio_caller_queue_wiring():
+    cq = load_svc("studio_caller_queue")
+    lk = load_svc("studio_livekit")
+    assert cq.move_waiting(["a", "b", "c"], "b", -1) == ["b", "a", "c"]
+    assert cq.move_waiting(["a", "b", "c"], "b", 1) == ["a", "c", "b"]
+    ident = cq.caller_identity("12345678-1234-1234-1234-123456789abc")
+    assert ident == "caller-12345678"
+    assert "send_room_data" in dir(lk)
+    assert "list_room_participants" in dir(lk)
+    api = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
+    assert "/sessions/{session_id}/queue" in api
+    assert "/sessions/{session_id}/callers" in api
+    dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
+    assert "CALLER BOARD" in dart
+    assert "Copy RSS feed URL" in dart
+    assert "Reject" in dart
+    assert "COMPLIANCE FLAGS" in dart

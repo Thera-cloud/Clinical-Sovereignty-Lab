@@ -76,6 +76,11 @@ class RtmpBody(BaseModel):
     rtmp_url: str = ""
 
 
+class QueueBody(BaseModel):
+    op: str
+    caller_id: str = ""
+
+
 class ConsentRecordBody(BaseModel):
     show_id: str = ""
     granted: bool = False
@@ -124,6 +129,15 @@ def _hw(user: Dict) -> str:
 
 def _pool(request: Request):
     return getattr(request.app.state, "db_pool", None)
+
+
+async def _redis(request: Request):
+    try:
+        from app.services.api_server import _get_auth_redis
+
+        return await _get_auth_redis()
+    except Exception:
+        return None
 
 
 def _flag() -> None:
@@ -325,6 +339,52 @@ async def dump_session(session_id: UUID, request: Request, user: Dict = Depends(
 
     # 409 tier2_locked when clean published episodes < LIVE_TIER_CLEAN_EPISODES
     return _raise(await _dump(_pool(request), str(session_id), _hw(user)))
+
+
+@router.get("/sessions/{session_id}/callers")
+async def session_callers(
+    session_id: UUID, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_caller_queue import list_session_callers
+
+    return _raise(
+        await list_session_callers(_pool(request), str(session_id), _hw(user))
+    )
+
+
+@router.get("/sessions/{session_id}/queue")
+async def session_queue_get(
+    session_id: UUID, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_caller_queue import get_board
+
+    return _raise(
+        await get_board(_pool(request), await _redis(request), str(session_id), _hw(user))
+    )
+
+
+@router.post("/sessions/{session_id}/queue")
+async def session_queue_op(
+    session_id: UUID,
+    body: QueueBody,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    _flag()
+    from app.services.studio_caller_queue import apply_queue_op
+
+    return _raise(
+        await apply_queue_op(
+            _pool(request),
+            await _redis(request),
+            str(session_id),
+            _hw(user),
+            body.op,
+            body.caller_id,
+        )
+    )
 
 
 @router.post("/sessions/{session_id}/join-token")
