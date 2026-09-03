@@ -75,6 +75,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
   int? _recordingPart;
   final _recorder = CoachWebRecorder();
   final _noteCtrl = TextEditingController();
+  final _cutsCtrl = TextEditingController();
   Timer? _tick;
   int _secs = 0;
   int _personaEpoch = 0;
@@ -102,6 +103,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     _descCtrl.dispose();
     _hostCtrl.dispose();
     _noteCtrl.dispose();
+    _cutsCtrl.dispose();
     super.dispose();
   }
 
@@ -250,10 +252,26 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
     );
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(r.statusCode == 200
-            ? 'OK'
-            : '${r.statusCode}: ${r.body.length > 80 ? r.body.substring(0, 80) : r.body}')));
+    String msg = '${r.statusCode}';
+    if (r.statusCode == 200) {
+      msg = 'OK';
+      try {
+        final j = json.decode(r.body);
+        if (j is Map) {
+          if (j['uploaded'] == true) {
+            msg = 'YouTube ${j['video_id'] ?? 'ok'}';
+          } else if (j['applied'] == true) {
+            msg = 'Cuts applied';
+          } else if (j['reason'] != null && '${j['reason']}'.isNotEmpty) {
+            msg = j['reason'].toString();
+          }
+        }
+      } catch (_) {}
+    } else {
+      msg =
+          '${r.statusCode}: ${r.body.length > 80 ? r.body.substring(0, 80) : r.body}';
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     if (path == '/api/studio/sessions' && r.statusCode == 200) {
       final j = json.decode(r.body) as Map<String, dynamic>;
       _sessionId = (j['session']?['id'] ?? j['id'] ?? '').toString();
@@ -324,6 +342,29 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
         _lkNote = note;
       });
     }
+  }
+
+  List<Map<String, double>> _parseCuts(String raw) {
+    final out = <Map<String, double>>[];
+    for (final part in raw.split(',')) {
+      final bits = part.trim().replaceAll('–', '-').split('-');
+      if (bits.length != 2) continue;
+      final a = double.tryParse(bits[0].trim());
+      final b = double.tryParse(bits[1].trim());
+      if (a == null || b == null || b <= a) continue;
+      out.add({'start_s': a, 'end_s': b});
+    }
+    return out;
+  }
+
+  Future<void> _applyCuts(String eid) async {
+    final cuts = _parseCuts(_cutsCtrl.text);
+    if (cuts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Cuts required (e.g. 10-40,90-120)')));
+      return;
+    }
+    await _post('/api/studio/episodes/$eid/apply-cuts', {'cuts': cuts});
   }
 
   Future<void> _openTranscript(String eid) async {
@@ -812,6 +853,14 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
             hintStyle: TextStyle(color: _muted),
           ),
         ),
+        TextField(
+          controller: _cutsCtrl,
+          style: const TextStyle(color: _text, fontSize: 12),
+          decoration: const InputDecoration(
+            hintText: 'FFmpeg cuts seconds e.g. 10-40,90-120',
+            hintStyle: TextStyle(color: _muted),
+          ),
+        ),
         if (_episodes.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 8),
@@ -820,11 +869,17 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
           ),
         ..._episodes.map((e) {
           final eid = (e['id'] ?? '').toString();
+          final key = (e['media_r2_key'] ?? '').toString();
+          final tape = e['media_ready'] == true && key.isNotEmpty
+              ? 'tape ready'
+              : (key.isNotEmpty ? 'tape pending' : 'no tape');
+          final yt = (e['youtube_video_id'] ?? '').toString();
           return ListTile(
             dense: true,
             title: Text('${e['title'] ?? 'Episode'} · ${e['state']}',
                 style: const TextStyle(color: _text, fontSize: 12)),
-            subtitle: Text('open flags ${e['open_flags'] ?? 0}',
+            subtitle: Text(
+                '$tape · open flags ${e['open_flags'] ?? 0}${yt.isEmpty ? '' : ' · yt $yt'}',
                 style: const TextStyle(color: _muted, fontSize: 11)),
             trailing: Wrap(
               spacing: 4,
@@ -838,6 +893,10 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab> {
                       ? null
                       : () => _post('/api/studio/episodes/$eid/youtube-upload'),
                   child: const Text('YouTube', style: TextStyle(fontSize: 11)),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : () => _applyCuts(eid),
+                  child: const Text('Apply cuts', style: TextStyle(fontSize: 11)),
                 ),
                 TextButton(
                   onPressed: _busy

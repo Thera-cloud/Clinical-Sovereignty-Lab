@@ -127,11 +127,14 @@ def test_migration_407_and_api_routes():
     assert "youtube/callback" in src
     assert "livekit/events" in src
     assert "ln-scan" in src
+    assert "apply-cuts" in src
     assert "cohost/turn" in src
     assert "cohost/caption" in src
     assert "cohost/speak" in src
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart
+    assert "Apply cuts" in dart
+    assert "tape ready" in dart
     assert "Little Nate (co-host)" in dart
     assert "Dump locked" in dart
     assert "Connect YouTube" in dart
@@ -219,6 +222,7 @@ def test_s4_room_meter_sip():
     assert plan["delay_s"] == 45
     assert plan["rtmp"] is False
     assert plan["photoreal"] is False
+    assert plan["media_r2_key"] == "studio/sid-1.mp4"
     minted = join_token("abc", "guest", identity="g1")
     assert minted["room_url"]
     assert minted["allow_video"] is False

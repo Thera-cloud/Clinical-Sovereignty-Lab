@@ -76,6 +76,30 @@ async def create_session(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]
 async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]:
     if not db_pool:
         return {"ok": False, "reason": "no_db", "code": 503}
+    egress_id = ""
+    try:
+        async with db_pool.acquire() as conn:
+            prior = await conn.fetchrow(
+                """
+                SELECT s.egress_id
+                FROM studio_sessions s
+                JOIN studio_shows sh ON sh.id = s.show_id
+                WHERE s.id = $1::uuid AND sh.coach_id = $2
+                """,
+                session_id,
+                coach_id,
+            )
+        if prior:
+            egress_id = (prior.get("egress_id") or "").strip()
+    except Exception as exc:
+        logger.warning("studio end egress lookup: %s", exc)
+    if egress_id:
+        try:
+            from app.services.studio_livekit import stop_room_egress
+
+            await stop_room_egress(egress_id, session_id)
+        except Exception as exc:
+            logger.warning("studio stop egress: %s", exc)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """

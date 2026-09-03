@@ -206,7 +206,8 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT e.id, e.title, e.media_r2_key, e.youtube_video_id, e.show_id
+                SELECT e.id, e.title, e.media_r2_key, e.youtube_video_id, e.show_id,
+                       e.session_id
                 FROM studio_episodes e
                 JOIN studio_shows s ON s.id = e.show_id
                 WHERE e.id = $1::uuid AND s.coach_id = $2
@@ -224,6 +225,23 @@ async def upload_episode(db_pool, coach_id: str, episode_id: str) -> Dict[str, A
                 "video_id": row["youtube_video_id"],
             }
         media_key = row.get("media_r2_key")
+        if not media_key and row.get("session_id"):
+            from app.services.studio_media_tape import attach_session_media_key
+
+            tape = await attach_session_media_key(db_pool, str(row["session_id"]))
+            media_key = (tape.get("media_r2_key") or "").strip() or None
+            if media_key:
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE studio_episodes
+                        SET media_r2_key = COALESCE(media_r2_key, $2),
+                            media_master_r2_key = COALESCE(media_master_r2_key, $2)
+                        WHERE id = $1::uuid
+                        """,
+                        episode_id,
+                        media_key,
+                    )
         title = row.get("title") or title
         show_id = str(row.get("show_id") or "")
     if not media_key:

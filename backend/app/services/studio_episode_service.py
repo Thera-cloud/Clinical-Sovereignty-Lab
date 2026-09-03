@@ -244,9 +244,12 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
         rows = await conn.fetch(
             """
             SELECT e.id, e.state, e.title, e.created_at,
+                   e.media_r2_key, e.media_cut_r2_key, e.youtube_video_id,
+                   COALESCE(sess.media_ready, FALSE) AS media_ready,
               (SELECT COUNT(*) FROM studio_compliance_flags f
                 WHERE f.episode_id = e.id AND f.status = 'open') AS open_flags
             FROM studio_episodes e
+            LEFT JOIN studio_sessions sess ON sess.id = e.session_id
             WHERE e.show_id = $1::uuid
             ORDER BY e.created_at DESC
             LIMIT 40
@@ -261,6 +264,10 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
                 "state": r["state"],
                 "title": r["title"],
                 "open_flags": int(r["open_flags"] or 0),
+                "media_r2_key": r.get("media_r2_key") or "",
+                "media_cut_r2_key": r.get("media_cut_r2_key") or "",
+                "media_ready": bool(r.get("media_ready")),
+                "youtube_video_id": r.get("youtube_video_id") or "",
             }
             for r in rows
         ],
@@ -273,7 +280,7 @@ async def create_from_session(db_pool, session_id: str, coach_id: str) -> Dict[s
     async with db_pool.acquire() as conn:
         sess = await conn.fetchrow(
             """
-            SELECT s.id, s.show_id, sh.name
+            SELECT s.id, s.show_id, sh.name, s.media_r2_key, s.media_ready
             FROM studio_sessions s
             JOIN studio_shows sh ON sh.id = s.show_id
             WHERE s.id = $1::uuid AND sh.coach_id = $2
@@ -290,16 +297,31 @@ async def create_from_session(db_pool, session_id: str, coach_id: str) -> Dict[s
         if existing:
             return {"ok": True, "episode_id": str(existing["id"]), "existing": True}
         transcript = await _speaker_transcript(conn, session_id)
+        media_key = (sess.get("media_r2_key") or "").strip()
+        if not media_key:
+            from app.services.studio_livekit import session_media_r2_key
+
+            candidate = session_media_r2_key(session_id)
+            try:
+                from app.services.r2_storage import head_object
+
+                if candidate and head_object(key=candidate):
+                    media_key = candidate
+            except Exception:
+                media_key = ""
         ep = await conn.fetchrow(
             """
-            INSERT INTO studio_episodes (show_id, session_id, state, title, transcript_json)
-            VALUES ($1::uuid, $2::uuid, 'in_review', $3, $4::jsonb)
+            INSERT INTO studio_episodes
+              (show_id, session_id, state, title, transcript_json,
+               media_r2_key, media_master_r2_key)
+            VALUES ($1::uuid, $2::uuid, 'in_review', $3, $4::jsonb, $5, $5)
             RETURNING id
             """,
             sess["show_id"],
             session_id,
             f"{sess['name']} session",
             json.dumps(transcript),
+            media_key or None,
         )
     from app.services.studio_compliance import run_pass
 
@@ -487,6 +509,12 @@ def _ep(row) -> Dict[str, Any]:
             transcript = json.loads(transcript)
         except Exception:
             transcript = []
+    cuts = row.get("cuts_json")
+    if isinstance(cuts, str):
+        try:
+            cuts = json.loads(cuts)
+        except Exception:
+            cuts = []
     return {
         "id": str(row["id"]),
         "show_id": str(row["show_id"]),
@@ -494,6 +522,11 @@ def _ep(row) -> Dict[str, Any]:
         "title": row.get("title"),
         "approved_by": row.get("approved_by"),
         "transcript": transcript if isinstance(transcript, list) else [],
+        "media_r2_key": row.get("media_r2_key") or "",
+        "media_master_r2_key": row.get("media_master_r2_key") or "",
+        "media_cut_r2_key": row.get("media_cut_r2_key") or "",
+        "youtube_video_id": row.get("youtube_video_id") or "",
+        "cuts": cuts if isinstance(cuts, list) else [],
     }
 
 

@@ -71,6 +71,16 @@ def verify_livekit_jwt(token: str) -> Dict[str, Any]:
     }
 
 
+def session_media_r2_key(session_id: str) -> str:
+    sid = (session_id or "").strip()
+    return f"studio/{sid}.mp4" if sid else ""
+
+
+def session_cut_r2_key(session_id: str) -> str:
+    sid = (session_id or "").strip()
+    return f"studio/{sid}/cut.mp4" if sid else ""
+
+
 def egress_plan(session_id: str, rtmp_url: str = "", live_unlocked: bool = False) -> Dict[str, Any]:
     return {
         "ok": True,
@@ -83,6 +93,7 @@ def egress_plan(session_id: str, rtmp_url: str = "", live_unlocked: bool = False
         "rtmp_url_set": bool(rtmp_url),
         "dump_cuts_delayed_output": True,
         "installed": bool(os.getenv("LIVEKIT_INTERNAL_URL")),
+        "media_r2_key": session_media_r2_key(session_id),
     }
 
 
@@ -189,13 +200,67 @@ def mint_livekit_jwt(
     return f"{h}.{p}.{_b64(sig)}"
 
 
+def parse_egress_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    raw = body or {}
+    event = str(raw.get("event") or raw.get("event_type") or "").strip()
+    info = raw.get("egressInfo") or raw.get("egress_info") or raw
+    if not isinstance(info, dict):
+        info = {}
+    room = str(info.get("roomName") or info.get("room_name") or raw.get("room") or "")
+    sid = room[7:] if room.startswith("studio-") else ""
+    file_obj: Any = info.get("file") or info.get("fileResults") or info.get("file_results") or {}
+    if isinstance(file_obj, list) and file_obj:
+        file_obj = file_obj[0]
+    if not isinstance(file_obj, dict):
+        file_obj = {}
+    filepath = str(
+        file_obj.get("filename")
+        or file_obj.get("filepath")
+        or info.get("filepath")
+        or ""
+    )
+    if not sid and filepath.startswith("studio/") and filepath.endswith(".mp4"):
+        mid = filepath[7:-4]
+        if "/" not in mid:
+            sid = mid
+    egress_id = str(
+        info.get("egressId") or info.get("egress_id") or raw.get("egress_id") or ""
+    )
+    status = info.get("status")
+    if status is None:
+        status = raw.get("status")
+    status_s = str(status or "").upper()
+    failed = status in (4, 5, 6, "4", "5", "6") or status_s in (
+        "EGRESS_FAILED",
+        "EGRESS_ABORTED",
+        "EGRESS_LIMIT_REACHED",
+    )
+    complete = (not failed) and (
+        event in ("egress_ended", "egress_complete", "egress_finished")
+        or status in (3, "3")
+        or status_s == "EGRESS_COMPLETE"
+    )
+    return {
+        "event": event or "unknown",
+        "session_id": sid,
+        "egress_id": egress_id,
+        "complete": bool(complete and sid),
+        "media_r2_key": session_media_r2_key(sid) if sid else "",
+        "failed": failed,
+    }
+
+
 def handle_event(body: Dict[str, Any]) -> Dict[str, Any]:
-    event = str((body or {}).get("event") or (body or {}).get("event_type") or "").strip()
+    parsed = parse_egress_event(body)
     return {
         "ok": True,
-        "event": event or "unknown",
+        "event": parsed.get("event") or "unknown",
         "allow_video_guest": False,
         "installed": bool(os.getenv("LIVEKIT_INTERNAL_URL")),
+        "session_id": parsed.get("session_id") or "",
+        "egress_id": parsed.get("egress_id") or "",
+        "complete": bool(parsed.get("complete")),
+        "media_r2_key": parsed.get("media_r2_key") or "",
     }
 
 
@@ -258,12 +323,60 @@ async def start_room_egress(
         plan["http"] = resp.status_code
         plan["started"] = resp.status_code < 400
         plan["egress_reply"] = (resp.text or "")[:240]
+        try:
+            data = resp.json() if resp.content else {}
+            if isinstance(data, dict):
+                plan["egress_id"] = str(
+                    data.get("egress_id") or data.get("egressId") or ""
+                )
+        except Exception:
+            plan["egress_id"] = ""
         if resp.status_code >= 400:
             plan["reason"] = "egress_worker_or_api"
     except Exception as exc:
         plan["started"] = False
         plan["reason"] = str(exc)[:120]
     return plan
+
+
+async def stop_room_egress(egress_id: str, session_id: str = "") -> Dict[str, Any]:
+    eid = (egress_id or "").strip()
+    out: Dict[str, Any] = {"ok": True, "stopped": False, "egress_id": eid}
+    if not eid:
+        out["reason"] = "no_egress_id"
+        return out
+    internal = (os.getenv("LIVEKIT_INTERNAL_URL") or "").rstrip("/")
+    key = os.getenv("LIVEKIT_API_KEY", "")
+    secret = os.getenv("LIVEKIT_API_SECRET", "")
+    if not internal or not key or not secret:
+        out["reason"] = "livekit_not_configured"
+        return out
+    token = mint_livekit_jwt(
+        api_key=key,
+        api_secret=secret,
+        room=f"studio-{session_id}" if session_id else "studio",
+        identity="egress",
+        role="host",
+    )
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.post(
+                f"{internal}/twirp/livekit.Egress/StopEgress",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"egress_id": eid},
+            )
+        out["http"] = resp.status_code
+        out["stopped"] = resp.status_code < 400
+        if resp.status_code >= 400:
+            out["reason"] = "egress_stop"
+    except Exception as exc:
+        out["reason"] = str(exc)[:120]
+    return out
 
 
 def join_token(session_id: str, role: str, identity: str = "") -> Dict[str, Any]:

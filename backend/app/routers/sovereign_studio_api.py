@@ -374,7 +374,18 @@ async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(
         from app.services.studio_invariants import live_tier_unlocked
 
         unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
-    return await start_room_egress(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
+    plan = await start_room_egress(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
+    if plan.get("media_r2_key") and (plan.get("started") or plan.get("r2")):
+        from app.services.studio_media_tape import stamp_session_tape
+
+        await stamp_session_tape(
+            pool,
+            str(session_id),
+            media_r2_key=str(plan.get("media_r2_key") or ""),
+            egress_id=str(plan.get("egress_id") or ""),
+            ready=False,
+        )
+    return plan
 
 
 @router.get("/shows/{show_id}/meter")
@@ -441,6 +452,18 @@ async def episode_cuts(
     from app.services.studio_episode_service import add_cuts
 
     return _raise(await add_cuts(_pool(request), str(episode_id), _hw(user), body.cuts or []))
+
+
+@router.post("/episodes/{episode_id}/apply-cuts")
+async def episode_apply_cuts(
+    episode_id: UUID, body: CutsBody, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_media_tape import apply_cuts
+
+    return _raise(
+        await apply_cuts(_pool(request), str(episode_id), _hw(user), body.cuts)
+    )
 
 
 @router.post("/episodes/{episode_id}/approve")
@@ -894,13 +917,23 @@ async def livekit_room_page():
 
 @public_router.post("/livekit/events")
 async def livekit_events(request: Request):
-    from app.services.studio_livekit import handle_event
+    from app.services.studio_livekit import handle_event, parse_egress_event
+    from app.services.studio_media_tape import stamp_session_tape
 
     body: Dict[str, Any] = {}
     try:
         body = await request.json()
     except Exception:
         body = {}
+    parsed = parse_egress_event(body)
+    if parsed.get("session_id") and parsed.get("media_r2_key"):
+        await stamp_session_tape(
+            _pool(request),
+            str(parsed["session_id"]),
+            media_r2_key=str(parsed.get("media_r2_key") or ""),
+            egress_id=str(parsed.get("egress_id") or ""),
+            ready=bool(parsed.get("complete")),
+        )
     return handle_event(body)
 
 
