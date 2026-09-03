@@ -172,3 +172,35 @@ def test_family_sanctuary_handlers_untouched():
         "generate_group_coaching_response",
     ):
         assert required in text
+
+
+def test_enter_fs_is_terminal_not_resumed():
+    """Lisa/Bill: leftover ENTER_FS must not reopen as today's Daily Reconnect."""
+    src = Path(__file__).resolve().parents[1] / "app" / "services" / "daily_reconnect_engine.py"
+    text = src.read_text()
+    assert "AND state NOT IN ('CLOSED', 'CRISIS_BYPASS', 'ENTER_FS')" in text
+    assert "'CLOSED', 'CRISIS_BYPASS', 'ENTER_FS'" in text
+
+
+def test_get_or_create_does_not_join_family_sanctuary():
+    src = (_ENGINE_PATH).read_text()
+    handle = src.split("async def _handle_get_or_create", 1)[1].split("async def _handle_join", 1)[0]
+    assert "add_or_reconnect_member" not in handle
+    assert "_ensure_sanctuary_room" not in handle
+
+
+def test_fs_offer_accept_attaches_sanctuary():
+    src = (_ENGINE_PATH).read_text()
+    handle = src.split("async def _handle_fs_offer_response", 1)[1].split("async def _handoff_enter_fs_coaching", 1)[0]
+    assert "add_or_reconnect_member" in handle
+    assert "_ensure_sanctuary_room" in handle
+
+
+def test_daily_reconnect_ui_does_not_auto_dump_into_sanctuary():
+    dart = Path(__file__).resolve().parents[2] / "mobile" / "lib" / "screens" / "daily_reconnect_screen.dart"
+    text = dart.read_text()
+    assert "pushReplacement" not in text
+    assert "_maybeHandoffToSanctuary(msg)" in text
+    state_block = text.split("if (type == 'reconnect_state'", 1)[1].split("if (type == 'reconnect_fs_response'", 1)[0]
+    assert "_maybeHandoffToSanctuary" not in state_block
+    assert "_logoutToLobby" in text

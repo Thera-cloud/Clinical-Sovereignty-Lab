@@ -264,29 +264,6 @@ class DailyReconnectEngine:
                 )
             session = await self._load_session(sid) or session
 
-        if self.sanctuary_engine and not session.get("sanctuary_id"):
-            sanctuary_id = await self._ensure_sanctuary_room(family_id, profile)
-            if sanctuary_id:
-                async with self.db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE daily_reconnect_session SET sanctuary_id = $1, updated_at = NOW() WHERE id = $2::uuid",
-                        sanctuary_id, sid,
-                    )
-                session["sanctuary_id"] = sanctuary_id
-
-        if session.get("sanctuary_id") and self.sanctuary_engine:
-            try:
-                hw = profile.get("hardware_id") or username
-                await self.sanctuary_engine.add_or_reconnect_member(
-                    sanctuary_id=session["sanctuary_id"],
-                    user_id=hw,
-                    user_name=profile.get("name") or username,
-                    websocket=websocket,
-                    user_family_id=family_id,
-                )
-            except Exception as e:
-                _log(f"sanctuary room attach failed: {e}")
-
         payload = await self._session_payload(session, username, warm_return=warm_return)
         await self._send(websocket, {"type": "reconnect_state", **payload})
         await self._broadcast(sid, {"type": "reconnect_member_joined", "user_id": username}, exclude=username)
@@ -496,6 +473,28 @@ class DailyReconnectEngine:
         if accepted:
             if session["state"] == "WRAP_UP":
                 await self._transition(session_id, "OFFER_FS", "wrap_up_to_sanctuary")
+            family_id = profile.get("family_id")
+            if self.sanctuary_engine and not session.get("sanctuary_id") and family_id:
+                sanctuary_id = await self._ensure_sanctuary_room(family_id, profile)
+                if sanctuary_id:
+                    async with self.db_pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE daily_reconnect_session SET sanctuary_id = $1, updated_at = NOW() WHERE id = $2::uuid",
+                            sanctuary_id, session_id,
+                        )
+                    session["sanctuary_id"] = sanctuary_id
+            if session.get("sanctuary_id") and self.sanctuary_engine:
+                try:
+                    hw = profile.get("hardware_id") or await self._resolve_user(profile)
+                    await self.sanctuary_engine.add_or_reconnect_member(
+                        sanctuary_id=session["sanctuary_id"],
+                        user_id=hw,
+                        user_name=profile.get("name") or hw,
+                        websocket=websocket,
+                        user_family_id=family_id,
+                    )
+                except Exception as e:
+                    _log(f"sanctuary room attach failed: {e}")
             await self._transition(session_id, "ENTER_FS", "fs_accepted")
             if session.get("sanctuary_id"):
                 try:
@@ -977,7 +976,7 @@ class DailyReconnectEngine:
                 """
                 SELECT * FROM daily_reconnect_session
                 WHERE family_id = $1 AND closed_at IS NULL
-                  AND state NOT IN ('CLOSED', 'CRISIS_BYPASS')
+                  AND state NOT IN ('CLOSED', 'CRISIS_BYPASS', 'ENTER_FS')
                 ORDER BY created_at DESC LIMIT 1
                 """,
                 family_id,
@@ -1000,7 +999,7 @@ class DailyReconnectEngine:
                 """
                 UPDATE daily_reconnect_session
                 SET state = $2, updated_at = NOW(),
-                    closed_at = CASE WHEN $2 IN ('CLOSED', 'CRISIS_BYPASS') THEN NOW() ELSE closed_at END
+                    closed_at = CASE WHEN $2 IN ('CLOSED', 'CRISIS_BYPASS', 'ENTER_FS') THEN NOW() ELSE closed_at END
                 WHERE id = $1::uuid
                 """,
                 session_id, new_state,

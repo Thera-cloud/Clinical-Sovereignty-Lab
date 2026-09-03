@@ -5246,7 +5246,6 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                             color: Color(0xFFC9A962)),
                         tooltip: 'Daily Reconnect',
                         onPressed: () async {
-                          _wsCh?.sink.close();
                           await Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -5283,7 +5282,6 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                         icon: const Icon(Icons.family_restroom,
                             color: Colors.amber),
                         onPressed: () async {
-                          _wsCh?.sink.close(); // FIX-H
                           await Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -5431,14 +5429,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                           });
                         },
                       ),
-                      IconButton(
+                          IconButton(
                           icon: const Icon(Icons.logout, color: Colors.red),
+                          tooltip: 'Log out',
                           onPressed: () {
-                            _wsCh?.sink.close(); // FIX-H
-                            Navigator.pushReplacement(
-                                context,
+                            _wsCh?.sink.close();
+                            Navigator.of(context).pushAndRemoveUntil(
                                 MaterialPageRoute(
-                                    builder: (_) => const LobbyScreen()));
+                                    builder: (_) => const LobbyScreen()),
+                                (route) => false);
                           }),
                     ],
                   ),

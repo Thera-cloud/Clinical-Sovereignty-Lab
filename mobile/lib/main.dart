@@ -5203,10 +5203,26 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   }
 
   void _exitSanctuary() {
-    _channel!.sink.add(json.encode({
+    _channel?.sink.add(json.encode({
       'type': 'sanctuary_exit',
       'sanctuary_id': _sanctuaryId,
     }));
+  }
+
+  void _leaveScreen() {
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  void _logoutToLobby() {
+    _isManuallyDisconnected = true;
+    try {
+      ClientWsHub.channel?.sink.close();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LobbyScreen()),
+      (route) => false,
+    );
   }
 
   void _confirmExit(String reason, bool informFamily) {
@@ -6278,12 +6294,19 @@ void _syncSanctuaryState() {
             ),
           ),
           const SizedBox(width: 6),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            tooltip: 'Log out',
+            onPressed: _logoutToLobby,
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onSelected: (value) {
+              if (value == 'leave') _leaveScreen();
               if (value == 'exit') _exitSanctuary();
               if (value == 'complete') _completeSanctuary();
               if (value == 'save_chat') _saveConversation();
+              if (value == 'logout') _logoutToLobby();
             },
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'save_chat', child: Row(children: [
@@ -6291,11 +6314,16 @@ void _syncSanctuaryState() {
                 SizedBox(width: 8),
                 Text('Save Conversation'),
               ])),
-              const PopupMenuItem(value: 'exit', child: Text('Exit Sanctuary')),
+              const PopupMenuItem(value: 'leave', child: Text('Back to chat')),
+              const PopupMenuItem(value: 'exit', child: Text('Pause Sanctuary')),
               PopupMenuItem(
                 value: 'complete',
                 enabled: _canCompleteSanctuary,
                 child: Text(_canCompleteSanctuary ? 'Complete Sanctuary' : 'Complete Sanctuary (HEAD only)'),
+              ),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Text('Log out', style: TextStyle(color: Colors.redAccent)),
               ),
             ],
           ),

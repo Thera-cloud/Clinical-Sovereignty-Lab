@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../main.dart' show FamilySanctuaryScreen, defaultWsUrl;
+import '../main.dart' show ClientWsHub, FamilySanctuaryScreen, LobbyScreen, defaultWsUrl;
 
 /// Daily Reconnect — Nate-fronted connection ritual (TOP_TIER gated).
 class DailyReconnectScreen extends StatefulWidget {
@@ -47,6 +47,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   final _scrollController = ScrollController();
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
+  bool _borrowedFromHub = false;
 
   @override
   void initState() {
@@ -60,7 +61,9 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
       _send({'type': 'reconnect_exit', 'session_id': _sessionId});
     }
     _sub?.cancel();
-    _channel?.sink.close();
+    if (!_borrowedFromHub) {
+      _channel?.sink.close();
+    }
     _reconnectTimer?.cancel();
     _turnController.dispose();
     _scrollController.dispose();
@@ -68,6 +71,17 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   }
 
   void _connect() {
+    _sub?.cancel();
+    _reconnectTimer?.cancel();
+    if (ClientWsHub.channel != null) {
+      _borrowedFromHub = true;
+      _channel = ClientWsHub.channel;
+      _sub = ClientWsHub.inbound.listen(_onMessage, onDone: _scheduleReconnect, onError: (_) => _scheduleReconnect);
+      _status = 'ready';
+      _send({'type': 'reconnect_get_or_create'});
+      return;
+    }
+    _borrowedFromHub = false;
     _channel = WebSocketChannel.connect(Uri.parse(defaultWsUrl));
     _sub = _channel!.stream.listen(_onMessage, onDone: _scheduleReconnect, onError: (_) => _scheduleReconnect);
   }
@@ -89,7 +103,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
 
   void _openFamilySanctuary() {
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
+    Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => FamilySanctuaryScreen(
           profile: widget.profile,
@@ -106,6 +120,17 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     if (state == 'ENTER_FS' && sid != null) {
       _openFamilySanctuary();
     }
+  }
+
+  void _logoutToLobby() {
+    try {
+      ClientWsHub.channel?.sink.close();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LobbyScreen()),
+      (route) => false,
+    );
   }
 
   void _applySessionFields(Map<String, dynamic> msg) {
@@ -287,6 +312,13 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
       final msg = jsonDecode(raw as String) as Map<String, dynamic>;
       final type = msg['type'] as String? ?? '';
       if (type == 'connected' || type == 'login_success') {
+        if (_borrowedFromHub) {
+          if (type == 'login_success') {
+            setState(() => _status = 'ready');
+            _send({'type': 'reconnect_get_or_create'});
+          }
+          return;
+        }
         if (type == 'connected') {
           _send({
             'type': 'login_request',
@@ -305,7 +337,6 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
           _applySessionFields(msg);
         });
         _scrollToLatestTurn();
-        _maybeHandoffToSanctuary(msg);
         return;
       }
       if (type == 'reconnect_fs_response') {
@@ -363,6 +394,13 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
         backgroundColor: const Color(0xFF0A0A0A),
         title: const Text('Daily Reconnect', style: TextStyle(color: gold)),
         iconTheme: const IconThemeData(color: gold),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            tooltip: 'Log out',
+            onPressed: _logoutToLobby,
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
