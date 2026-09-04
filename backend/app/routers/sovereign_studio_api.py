@@ -76,6 +76,12 @@ class RtmpBody(BaseModel):
     rtmp_url: str = ""
 
 
+class YoutubeGoLiveBody(BaseModel):
+    title: str = ""
+    privacy: str = "unlisted"
+    session_id: str = ""
+
+
 class QueueBody(BaseModel):
     op: str
     caller_id: str = ""
@@ -447,6 +453,43 @@ async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(
             ready=False,
         )
     return plan
+
+
+@router.post("/sessions/{session_id}/share-asset")
+async def share_asset_coach(
+    session_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    user: Dict = Depends(require_coach),
+):
+    """Coach JWT ingest from the STUDIO ON AIR picker. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    pool = _pool(request)
+    if not pool:
+        raise HTTPException(503, "no_db")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT s.id FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE s.id = $1::uuid AND sh.coach_id = $2
+            """,
+            str(session_id),
+            _hw(user),
+        )
+    if not row:
+        raise HTTPException(404, "not_found")
+    raw = await file.read()
+    from app.services.studio_cohost_share import ingest_share_asset
+
+    return _raise(
+        await ingest_share_asset(
+            str(session_id),
+            raw,
+            filename=file.filename or "file",
+            content_type=file.content_type or "",
+        )
+    )
 
 
 @router.get("/shows/{show_id}/meter")
@@ -925,6 +968,28 @@ async def cohost_share_frame_public(
     return {"ok": True, "seen": bool(out.get("seen")), "note": out.get("note") or ""}
 
 
+@public_router.post("/sessions/{session_id}/cohost/share-asset")
+async def cohost_share_asset_public(
+    session_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Host-only image/PDF/document ingest so Nate can read the page. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    _require_host_jwt(request, session_id)
+    raw = await file.read()
+    from app.services.studio_cohost_share import ingest_share_asset
+
+    return _raise(
+        await ingest_share_asset(
+            str(session_id),
+            raw,
+            filename=file.filename or "file",
+            content_type=file.content_type or "",
+        )
+    )
+
+
 @public_router.post("/sessions/{session_id}/cohost/share")
 async def cohost_share_public(session_id: UUID, body: CohostShareBody, request: Request):
     """Host-only lookup or URL card for the share pane. QUANTUM-CRYSTAL-ARCH"""
@@ -1014,6 +1079,60 @@ async def youtube_status(request: Request, user: Dict = Depends(require_coach)):
     from app.services.studio_youtube import oauth_status
 
     return await oauth_status(_pool(request), _hw(user))
+
+
+@router.post("/shows/{show_id}/youtube-go-live")
+async def youtube_go_live(
+    show_id: UUID,
+    body: YoutubeGoLiveBody,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    """Create a Live event on the assigned coach channel and save RTMP. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    from app.services.studio_youtube import go_live
+
+    pool = _pool(request)
+    out = await go_live(
+        pool,
+        _hw(user),
+        str(show_id),
+        title=body.title,
+        privacy=body.privacy,
+    )
+    if not out.get("ok"):
+        return _raise(out)
+    sid = (body.session_id or "").strip()
+    if sid and pool:
+        from app.services.studio_livekit import start_room_egress
+        from app.services.studio_invariants import live_tier_unlocked
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT sh.rtmp_url,
+                  (SELECT COUNT(*) FROM studio_episodes e
+                    WHERE e.show_id = sh.id AND e.state = 'published'
+                      AND NOT EXISTS (
+                        SELECT 1 FROM studio_compliance_flags f
+                        WHERE f.episode_id = e.id AND f.status = 'open'
+                      )
+                  ) AS clean_published
+                FROM studio_sessions s
+                JOIN studio_shows sh ON sh.id = s.show_id
+                WHERE s.id = $1::uuid AND sh.id = $2::uuid AND sh.coach_id = $3
+                """,
+                sid,
+                str(show_id),
+                _hw(user),
+            )
+        if row:
+            unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
+            plan = await start_room_egress(
+                sid, rtmp_url=row["rtmp_url"] or "", live_unlocked=unlocked
+            )
+            out["egress"] = plan
+    return out
 
 
 @router.get("/youtube/connect")

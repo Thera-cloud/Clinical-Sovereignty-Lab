@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import base64
+import io
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 logger = logging.getLogger("studio_cohost_share")
@@ -52,7 +53,7 @@ def remember_share_frame(session_id: str, note: str, jpeg_b64: str = "") -> None
     if not sid:
         return
     _SEEN[sid] = {
-        "note": (note or "")[:800],
+        "note": (note or "")[:4000],
         "jpeg": (jpeg_b64 or "")[:900_000],
         "at": time.time(),
     }
@@ -85,7 +86,7 @@ async def describe_share_frame(image_bytes: bytes) -> Dict[str, Any]:
     raw = image_bytes or b""
     if len(raw) < 80:
         return {"ok": False, "reason": "empty_frame", "code": 422}
-    if len(raw) > 500_000:
+    if len(raw) > 1_500_000:
         return {"ok": False, "reason": "frame_too_large", "code": 413}
     jpeg = base64.b64encode(raw).decode("ascii")
     note = ""
@@ -111,6 +112,194 @@ async def describe_share_frame(image_bytes: bytes) -> Dict[str, Any]:
         logger.warning("studio share-frame describe skipped: %s", exc)
         note = ""
     return {"ok": True, "note": note[:800], "seen": bool(note), "jpeg": jpeg}
+
+
+_MAX_IMAGE = 2_000_000
+_MAX_DOC = 8_000_000
+_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/pjpeg",
+}
+_DOC_TYPES = {
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+_VIDEO_TYPES = {
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-m4v",
+    "video/mpeg",
+}
+
+
+def classify_share_asset(filename: str, content_type: str) -> str:
+    name = (filename or "").strip().lower()
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    if ctype in _VIDEO_TYPES or name.endswith((".mp4", ".webm", ".mov", ".m4v", ".mpeg", ".mpg")):
+        return "video"
+    if ctype in _IMAGE_TYPES or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return "image"
+    if ctype == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    if ctype.endswith("wordprocessingml.document") or name.endswith(".docx"):
+        return "docx"
+    if ctype in {"text/plain", "text/markdown"} or name.endswith((".txt", ".md")):
+        return "txt"
+    if ctype == "application/msword" or name.endswith(".doc"):
+        return "doc"
+    if ctype.startswith("image/"):
+        return "image"
+    if ctype.startswith("video/"):
+        return "video"
+    return "unknown"
+
+
+def _resize_image_jpeg(raw: bytes) -> bytes:
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(raw))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        img.thumbnail((1280, 1280))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=78)
+        out = buf.getvalue()
+        return out if out else raw
+    except Exception:
+        return raw
+
+
+def _extract_pdf(raw: bytes) -> Tuple[str, bytes]:
+    text = ""
+    jpeg = b""
+    try:
+        import fitz
+
+        doc = fitz.open(stream=raw, filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            if i >= 12:
+                break
+            pages.append(page.get_text() or "")
+            if i == 0 and not jpeg:
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.4, 1.4), alpha=False)
+                jpeg = pix.tobytes("jpeg")
+                if len(jpeg) > 450_000:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(0.9, 0.9), alpha=False)
+                    jpeg = pix.tobytes("jpeg")
+        text = "\n".join(pages)
+        doc.close()
+    except Exception as exc:
+        logger.warning("studio pdf fitz: %s", exc)
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(raw))
+            text = "\n".join((p.extract_text() or "") for p in reader.pages[:12])
+        except Exception as exc2:
+            logger.warning("studio pdf pypdf: %s", exc2)
+    return text.strip(), jpeg
+
+
+def _extract_docx(raw: bytes) -> str:
+    try:
+        from docx import Document
+
+        doc = Document(io.BytesIO(raw))
+        parts = [p.text for p in doc.paragraphs if (p.text or "").strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text for c in row.cells if (c.text or "").strip()]
+                if cells:
+                    parts.append(" | ".join(cells))
+        return "\n".join(parts).strip()
+    except Exception as exc:
+        logger.warning("studio docx: %s", exc)
+        return ""
+
+
+def _extract_txt(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="replace").strip()
+
+
+async def ingest_share_asset(
+    session_id: str,
+    raw: bytes,
+    filename: str = "",
+    content_type: str = "",
+) -> Dict[str, Any]:
+    """Host upload → text/still Nate can actually read. QUANTUM-CRYSTAL-ARCH"""
+    blob = raw or b""
+    name = (filename or "file").strip()[:180] or "file"
+    kind = classify_share_asset(name, content_type)
+    if kind == "video":
+        return {
+            "ok": False,
+            "reason": "video_use_booth_still",
+            "code": 422,
+            "hint": "Open the live room Video tab so Nate gets a still of the clip.",
+        }
+    if kind == "doc":
+        return {"ok": False, "reason": "convert_doc_to_pdf", "code": 422}
+    if kind == "unknown":
+        return {"ok": False, "reason": "unsupported_share_type", "code": 422}
+    if kind == "image":
+        if len(blob) > _MAX_IMAGE:
+            return {"ok": False, "reason": "file_too_large", "code": 413}
+        framed = _resize_image_jpeg(blob)
+        out = await describe_share_frame(framed)
+        if not out.get("ok"):
+            return out
+        ocr = (out.get("note") or "").strip()
+        note = f"On screen ({name}): {ocr}".strip() if ocr else f"On screen image {name} — still attached for Little Nate."
+        jpeg = out.get("jpeg") or base64.b64encode(framed).decode("ascii")
+        remember_share_frame(session_id, note, jpeg)
+        return {
+            "ok": True,
+            "kind": "image",
+            "seen": bool(ocr) or bool(jpeg),
+            "note": note[:4000],
+            "name": name,
+        }
+    if len(blob) > _MAX_DOC:
+        return {"ok": False, "reason": "file_too_large", "code": 413}
+    jpeg_bytes = b""
+    text = ""
+    share_kind = "document"
+    if kind == "pdf":
+        text, jpeg_bytes = _extract_pdf(blob)
+        share_kind = "document"
+    elif kind == "docx":
+        text = _extract_docx(blob)
+    else:
+        text = _extract_txt(blob)
+        if len(blob) > 400_000:
+            return {"ok": False, "reason": "file_too_large", "code": 413}
+    if not text and not jpeg_bytes:
+        return {"ok": False, "reason": "unread_document", "code": 422}
+    excerpt = (text or "")[:3600]
+    note = f"On screen ({name}):\n{excerpt}" if excerpt else f"On screen document {name} — page still attached."
+    jpeg = base64.b64encode(jpeg_bytes).decode("ascii") if jpeg_bytes else ""
+    remember_share_frame(session_id, note, jpeg)
+    return {
+        "ok": True,
+        "kind": share_kind,
+        "seen": note_has_seen_content(note) or bool(jpeg),
+        "note": note[:4000],
+        "name": name,
+        "pages_read": bool(text),
+    }
 
 
 def resolve_sound(sound_id: str) -> Dict[str, Any]:

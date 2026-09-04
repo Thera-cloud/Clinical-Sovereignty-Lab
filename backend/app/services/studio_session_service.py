@@ -283,11 +283,19 @@ async def cohost_turn(
 
     sid = str(session_id)
     share_k = (share_kind or "").strip()[:40]
-    share_n = (share_note or "").strip()[:800]
+    share_n = (share_note or "").strip()[:4000]
     seen = share_seen(sid)
     share_n = merge_share_note(share_n, seen.get("note") or "")
     jpeg = seen.get("jpeg") or ""
-    needs_eyes = share_k.lower() in {"screen", "image", "file", "window"}
+    needs_eyes = share_k.lower() in {
+        "screen",
+        "image",
+        "file",
+        "window",
+        "document",
+        "video",
+        "pdf",
+    }
     can_see = note_has_seen_content(share_n) or bool(jpeg)
     if kind in ("toss", "open", "caller_join"):
         prime_clear(sid)

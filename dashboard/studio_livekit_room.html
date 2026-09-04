@@ -41,6 +41,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #waitHint{display:block;font-size:10px;color:#8B7355;margin-top:2px}
 .tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
 .tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto}
+#shareTabs{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px;flex:0 0 auto}
+#shareTabs button{background:#111;color:#8B7355;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:10px;letter-spacing:1px;cursor:pointer}
+#shareTabs button.on{border-color:#C9A962;color:#C9A962}
 .tile .box{flex:1;position:relative;min-height:220px;background:#0A0A0A;overflow:hidden}
 .tile .box video{position:absolute;inset:0;width:100%!important;height:100%!important;object-fit:cover;object-position:center;background:#0A0A0A}
 .tile .box canvas#env{position:absolute;width:1px!important;height:1px!important;opacity:0;pointer-events:none}
@@ -85,7 +88,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
     <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901q" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
-    <div class="tile" id="shareTile"><h3>ON SCREEN</h3><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or ask Nate to look it up</div></div></div>
+    <div class="tile" id="shareTile"><h3>ON SCREEN</h3><div id="shareTabs"><button type="button" id="tabShareScreen" data-share="screen">Screen</button><button type="button" id="tabShareImage" data-share="image">Image</button><button type="button" id="tabShareDoc" data-share="doc">Document</button><button type="button" id="tabShareVideo" data-share="video">Video</button><button type="button" id="tabShareLookup" data-share="lookup">Lookup</button></div><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or ask Nate to look it up</div></div></div>
   </div>
   <aside id="rail">
     <div id="joinCall">JOIN THE CALL</div>
@@ -117,7 +120,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   <button id="btnFile" type="button">File</button>
   <button id="btnLookup" type="button">Look up</button>
   <button id="btnSfx" type="button">Sound</button>
-  <input id="shareFile" type="file" accept="image/*,.pdf,.txt,.doc,.docx" hidden/>
+  <input id="shareFile" type="file" accept="image/*,video/*,.pdf,.txt,.doc,.docx,.md,.mp4,.webm,.mov" hidden/>
+  <input id="shareFileImage" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden/>
+  <input id="shareFileDoc" type="file" accept=".pdf,.txt,.doc,.docx,.md,application/pdf,text/plain" hidden/>
+  <input id="shareFileVideo" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" hidden/>
   <button id="btnToss" type="button">Toss to Nate</button>
   <button id="btnPause" type="button">Pause LN</button>
   <button id="btnBring" type="button">Bring on</button>
@@ -194,6 +200,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       var src = null, w = 0, h = 0;
       if (v && v.videoWidth){ src = v; w = v.videoWidth; h = v.videoHeight; }
       if ((!src || !w) && img && img.naturalWidth){ src = img; w = img.naturalWidth; h = img.naturalHeight; }
+      var still = document.querySelector('#shareTile canvas.share-still');
+      if ((!src || !w) && still && still.width){ src = still; w = still.width; h = still.height; }
       if (!src || !w || !h) return null;
       var scale = Math.min(1, 1280 / Math.max(w, h));
       var c = document.createElement('canvas');
@@ -812,7 +820,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (vid){ try { vid.srcObject = null; } catch (e) {} vid.removeAttribute('src'); }
     var box = document.getElementById('shareBox');
     if (box){
-      var extras = box.querySelectorAll('.share-img, .share-doc');
+      var extras = box.querySelectorAll('.share-img, .share-doc, canvas.share-still');
       for (var i = 0; i < extras.length; i++) extras[i].remove();
     }
     if (shareObjUrl){ try { URL.revokeObjectURL(shareObjUrl); } catch (e) {} shareObjUrl = ''; }
@@ -940,6 +948,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     shareLayout(false);
     var btn = document.getElementById('btnShare');
     if (btn){ btn.textContent = 'Share'; btn.classList.remove('on'); }
+    markShareTab('');
     if (!guest) broadcastShare();
     setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Share closed — hosts side by side.');
   }
@@ -976,22 +985,126 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     navigator.mediaDevices.getDisplayMedia({video:true, audio:true}).then(function(ms){
       return publishShareStream(ms, 'screen', 'Host is sharing a window.');
     }).then(function(){
+      markShareTab('screen');
       setStatus('On screen — sending Nate a still of the page.');
     }).catch(function(e){
       if (e && e.name === 'NotAllowedError') setStatus('Screen share cancelled.');
       else setStatus('Screen share failed.');
     });
   }
+  function markShareTab(kind){
+    var tabs = document.getElementById('shareTabs');
+    if (!tabs) return;
+    var btns = tabs.querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++){
+      var k = btns[i].getAttribute('data-share') || '';
+      btns[i].classList.toggle('on', k === kind);
+    }
+  }
+  function pushShareAsset(file){
+    if (guest || !file || !cfg.session || !cfg.token) return Promise.resolve();
+    if (file.size > 8 * 1024 * 1024){
+      setStatus('File is too large for Nate to ingest (8 MB max).');
+      return Promise.resolve();
+    }
+    var fd = new FormData();
+    fd.append('file', file, file.name || 'file');
+    return fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/share-asset', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      body: fd
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (j && j.ok){
+        shareState.on = true;
+        shareState.kind = j.kind || shareState.kind || 'document';
+        if (j.note) shareState.note = j.note;
+        var cards = document.getElementById('shareCards');
+        if (cards && j.note){
+          cards.hidden = false;
+          cards.innerHTML = '';
+          var d = document.createElement('div');
+          d.className = 'card';
+          d.textContent = (j.note || '').slice(0, 900);
+          cards.appendChild(d);
+        }
+        broadcastShare({kind: shareState.kind, note: shareState.note, name: file.name || ''});
+        setStatus(j.seen ? 'On screen — Nate can read it.' : 'On screen — Nate has the still.');
+      } else {
+        setStatus('Nate could not read that file: ' + ((j && (j.detail || j.reason)) || 'unavailable'));
+      }
+      return j;
+    }).catch(function(){ setStatus('Upload to Nate failed.'); });
+  }
+  function openShareVideo(file){
+    var url = URL.createObjectURL(file);
+    shareObjUrl = url;
+    var vid = document.getElementById('shareVid');
+    if (!vid) return;
+    vid.srcObject = null;
+    vid.src = url;
+    vid.muted = true;
+    vid.loop = true;
+    vid.onloadeddata = function(){
+      shareLayout(true);
+      showShareEmpty(true);
+      markShareTab('video');
+      var stream = null;
+      try {
+        if (vid.captureStream) stream = vid.captureStream(8);
+        else if (vid.mozCaptureStream) stream = vid.mozCaptureStream(8);
+      } catch (e) {}
+      var note = 'On screen video ' + (file.name || 'clip') + ' — stills going to Nate.';
+      if (stream && stream.getVideoTracks && stream.getVideoTracks().length){
+        publishShareStream(stream, 'video', note);
+      } else {
+        shareState.on = true;
+        shareState.kind = 'video';
+        shareState.note = note;
+        document.getElementById('btnShare').textContent = 'Stop share';
+        document.getElementById('btnShare').classList.add('on');
+        broadcastShare({kind:'video', name:file.name || '', note:note});
+        armShareFrames();
+      }
+      vid.play().catch(function(){});
+      setStatus('On screen — sending Nate a still of the clip.');
+    };
+  }
+  function openShareDocument(file){
+    unpublishShare();
+    shareState.on = true;
+    shareState.kind = 'document';
+    shareState.note = '';
+    shareLayout(true);
+    showShareEmpty(true);
+    markShareTab('doc');
+    var type = (file.type || '').toLowerCase();
+    var low = (file.name || '').toLowerCase();
+    if (type === 'application/pdf' || low.slice(-4) === '.pdf'){
+      shareObjUrl = URL.createObjectURL(file);
+      var obj = document.createElement('object');
+      obj.className = 'share-doc';
+      obj.type = 'application/pdf';
+      obj.data = shareObjUrl;
+      document.getElementById('shareBox').appendChild(obj);
+    }
+    document.getElementById('btnShare').textContent = 'Stop share';
+    document.getElementById('btnShare').classList.add('on');
+    pushShareAsset(file);
+  }
   function openShareFile(file){
     if (guest || !file) return;
-    var type = file.type || '';
+    unpublishShare();
+    clearSharePane();
+    var type = (file.type || '').toLowerCase();
     var name = file.name || 'file';
-    if (type.indexOf('image/') === 0){
+    var low = name.toLowerCase();
+    if (type.indexOf('image/') === 0 || /\.(jpg|jpeg|png|webp|gif)$/.test(low)){
       var url = URL.createObjectURL(file);
       shareObjUrl = url;
       var img = new Image();
       img.onload = function(){
         var c = document.createElement('canvas');
+        c.className = 'share-still';
         c.width = Math.max(16, img.naturalWidth);
         c.height = Math.max(16, img.naturalHeight);
         c.getContext('2d').drawImage(img, 0, 0);
@@ -999,37 +1112,19 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         shown.className = 'share-img';
         shown.src = url;
         document.getElementById('shareBox').appendChild(shown);
+        markShareTab('image');
         var stream = c.captureStream(6);
-        publishShareStream(stream, 'image', 'Host opened image ' + name);
+        publishShareStream(stream, 'image', 'On screen image ' + name + ' — still going to Nate.');
+        pushShareAsset(file);
       };
       img.src = url;
       return;
     }
-    shareState.on = true;
-    shareState.kind = 'file';
-    shareState.note = 'Host opened ' + name;
-    shareLayout(true);
-    showShareEmpty(true);
-    if (type === 'application/pdf'){
-      shareObjUrl = URL.createObjectURL(file);
-      var obj = document.createElement('object');
-      obj.className = 'share-doc';
-      obj.type = 'application/pdf';
-      obj.data = shareObjUrl;
-      document.getElementById('shareBox').appendChild(obj);
-    } else {
-      var cards = document.getElementById('shareCards');
-      cards.hidden = false;
-      cards.textContent = '';
-      var d = document.createElement('div');
-      d.className = 'card';
-      d.textContent = name + ' is on the host pane.';
-      cards.appendChild(d);
+    if (type.indexOf('video/') === 0 || /\.(mp4|webm|mov|m4v)$/.test(low)){
+      openShareVideo(file);
+      return;
     }
-    document.getElementById('btnShare').textContent = 'Stop share';
-    document.getElementById('btnShare').classList.add('on');
-    broadcastShare({kind:'file', name:name});
-    setStatus(name + ' is on screen.');
+    openShareDocument(file);
   }
   function doLookup(query){
     if (guest || !cfg.session || !cfg.token) return;
@@ -1050,6 +1145,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       shareState.note = j.note || '';
       shareLayout(true);
       renderShareCards(j.results || [], j.query || q);
+      markShareTab('lookup');
       document.getElementById('btnShare').textContent = 'Stop share';
       document.getElementById('btnShare').classList.add('on');
       broadcastShare({kind:'search', query:j.query || q, results:j.results || [], note:j.note || ''});
@@ -1162,11 +1258,13 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   pollRealm();
   setInterval(pollRealm, 20000);
   renderWait();
-  if (guest) {
+    if (guest) {
     ['btnCam','btnShare','btnFile','btnLookup','btnSfx'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
+    var tabs = document.getElementById('shareTabs');
+    if (tabs) tabs.style.display = 'none';
   }
   document.getElementById('btnChat').onclick = function(){
     document.getElementById('transcript').classList.toggle('collapsed');
@@ -1460,11 +1558,33 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (guest) return;
     document.getElementById('shareFile').click();
   };
-  document.getElementById('shareFile').onchange = function(){
-    var f = this.files && this.files[0];
-    this.value = '';
-    if (f) openShareFile(f);
-  };
+  function bindSharePick(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.onchange = function(){
+      var f = this.files && this.files[0];
+      this.value = '';
+      if (f) openShareFile(f);
+    };
+  }
+  bindSharePick('shareFile');
+  bindSharePick('shareFileImage');
+  bindSharePick('shareFileDoc');
+  bindSharePick('shareFileVideo');
+  (function(){
+    var tabs = document.getElementById('shareTabs');
+    if (!tabs || guest) return;
+    tabs.addEventListener('click', function(ev){
+      var t = ev.target;
+      if (!t || t.tagName !== 'BUTTON') return;
+      var kind = t.getAttribute('data-share') || '';
+      if (kind === 'screen') startScreenShare();
+      else if (kind === 'image') document.getElementById('shareFileImage').click();
+      else if (kind === 'doc') document.getElementById('shareFileDoc').click();
+      else if (kind === 'video') document.getElementById('shareFileVideo').click();
+      else if (kind === 'lookup') doLookup('');
+    });
+  })();
   document.getElementById('btnLookup').onclick = function(){ doLookup(''); };
   document.getElementById('btnSfx').onclick = function(){
     if (guest) return;

@@ -145,6 +145,10 @@ def test_migration_407_and_api_routes():
     assert "Speaker transcript" in dart
     assert "Open studio room" in dart
     assert "SESSION VIEW" in dart
+    assert "Tab(text: 'ON AIR')" in dart
+    assert "Go live on YouTube" in dart
+    assert "Pick file for Nate" in dart
+    assert "youtube-go-live" in dart
     html = (ROOT / "mobile/web/studio_livekit_room.html").read_text()
     nate_html = (ROOT / "mobile/web/studio_nate_room.html").read_text()
     assert html == nate_html
@@ -361,7 +365,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260902u" in url
+    assert "v=20260903a" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -615,6 +619,11 @@ def test_studio_realm_rotation():
         assert "function grabShareJpeg" in room, rel
         assert "function pushShareFrame" in room, rel
         assert "cohost/share-frame" in room, rel
+        assert 'id="shareTabs"' in room, rel
+        assert 'id="shareFileVideo"' in room, rel
+        assert "cohost/share-asset" in room, rel
+        assert "function pushShareAsset" in room, rel
+        assert "function openShareVideo" in room, rel
 
 
 def test_studio_share_host_only():
@@ -652,7 +661,10 @@ def test_studio_share_host_only():
     api_src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
     assert '/sessions/{session_id}/cohost/share' in api_src
     assert '/sessions/{session_id}/cohost/share-frame' in api_src
+    assert '/sessions/{session_id}/cohost/share-asset' in api_src
+    assert '/sessions/{session_id}/share-asset' in api_src
     assert '/sessions/{session_id}/cohost/sound' in api_src
+    assert "youtube-go-live" in api_src
     assert "host_only" in api_src
     assert "_require_host_jwt" in api_src
 
@@ -663,6 +675,29 @@ def test_studio_share_host_only():
     assert "cannot see the page yet" in sess_src
     assert "images=[jpeg] if jpeg else None" in sess_src
     assert "needs_eyes" in sess_src
+
+    assert share.classify_share_asset("notes.txt", "text/plain") == "txt"
+    assert share.classify_share_asset("clip.mp4", "video/mp4") == "video"
+    assert share.classify_share_asset("page.pdf", "application/pdf") == "pdf"
+    txt = asyncio.run(
+        share.ingest_share_asset(
+            "sess-doc",
+            b"Clinical Sovereignty Lab patent claims visible on the page.\n" * 3,
+            "notes.txt",
+            "text/plain",
+        )
+    )
+    assert txt["ok"] is True
+    assert txt["seen"] is True
+    assert "On screen" in txt["note"]
+    assert "patent claims" in txt["note"]
+    vid = asyncio.run(
+        share.ingest_share_asset("sess-doc", b"not-a-video", "clip.mp4", "video/mp4")
+    )
+    assert vid["ok"] is False
+    yt = (ROOT / "backend/app/services/studio_youtube.py").read_text()
+    assert "auth/youtube" in yt
+    assert "async def go_live" in yt
 
 
 def test_studio_caller_queue_wiring():

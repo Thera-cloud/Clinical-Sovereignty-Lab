@@ -60,6 +60,9 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   final _rtmpCtrl = TextEditingController();
   String _vertical = 'life_coaching';
   bool _ytConnected = false;
+  String _ytChannel = '';
+  String _ytWatch = '';
+  String _ytHint = '';
   bool _smsOptIn = false;
   String _lkNote = '';
   String _roomUrl = '';
@@ -104,7 +107,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   @override
   void initState() {
     super.initState();
-    _studioTabs = TabController(length: 4, vsync: this);
+    _studioTabs = TabController(length: 5, vsync: this);
     _refresh();
   }
 
@@ -542,6 +545,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       if (ytR.statusCode == 200) {
         final j = json.decode(ytR.body) as Map<String, dynamic>;
         _ytConnected = j['connected'] == true;
+        _ytChannel = (j['channel_name'] ?? '').toString();
+        _ytHint = (j['live_hint'] ?? '').toString();
       }
       if (envR.statusCode == 200) {
         final j = json.decode(envR.body) as Map<String, dynamic>;
@@ -606,6 +611,9 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         if (j is Map) {
           if (j['uploaded'] == true) {
             msg = 'YouTube ${j['video_id'] ?? 'ok'}';
+          } else if (j['live'] == true) {
+            _ytWatch = (j['watch_url'] ?? '').toString();
+            msg = _ytWatch.isNotEmpty ? 'Live $_ytWatch' : 'YouTube live armed';
           } else if (j['applied'] == true) {
             msg = 'Cuts applied';
           } else if (j['reason'] != null && '${j['reason']}'.isNotEmpty) {
@@ -648,6 +656,108 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     if (url.isEmpty) return;
     await launchUrl(Uri.parse(url),
         mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+  }
+
+  Future<void> _goYoutubeLive() async {
+    final sid = (_selected?['id'] ?? '').toString();
+    if (sid.isEmpty) return;
+    final title = _nameCtrl.text.trim().isEmpty
+        ? 'Sovereign Studio live'
+        : _nameCtrl.text.trim();
+    await _post('/api/studio/shows/$sid/youtube-go-live', {
+      'title': title,
+      'privacy': 'unlisted',
+      'session_id': _sessionId ?? '',
+    });
+  }
+
+  Future<void> _pickLiveShare() async {
+    final sid = (_sessionId ?? '').trim();
+    if (sid.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Start a session first, then pick a file for Nate.')));
+      return;
+    }
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const [
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+          'gif',
+          'pdf',
+          'txt',
+          'doc',
+          'docx',
+          'md',
+          'mp4',
+          'webm',
+          'mov',
+        ],
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+      final file = picked.files.first;
+      final ext = (file.extension ?? '').toLowerCase();
+      if (['mp4', 'webm', 'mov', 'm4v'].contains(ext)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Video: Open studio room → ON SCREEN → Video so Nate gets a still.')));
+        return;
+      }
+      final bytes = await _pickedFileBytes(file);
+      if (bytes == null || bytes.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read that file')));
+        return;
+      }
+      if (bytes.length > 8 * 1024 * 1024) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File is over 8 MB')));
+        return;
+      }
+      setState(() => _busy = true);
+      final req = http.MultipartRequest(
+        'POST',
+        Uri.parse(
+            '${AppConfig.apiBaseUrl}/api/studio/sessions/$sid/share-asset'),
+      );
+      req.headers['Authorization'] = 'Bearer ${widget.token}';
+      req.files.add(http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: file.name,
+      ));
+      final streamed = await req.send();
+      final r = await http.Response.fromStream(streamed);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      String msg = '${r.statusCode}';
+      if (r.statusCode == 200) {
+        try {
+          final j = json.decode(r.body) as Map<String, dynamic>;
+          msg = j['seen'] == true
+              ? 'Nate can read ${(j['name'] ?? file.name)}'
+              : (j['reason'] ?? 'Uploaded').toString();
+        } catch (_) {
+          msg = 'Uploaded';
+        }
+      } else {
+        msg = r.body.length > 80 ? r.body.substring(0, 80) : r.body;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Picker failed: $e')));
+    }
   }
 
   Future<void> _toggleSms(bool on) async {
@@ -1049,6 +1159,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
             Tab(text: 'LIVE'),
             Tab(text: 'EDIT'),
             Tab(text: 'PERSONA'),
+            Tab(text: 'ON AIR'),
           ],
         ),
         Expanded(
@@ -1059,6 +1170,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
               _livePane(liveReady),
               _editPane(),
               _personaPane(),
+              _onAirPane(liveReady),
             ],
           ),
         ),
@@ -1242,6 +1354,96 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     );
   }
 
+  Widget _onAirPane(bool liveReady) {
+    final channel = _ytChannel.isEmpty ? 'not connected' : _ytChannel;
+    final sessionOn = (_sessionId ?? '').isNotEmpty;
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
+        const Text('YOUTUBE LIVE',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Text(
+          _ytConnected
+              ? 'Assigned channel: $channel'
+              : 'Connect your YouTube channel, then Go live.',
+          style: const TextStyle(color: _text, fontSize: 13),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Go live creates a YouTube Live event on that channel and writes the RTMP ingest. Start a session first if you want Studio to push the room to YouTube in the same step.',
+          style: TextStyle(color: _muted, fontSize: 12),
+        ),
+        if (_ytHint.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(_ytHint, style: const TextStyle(color: _muted, fontSize: 11)),
+        ],
+        if (_ytWatch.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(_ytWatch, style: const TextStyle(color: _text, fontSize: 12)),
+        ],
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: _busy ? null : _connectYoutube,
+              child: const Text('Connect YouTube'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              onPressed: _busy || !_ytConnected || _selected == null
+                  ? null
+                  : _goYoutubeLive,
+              child: const Text('Go live on YouTube',
+                  style: TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+        if (!liveReady)
+          const Text(
+            'RTMP egress waits until 1 clean published episode unlocks live tier.',
+            style: TextStyle(color: _muted, fontSize: 11),
+          ),
+        const SizedBox(height: 16),
+        const Text('ON SCREEN FOR LITTLE NATE',
+            style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        const Text(
+          'Pick an image, PDF, or document. Nate reads the extracted text / still. For video, open the studio room and use ON SCREEN → Video.',
+          style: TextStyle(color: _muted, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _gold),
+              onPressed: _busy || !sessionOn ? null : _pickLiveShare,
+              child: const Text('Pick file for Nate',
+                  style: TextStyle(color: Colors.black)),
+            ),
+            if (_roomUrl.isNotEmpty)
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        final tab = openStudioRoomPlaceholder();
+                        await _joinRoom();
+                        if (!mounted || _roomUrl.isEmpty) return;
+                        navigateStudioRoomTab(tab, _roomUrl);
+                      },
+                child: const Text('Open studio room'),
+              ),
+          ],
+        ),
+        if (!sessionOn)
+          const Text('Start a session on LIVE first.',
+              style: TextStyle(color: _muted, fontSize: 11)),
+      ],
+    );
+  }
+
   Widget _livePane(bool liveReady) {
     return ListView(
       padding: const EdgeInsets.only(top: 12),
@@ -1252,7 +1454,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
           const Text('SESSION VIEW',
               style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
           const Text(
-              'Host tile · LN avatar · callers (audio) · waiting room. Dock: Mute, Camera, Toss, Pause LN, Bring on, Hold, Drop, End.',
+              'Host tile · LN avatar · callers (audio) · waiting room. Dock: Mute, Camera, Share, File, Look up. ON SCREEN tabs: Screen · Image · Document · Video · Lookup.',
               style: TextStyle(color: _muted, fontSize: 11)),
           const SizedBox(height: 6),
         ],

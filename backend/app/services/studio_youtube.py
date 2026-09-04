@@ -17,7 +17,11 @@ logger = logging.getLogger("studio_youtube")
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
-SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+SCOPES = (
+    "https://www.googleapis.com/auth/youtube.upload "
+    "https://www.googleapis.com/auth/youtube.readonly "
+    "https://www.googleapis.com/auth/youtube"
+)
 
 
 def _client() -> tuple[str, str]:
@@ -82,6 +86,11 @@ async def oauth_status(db_pool, coach_id: str) -> Dict[str, Any]:
         "oauth_configured": bool(cid),
         "channel_owned_by": "coach",
         "channel_name": channel,
+        "can_create_live": connected,
+        "live_hint": (
+            "Go live creates a YouTube Live event on this channel and writes the RTMP ingest. "
+            "If Google returns insufficient permissions, tap Connect YouTube again to grant live access."
+        ),
     }
 
 
@@ -366,6 +375,127 @@ async def _access_token(db_pool, coach_id: str) -> str:
     except Exception as exc:
         logger.warning("studio youtube access: %s", exc)
         return ""
+
+
+def _yt_error(data: Any) -> str:
+    err = (data or {}).get("error") if isinstance(data, dict) else None
+    if isinstance(err, dict):
+        errors = err.get("errors") or []
+        if errors and isinstance(errors[0], dict):
+            return str(errors[0].get("reason") or errors[0].get("message") or "")[:160]
+        return str(err.get("message") or err.get("status") or "")[:160]
+    return ""
+
+
+async def go_live(
+    db_pool,
+    coach_id: str,
+    show_id: str,
+    title: str = "",
+    privacy: str = "unlisted",
+) -> Dict[str, Any]:
+    """Create a Live event on the coach's connected channel and store RTMP. QUANTUM-CRYSTAL-ARCH"""
+    status = await oauth_status(db_pool, coach_id)
+    if not status.get("connected"):
+        return {"ok": False, "reason": "youtube_not_connected", "code": 409}
+    vis = (privacy or "unlisted").strip().lower()
+    if vis not in {"unlisted", "public"}:
+        vis = "unlisted"
+    token = await _access_token(db_pool, coach_id)
+    if not token:
+        return {"ok": False, "reason": "youtube_token", "code": 409}
+    name = (title or "").strip()[:90] or "Sovereign Studio live"
+    from datetime import datetime, timedelta, timezone
+
+    start = (datetime.now(timezone.utc) + timedelta(seconds=20)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    try:
+        import httpx
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            br = await client.post(
+                f"{YT_API_BASE}/liveBroadcasts",
+                params={"part": "snippet,status,contentDetails"},
+                headers=headers,
+                json={
+                    "snippet": {"title": name, "scheduledStartTime": start},
+                    "status": {"privacyStatus": vis, "selfDeclaredMadeForKids": False},
+                    "contentDetails": {
+                        "enableAutoStart": True,
+                        "enableAutoStop": True,
+                        "enableDvr": True,
+                    },
+                },
+            )
+            br_data = br.json() if br.headers.get("content-type", "").startswith("application/json") else {}
+            if br.status_code >= 400:
+                reason = _yt_error(br_data) or f"yt_broadcast_{br.status_code}"
+                code = 409 if "insufficient" in reason.lower() or br.status_code == 403 else 400
+                return {
+                    "ok": False,
+                    "reason": "reconnect_youtube" if code == 409 else reason,
+                    "detail": reason,
+                    "code": code,
+                }
+            broadcast_id = br_data.get("id") or ""
+            st = await client.post(
+                f"{YT_API_BASE}/liveStreams",
+                params={"part": "snippet,cdn"},
+                headers=headers,
+                json={
+                    "snippet": {"title": name},
+                    "cdn": {
+                        "frameRate": "variable",
+                        "ingestionType": "rtmp",
+                        "resolution": "variable",
+                    },
+                },
+            )
+            st_data = st.json() if st.headers.get("content-type", "").startswith("application/json") else {}
+            if st.status_code >= 400:
+                reason = _yt_error(st_data) or f"yt_stream_{st.status_code}"
+                return {"ok": False, "reason": reason, "code": 400}
+            stream_id = st_data.get("id") or ""
+            info = ((st_data.get("cdn") or {}).get("ingestionInfo") or {})
+            ingest = (info.get("ingestionAddress") or "").rstrip("/")
+            key = info.get("streamName") or ""
+            rtmp_url = f"{ingest}/{key}" if ingest and key else ""
+            if not rtmp_url:
+                return {"ok": False, "reason": "yt_ingest_missing", "code": 502}
+            if broadcast_id and stream_id:
+                bound = await client.post(
+                    f"{YT_API_BASE}/liveBroadcasts/bind",
+                    params={
+                        "id": broadcast_id,
+                        "streamId": stream_id,
+                        "part": "id,contentDetails,status",
+                    },
+                    headers=headers,
+                )
+                if bound.status_code >= 400:
+                    logger.warning("studio youtube bind %s", bound.status_code)
+            from app.services.studio_tier2 import store_rtmp
+
+            stored = await store_rtmp(db_pool, show_id, coach_id, rtmp_url)
+            if not stored.get("ok"):
+                return stored
+            watch_url = f"https://www.youtube.com/watch?v={broadcast_id}" if broadcast_id else ""
+            return {
+                "ok": True,
+                "live": True,
+                "broadcast_id": broadcast_id,
+                "stream_id": stream_id,
+                "rtmp_set": True,
+                "watch_url": watch_url,
+                "privacy": vis,
+                "channel_name": status.get("channel_name") or "",
+                "destination": "coach_channel",
+            }
+    except Exception as exc:
+        logger.warning("studio youtube go_live: %s", exc)
+        return {"ok": False, "reason": "yt_live_failed", "code": 400}
 
 
 async def upload_dry_run(db_pool, coach_id: str, episode_id: str) -> Dict[str, Any]:
