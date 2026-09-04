@@ -135,10 +135,12 @@ flutter build web --release --base-href /
 Upload from your Mac (not from the droplet):
 
 ```bash
-rsync -av --delete \
+rsync -av \
   ~/Desktop/Clinical-Sovereignty-Lab-2/mobile/build/web/ \
   root@68.183.168.75:/var/www/sovereignsanctuary-web/
 ```
+
+Never `--delete` here. Legal and Stripe landing pages on this root are not all produced by Flutter itself; `--delete` 404s `data-deletion.html` / `payment-complete` and SPA-masks them as the app shell. Prefer `bash scripts/deploy_flutter_web.sh`.
 
 ## Zoom scheduling (production)
 

@@ -44,10 +44,12 @@ ssh root@68.183.168.75 'rsync -av --exclude=_archive --exclude=Untitled \
 ### Flutter web (client + coach portals)
 
 ```bash
-ssh root@68.183.168.75 'rsync -av --delete \
+ssh root@68.183.168.75 'rsync -av \
  /opt/clinical-sovereignty-lab/mobile/build/web/ /var/www/sovereignsanctuary-web/ && \
  systemctl reload nginx'
 ```
+
+**Never `--delete` on this root.** App Store / Meta / Stripe pages (`data-deletion.html`, `sms-policy.html`, `payment-complete.html`, `payment-cancelled.html`) live here and are not safe to prune from a partial build tree.
 
 **Preferred from dev machine:** `bash scripts/deploy_flutter_web.sh` (builds locally, rsyncs `mobile/build/web/`, reloads nginx, runs CF purge when `.env` has purge token).
 
@@ -65,6 +67,7 @@ If origin is correct but browser still shows old content, do a **single-URL Clou
 
 - ❌ Don't `docker compose up -d nginx` and assume changes deployed — `nate_nginx` is dead.
 - ❌ Don't `docker exec nate_nginx ...` — container isn't running.
+- ❌ Don't `rsync --delete` into `/var/www/sovereignsanctuary-web/` — that 404s Stripe `/payment-complete` and SPA-masks `/data-deletion.html`.
 - ❌ Don't edit files directly in `/var/www/` — they get overwritten by the next rsync from the repo, and the repo loses the source-of-truth.
 - ❌ Don't rely on bind-mount auto-reflection — there is no bind mount in production.
 

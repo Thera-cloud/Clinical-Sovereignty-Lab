@@ -27,7 +27,10 @@ for a in "$@"; do
   esac
 done
 
-LEGAL_PAGES=(try.html signup.html privacy.html terms.html)
+LEGAL_PAGES=(
+  try.html signup.html privacy.html terms.html
+  data-deletion.html sms-policy.html payment-complete.html payment-cancelled.html
+)
 
 overlay_legal_pages() {
   local dest="$1"
@@ -61,28 +64,21 @@ VERSION="$(date +%Y.%m.%d.%H%M)"
 COMMIT="$(cd "${ROOT}" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 printf '%s\n' "{\"version\":\"${VERSION}\",\"build\":\"${COMMIT}\",\"deployed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "${ROOT}/mobile/build/web/version.json"
 
-# App Store / Meta / Stripe pages must ride with every Flutter rsync (never --delete).
-for f in data-deletion.html sms-policy.html payment-complete.html payment-cancelled.html; do
-  src="${ROOT}/mobile/web/${f}"
-  dst="${ROOT}/mobile/build/web/${f}"
-  if [[ -f "${src}" ]]; then
-    cp "${src}" "${dst}"
-  else
-    echo "WARN: missing ${src}" >&2
-  fi
-done
-
 echo "rsync → ${SERVER}:${WEB_ROOT}"
 # Never --delete: extras on this root (legal pages, studio HTML) must not be pruned.
 rsync -avz "${ROOT}/mobile/build/web/" "${SERVER}:${WEB_ROOT}"
 
 # Overlay again on the live docroot so a future rsync --delete of build/web
-# cannot leave try.html missing (SPA then serves Flutter gateway).
+# cannot leave try.html / Stripe / Meta pages missing (SPA then serves Flutter gateway).
 rsync -avz \
   "${ROOT}/mobile/build/web/try.html" \
   "${ROOT}/mobile/build/web/signup.html" \
   "${ROOT}/mobile/build/web/privacy.html" \
   "${ROOT}/mobile/build/web/terms.html" \
+  "${ROOT}/mobile/build/web/data-deletion.html" \
+  "${ROOT}/mobile/build/web/sms-policy.html" \
+  "${ROOT}/mobile/build/web/payment-complete.html" \
+  "${ROOT}/mobile/build/web/payment-cancelled.html" \
   "${SERVER}:${WEB_ROOT}"
 
 ssh "${SERVER}" "grep -q 'Talk to Little Nate' ${WEB_ROOT}try.html && grep -q flutter_bootstrap ${WEB_ROOT}index.html"
