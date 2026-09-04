@@ -18,8 +18,6 @@ from typing import Optional
 logger = logging.getLogger("nate.voice_notifications")
 
 _twilio_client = None
-_messaging_service_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
-_from_number = os.getenv("TWILIO_PHONE_NUMBER", "")
 _data_dir = os.getenv("DATA_DIR", "/app/data")
 _opt_out_path = Path(_data_dir) / "sms_opt_out.json"
 
@@ -63,11 +61,12 @@ def _send_sms(to: str, body: str) -> bool:
         logger.warning("Twilio client not available for SMS")
         return False
     try:
-        kwargs = {"body": body, "to": to}
-        if _messaging_service_sid:
-            kwargs["messaging_service_sid"] = _messaging_service_sid
-        else:
-            kwargs["from_"] = _from_number
+        from app.services.twilio_a2p import sms_create_kwargs
+
+        kwargs = sms_create_kwargs(to, body)
+        if not kwargs:
+            logger.warning("SMS skipped: no messaging service or from number")
+            return False
         msg = client.messages.create(**kwargs)
         logger.info("SMS sent to %s: sid=%s", to[:6], msg.sid)
         return True

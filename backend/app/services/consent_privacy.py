@@ -125,20 +125,14 @@ class ConsentPrivacyManager:
 
         if self._twilio:
             try:
-                from_number = os.getenv("TWILIO_PHONE_NUMBER")
-                messaging_sid = os.getenv("TWILIO_MESSAGING_SID")
-                if not from_number and not messaging_sid:
-                    logger.warning("ConsentPrivacy: no TWILIO_PHONE_NUMBER or MESSAGING_SID — SMS not sent")
-                    return None
+                from app.services.twilio_a2p import sms_create_kwargs
 
-                msg_kwargs: Dict[str, Any] = {
-                    "body": sms_body,
-                    "to": phone,
-                }
-                if messaging_sid:
-                    msg_kwargs["messaging_service_sid"] = messaging_sid
-                else:
-                    msg_kwargs["from_"] = from_number
+                msg_kwargs = sms_create_kwargs(phone, sms_body)
+                if not msg_kwargs:
+                    logger.warning(
+                        "ConsentPrivacy: no TWILIO_MESSAGING_SERVICE_SID or from number — SMS not sent"
+                    )
+                    return None
 
                 self._twilio.messages.create(**msg_kwargs)
                 logger.info("ConsentPrivacy: SMS sent to %s for %s", phone[-4:], consent_type)

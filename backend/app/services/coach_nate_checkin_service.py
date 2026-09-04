@@ -526,10 +526,12 @@ class CoachNateCheckinService:
         )
         try:
             from twilio.rest import Client
+            from app.services.twilio_a2p import sms_create_kwargs
 
-            Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN).messages.create(
-                to=phone, from_=TWILIO_PHONE_NUMBER, body=body
-            )
+            kwargs = sms_create_kwargs(phone, body)
+            if not kwargs:
+                return
+            Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN).messages.create(**kwargs)
             await self._event(int(task["id"]), "sms_callback_invite", {})
         except Exception as e:
             logger.warning("SMS callback invite failed: %s", e)

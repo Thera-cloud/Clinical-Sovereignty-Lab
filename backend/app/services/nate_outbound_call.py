@@ -374,12 +374,13 @@ async def send_fallback_sms(
     if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
         try:
             from twilio.rest import Client
+            from app.services.twilio_a2p import sms_create_kwargs
+
+            kwargs = sms_create_kwargs(phone, msg)
+            if not kwargs:
+                return False
             client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-            client.messages.create(
-                to=phone,
-                from_=TWILIO_PHONE_NUMBER,
-                body=msg,
-            )
+            client.messages.create(**kwargs)
             _logger.info("Fallback SMS sent via Twilio to %s", phone[-4:])
             return True
         except Exception as e:

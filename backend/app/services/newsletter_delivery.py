@@ -624,11 +624,13 @@ async def _send_dispatch_sms(phone: str, slug: str) -> bool:
 
         sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
         token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
-        from_num = os.getenv("TWILIO_FROM_NUMBER") or os.getenv("TWILIO_PHONE_NUMBER")
-        if not (sid and token and from_num and phone):
+        from app.services.twilio_a2p import sms_create_kwargs
+
+        kwargs = sms_create_kwargs(phone, body, max_len=320)
+        if not (sid and token and kwargs):
             return False
         client = Client(sid, token)
-        client.messages.create(to=phone, from_=from_num, body=body[:320])
+        client.messages.create(**kwargs)
         return True
     except Exception as e:
         logger.warning("dispatch SMS failed: %s", e)

@@ -606,16 +606,14 @@ class DripScheduler:
             return
 
         normalized = self._normalize_phone(phone)
-        from_number = getattr(settings, 'TWILIO_FROM_NUMBER', '') or ''
-        if not from_number:
+        from app.services.twilio_a2p import sms_create_kwargs
+
+        kwargs = sms_create_kwargs(normalized, body)
+        if not kwargs:
             return
 
         try:
-            message = self.twilio_client.messages.create(
-                body=body,
-                from_=from_number,
-                to=normalized
-            )
+            message = self.twilio_client.messages.create(**kwargs)
 
             await conn.execute(
                 """INSERT INTO delivery_log

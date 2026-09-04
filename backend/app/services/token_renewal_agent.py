@@ -240,7 +240,6 @@ class TokenRenewalAgent:
     # ── step 4: check if pending renewals resolved ───────────────────────
 
     async def _check_pending_resolutions(self, adapters, now: datetime):
-        resolved = []
         for platform in list(self._pending_renewals.keys()):
             try:
                 async with self.db_pool.acquire() as conn:
@@ -252,12 +251,9 @@ class TokenRenewalAgent:
                     adapter = adapters.get(platform)
                     if adapter:
                         await self._on_renewal_success(platform, adapter, now)
-                    resolved.append(platform)
+                    # Success path pops inside _on_renewal_success. Keep cooldown on failed auth.
             except Exception as e:
                 logger.error("TokenRenewalAgent: resolution check failed for %s: %s", platform, e)
-
-        for p in resolved:
-            self._pending_renewals.pop(p, None)
 
     # ── step 5: validate after renewal ───────────────────────────────────
 
