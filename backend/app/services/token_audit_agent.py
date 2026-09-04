@@ -174,7 +174,11 @@ class TokenAuditAgent:
 
                 for row in expired_platforms:
                     plat = row["platform"]
+                    if str(plat).startswith("_pkce_"):
+                        continue
                     if not social_token_outbound_alerts_allowed_for_platform(plat):
+                        continue
+                    if await self._verify_platform_live(plat):
                         continue
 
                     notified = await conn.fetchval("""

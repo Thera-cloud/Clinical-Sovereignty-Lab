@@ -17,6 +17,14 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("skyeye.token_renewal_agent")
 
 
+def admin_alert_required(refresh_ok: bool, live_ok: bool) -> bool:
+    """Outbound SMS/email only when refresh failed and the live API rejects the token.
+
+    Stale token_expiry (Facebook Page tokens) must not page the admin.
+    """
+    return (not refresh_ok) and (not live_ok)
+
+
 class TokenRenewalAgent:
     """Detects token failures, auto-refreshes when possible, notifies admin otherwise."""
 
@@ -88,17 +96,36 @@ class TokenRenewalAgent:
                      len(failing), ", ".join(failing))
 
         for platform_name, row in failing.items():
+            if str(platform_name).startswith("_pkce_"):
+                continue
             adapter = adapters.get(platform_name)
             if not adapter:
                 logger.warning("TokenRenewalAgent: no adapter for %s", platform_name)
                 continue
 
             resolved = await self._attempt_auto_refresh(platform_name, adapter)
-            if resolved:
-                await self._on_renewal_success(platform_name, adapter, now)
+            live_ok = False
+            if not resolved:
+                live_ok = await self._token_is_live(adapter)
+            if resolved or live_ok:
+                if live_ok and not resolved:
+                    try:
+                        await adapter._heal_past_token_expiry()
+                    except Exception:
+                        pass
+                    await self._log_activity(
+                        platform_name, "token_renewal_live_ok",
+                        "Live API accepted token — stale expiry ignored, no admin alert",
+                        severity="info",
+                    )
+                    self._pending_renewals.pop(platform_name, None)
+                    await self._retry_failed_posts(platform_name)
+                else:
+                    await self._on_renewal_success(platform_name, adapter, now)
                 continue
 
-            await self._notify_admin(platform_name, now)
+            if admin_alert_required(refresh_ok=False, live_ok=False):
+                await self._notify_admin(platform_name, now)
 
         await self._check_pending_resolutions(adapters, now)
 
@@ -144,13 +171,23 @@ class TokenRenewalAgent:
                 rows = await conn.fetch("""
                     SELECT platform, status, token_expiry, error_message
                     FROM skyeye_platform_tokens
-                    WHERE status = 'expired'
-                       OR (token_expiry IS NOT NULL AND token_expiry < $1)
+                    WHERE platform NOT LIKE '_pkce_%'
+                      AND (
+                        status = 'expired'
+                        OR (token_expiry IS NOT NULL AND token_expiry < $1)
+                      )
                 """, threshold)
             return {r["platform"]: dict(r) for r in rows}
         except Exception as e:
             logger.error("TokenRenewalAgent: detect query failed: %s", e)
             return {}
+
+    async def _token_is_live(self, adapter) -> bool:
+        try:
+            return bool(await adapter.authenticate())
+        except Exception as e:
+            logger.warning("TokenRenewalAgent: live check failed: %s", e)
+            return False
 
     # ── step 2: auto-refresh ─────────────────────────────────────────────
 
@@ -244,10 +281,16 @@ class TokenRenewalAgent:
             try:
                 async with self.db_pool.acquire() as conn:
                     row = await conn.fetchrow(
-                        "SELECT status FROM skyeye_platform_tokens WHERE platform = $1",
+                        "SELECT status, token_expiry FROM skyeye_platform_tokens WHERE platform = $1",
                         platform
                     )
                 if row and row["status"] == "connected":
+                    exp = row["token_expiry"]
+                    if exp is not None:
+                        if getattr(exp, "tzinfo", None) is None:
+                            exp = exp.replace(tzinfo=timezone.utc)
+                        if exp < now:
+                            continue
                     adapter = adapters.get(platform)
                     if adapter:
                         await self._on_renewal_success(platform, adapter, now)

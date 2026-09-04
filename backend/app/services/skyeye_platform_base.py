@@ -15,7 +15,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -777,6 +777,40 @@ class SocialPlatformAdapter(ABC):
                 """, self.platform_name, status, error_message)
         except Exception as e:
             logger.error(f"Failed to update token status for {self.platform_name}: {e}")
+
+    async def _heal_past_token_expiry(self, default_ttl: Optional[timedelta] = None) -> None:
+        """Rewrite token_expiry only when it is already in the past and the API still works.
+
+        Facebook Page tokens often stay valid after the stored expiry column goes stale.
+        Never extend a *future* expiry (YouTube access tokens are ~1h).
+        """
+        if not self.db_pool:
+            return
+        ttl = default_ttl or timedelta(days=60)
+        new_exp = datetime.now(timezone.utc) + ttl
+        try:
+            async with self.db_pool.acquire() as conn:
+                result = await conn.execute(
+                    """
+                    UPDATE skyeye_platform_tokens
+                    SET token_expiry = $2,
+                        status = 'connected',
+                        error_message = NULL,
+                        updated_at = NOW()
+                    WHERE platform = $1
+                      AND token_expiry IS NOT NULL
+                      AND token_expiry < NOW()
+                    """,
+                    self.platform_name,
+                    new_exp,
+                )
+            if result and result.split()[-1] not in ("0",):
+                logger.info(
+                    "%s: healed stale token_expiry (was in the past, API still live)",
+                    self.platform_name,
+                )
+        except Exception as e:
+            logger.warning("Failed to heal stale expiry for %s: %s", self.platform_name, e)
 
     # ── Utility ─────────────────────────────────────────────────────
 

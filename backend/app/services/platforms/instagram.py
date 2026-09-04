@@ -74,6 +74,7 @@ class InstagramAdapter(SocialPlatformAdapter):
                 if resp.status_code == 200:
                     self._connected = True
                     await self._update_token_status("connected")
+                    await self._heal_past_token_expiry()
                     logger.info("Instagram: Authenticated successfully")
                     return True
                 elif resp.status_code == 401:

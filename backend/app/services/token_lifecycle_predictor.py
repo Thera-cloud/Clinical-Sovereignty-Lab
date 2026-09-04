@@ -80,6 +80,10 @@ class TokenLifecyclePredictor:
 
             days_left = (expiry - now).total_seconds() / 86400
             platform = tok["platform"]
+            if str(platform).startswith("_pkce_"):
+                continue
+            if days_left < 0:
+                continue
             has_refresh = bool(tok.get("refresh_token"))
 
             for threshold_days, severity in WARN_TIERS:
@@ -113,6 +117,7 @@ class TokenLifecyclePredictor:
                     SELECT platform, status, token_expiry, refresh_token
                     FROM skyeye_platform_tokens
                     WHERE status != 'disconnected'
+                      AND platform NOT LIKE '_pkce_%'
                 """)
         except Exception as e:
             logger.error("TokenLifecyclePredictor: token fetch failed: %s", e)

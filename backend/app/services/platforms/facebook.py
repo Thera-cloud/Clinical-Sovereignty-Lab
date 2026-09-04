@@ -70,6 +70,7 @@ class FacebookAdapter(SocialPlatformAdapter):
                 if resp.status_code == 200:
                     self._connected = True
                     await self._update_token_status("connected")
+                    await self._heal_past_token_expiry()
                     return True
                 elif resp.status_code == 401:
                     return await self.refresh_token()
@@ -94,6 +95,7 @@ class FacebookAdapter(SocialPlatformAdapter):
             return False
 
         # fb_exchange_token requires a valid token — verify first
+        probe_ok = False
         try:
             async with httpx.AsyncClient(timeout=10.0) as probe:
                 check = await probe.get(
@@ -106,6 +108,7 @@ class FacebookAdapter(SocialPlatformAdapter):
                     await self._update_token_status("expired", self._last_error)
                     logger.warning("Facebook: Token is dead, fb_exchange_token would fail — skipping")
                     return False
+                probe_ok = check.status_code == 200
         except Exception:
             pass  # network hiccup — still attempt the exchange
 
@@ -133,11 +136,20 @@ class FacebookAdapter(SocialPlatformAdapter):
                     )
                     self._connected = True
                     return True
-                else:
-                    self._connected = False
-                    return False
+                if probe_ok:
+                    await self._heal_past_token_expiry()
+                    self._connected = True
+                    logger.info("Facebook: live token, exchange skipped — not alerting")
+                    return True
+                self._connected = False
+                return False
         except Exception as e:
             self._last_error = str(e)
+            if probe_ok:
+                await self._heal_past_token_expiry()
+                self._connected = True
+                logger.warning("Facebook: exchange error with live token: %s", e)
+                return True
             self._connected = False
             return False
 
