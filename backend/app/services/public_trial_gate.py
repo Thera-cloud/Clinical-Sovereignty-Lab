@@ -813,24 +813,34 @@ async def db_refund_turn(device_uuid_hash: str) -> None:
 
 
 async def db_append_history(device_uuid_hash: str, user_text: str, assistant_text: str) -> None:
-    """Append {user, assistant} pair to trial_history, capped at last 20 pairs."""
+    """Append {user, assistant} pair to trial_history, capped at last 20 pairs.
+
+    Must concatenate jsonb **arrays**. `array || object` is a Postgres error
+    (`cannot concatenate jsonb values`), which used to fail closed here and
+    leave turns_used incremented with trial_history still `[]` — those rows
+    then vanished from the Trial Digest (empty history was treated as probe).
+    """
     pool = get_db_pool()
-    pair = json.dumps({"user": user_text, "assistant": assistant_text})
     try:
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE public_summon_usage
                 SET trial_history = (
-                    CASE WHEN jsonb_array_length(COALESCE(trial_history, '[]'::jsonb)) >= $2
+                    CASE WHEN jsonb_array_length(COALESCE(trial_history, '[]'::jsonb)) >= $3
                          THEN (COALESCE(trial_history, '[]'::jsonb) - 0)
                          ELSE COALESCE(trial_history, '[]'::jsonb)
                     END
-                ) || $1::jsonb,
+                ) || jsonb_build_array(
+                    jsonb_build_object('user', $1::text, 'assistant', $2::text)
+                ),
                     last_seen = NOW()
-                WHERE device_uuid_hash = $3
+                WHERE device_uuid_hash = $4
                 """,
-                pair, TRIAL_MAX_HISTORY_PAIRS, device_uuid_hash,
+                user_text or "",
+                assistant_text or "",
+                TRIAL_MAX_HISTORY_PAIRS,
+                device_uuid_hash,
             )
     except Exception as e:
         logger.warning("public_trial_gate: history append failed for %s: %s", device_uuid_hash, e)

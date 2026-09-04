@@ -5,12 +5,17 @@ Once daily (12:00 UTC / 08:00 ET) to support@sovereignsanctuary.net.
 Subject carries 🟢/🔴 verdict so a clean day is ignorable from the inbox.
 
 Organic counts exclude probe/red-team sessions (content heuristic) and
-converted test accounts (e2e_trial_*, Test*).
+converted test accounts (e2e_trial_*, Test*). Funnel "Last 24h" matches
+the email header (rolling window to digest send), not the ET calendar
+day — a chat at 09:48 ET is in the next 08:00 ET digest, not missed.
+Unique IPs come from Redis ip_daily keys (hashed), minus
+PUBLIC_TRIAL_INTERNAL_IPS; nginx /try.html parse is fallback only.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html as _html
 import json
 import logging
@@ -19,7 +24,7 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("skyeye.public_trial_digest")
@@ -113,12 +118,19 @@ def _parse_history(raw: Any) -> List[Dict[str, str]]:
     return out
 
 
-def _is_probe_session(history: List[Dict[str, str]], converted_username: Optional[str]) -> bool:
+def _is_probe_session(
+    history: List[Dict[str, str]],
+    converted_username: Optional[str],
+    turns_used: int = 0,
+) -> bool:
     if converted_username and _TEST_ACCOUNT_RE.match(converted_username):
         return True
     user_msgs = [h["user"] for h in history if h.get("user")]
     if not user_msgs:
-        return True  # turns with empty history = batch/automation artifact
+        # Abandoned Turnstile start (0 turns, empty history) is not organic.
+        # Turns with empty history used to be treated as probes; that hid
+        # real chats when jsonb array||object append failed.
+        return int(turns_used or 0) <= 0
     for msg in user_msgs:
         low = msg.lower()
         if any(phrase in low for phrase in _RED_TEAM_PHRASES):
@@ -128,6 +140,55 @@ def _is_probe_session(history: List[Dict[str, str]], converted_username: Optiona
         if _BASE64_BLOB_RE.search(msg):
             return True
     return any(_PROBE_USER_RE.search(u) for u in user_msgs)
+
+
+def _internal_trial_ips() -> set:
+    return {
+        ip.strip()
+        for ip in os.getenv("PUBLIC_TRIAL_INTERNAL_IPS", "170.62.100.237").split(",")
+        if ip.strip()
+    }
+
+
+def _hash_trial_ip(ip: str) -> str:
+    return hashlib.sha256((ip or "unknown").encode("utf-8")).hexdigest()
+
+
+def parse_try_html_unique_ips(
+    log_path: str,
+    window_start: datetime,
+    internal_ips: Optional[set] = None,
+) -> Optional[int]:
+    """Count distinct client IPs that GET /try.html inside window_start..now.
+
+    Returns None if the log file is missing (typical inside nate_backend).
+    """
+    internal_ips = internal_ips if internal_ips is not None else _internal_trial_ips()
+    if not os.path.isfile(log_path):
+        return None
+    line_re = re.compile(
+        r'^(?P<ip>\S+) .+ \[(?P<ts>[^\]]+)\] "GET /try\.html '
+    )
+    unique: set = set()
+    try:
+        with open(log_path, errors="ignore") as fh:
+            for raw in fh:
+                m = line_re.match(raw)
+                if not m:
+                    continue
+                ip = m.group("ip")
+                if ip in internal_ips:
+                    continue
+                try:
+                    ts = datetime.strptime(m.group("ts"), "%d/%b/%Y:%H:%M:%S %z")
+                except ValueError:
+                    continue
+                if ts < window_start:
+                    continue
+                unique.add(ip)
+    except OSError:
+        return None
+    return len(unique)
 
 
 def _first_user_message(history: List[Dict[str, str]]) -> str:
@@ -306,6 +367,8 @@ class PublicTrialDigest:
         global_cap = int(os.getenv("MAX_TRIAL_TURNS_PER_DAY", "2000"))
         peak_hour_label = "n/a"
         unique_ips = overrides.get("unique_ips")
+        organic_turns_24h = 0
+        depletion_line = "none"
 
         async with self.db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -352,14 +415,13 @@ class PublicTrialDigest:
             phi_last_sweep = ts.astimezone(ET).strftime("%H:%M ET")
         phi_status = "clean" if int(phi_quarantines_24h) == 0 else f"{phi_quarantines_24h} quarantined"
 
-        today_et = now.astimezone(ET).date()
-        week_start_et = today_et - timedelta(days=6)
+        week_start = now - timedelta(days=7)
         hour_turns: Dict[int, int] = {}
 
         for row in rows:
             history = _parse_history(row["trial_history"])
-            probe = _is_probe_session(history, row["converted_username"])
             turns = int(row["turns_used"] or 0)
+            probe = _is_probe_session(history, row["converted_username"], turns)
             bleed_details: List[Dict[str, Any]] = []
             if not probe:
                 bleed_details = _find_bleed_details_in_session(history)
@@ -385,8 +447,7 @@ class PublicTrialDigest:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
 
             if not probe and started:
-                started_et = started.astimezone(ET).date()
-                if started_et == today_et:
+                if started >= window_start:
                     organic_today["starts"] += 1
                     if turns >= 5:
                         organic_today["reached_5"] += 1
@@ -394,7 +455,7 @@ class PublicTrialDigest:
                         organic_today["reached_15"] += 1
                     if row["converted"]:
                         organic_today["converted"] += 1
-                if started_et >= week_start_et:
+                if started >= week_start:
                     organic_7d["starts"] += 1
                     if turns >= 5:
                         organic_7d["reached_5"] += 1
@@ -404,6 +465,7 @@ class PublicTrialDigest:
                         organic_7d["converted"] += 1
 
             if not probe and last_seen and last_seen >= window_start and turns > 0:
+                organic_turns_24h += turns
                 hour_key = last_seen.astimezone(ET).hour
                 hour_turns[hour_key] = hour_turns.get(hour_key, 0) + turns
                 conv_flags = sum(len(d["hit_patterns"]) for d in bleed_details)
@@ -414,7 +476,7 @@ class PublicTrialDigest:
                     "device_uuid_hash": row["device_uuid_hash"],
                     "last_seen_et": last_seen.astimezone(ET).strftime("%H:%M ET"),
                     "source": source,
-                    "opened": _first_user_message(history),
+                    "opened": _first_user_message(history) or "(no text stored)",
                     "turns": turns,
                     "gated": bool(row["gated_at"]),
                     "flags": "none" if conv_flags == 0 else f"{conv_flags} bleed flag(s)",
@@ -426,7 +488,13 @@ class PublicTrialDigest:
         if latest_label and conversations:
             conversations[0]["source"] = latest_label
 
-        global_turns = await self._redis_global_daily() or overrides.get("global_turns", 0)
+        global_turns = await self._redis_global_daily()
+        if not global_turns:
+            global_turns = int(overrides.get("global_turns") or 0)
+        if unique_ips is None:
+            unique_ips = await self._redis_unique_trial_ips()
+        if unique_ips is None:
+            unique_ips = self._nginx_unique_ips(window_start)
         if hour_turns:
             peak_h, peak_n = max(hour_turns.items(), key=lambda x: x[1])
             ampm = "am" if peak_h < 12 else "pm"
@@ -435,6 +503,7 @@ class PublicTrialDigest:
 
         budget_pct = int(round(100 * global_turns / global_cap)) if global_cap else 0
         budget_ok = global_turns < global_cap * 0.8
+        depletion_line = "none" if budget_ok else f"cap at {budget_pct}%"
 
         verdict = "all clear"
         emoji = "🟢"
@@ -455,6 +524,8 @@ class PublicTrialDigest:
             "global_cap": global_cap,
             "budget_pct": budget_pct,
             "budget_ok": budget_ok,
+            "depletion_line": depletion_line,
+            "organic_turns_24h": organic_turns_24h,
             "peak_hour": peak_hour_label,
             "unique_ips": unique_ips,
             "organic_today": organic_today,
@@ -478,6 +549,50 @@ class PublicTrialDigest:
         except Exception as e:
             logger.warning("PublicTrialDigest: Redis global daily read failed: %s", e)
             return 0
+
+    async def _redis_unique_trial_ips(self) -> Optional[int]:
+        """Count hashed per-IP daily cap keys, minus PUBLIC_TRIAL_INTERNAL_IPS."""
+        if not self.redis_url:
+            return None
+        try:
+            import redis.asyncio as aioredis
+            from app.services.trial_signup_redis_keys import (
+                public_trial_ip_daily_key,
+                public_trial_ip_daily_scan_pattern,
+            )
+            r = aioredis.from_url(self.redis_url, decode_responses=True)
+            try:
+                found: set = set()
+                cursor = 0
+                pattern = public_trial_ip_daily_scan_pattern()
+                while True:
+                    cursor, batch = await r.scan(cursor, match=pattern, count=200)
+                    found.update(batch)
+                    if cursor == 0:
+                        break
+                skip = {
+                    public_trial_ip_daily_key(_hash_trial_ip(ip))
+                    for ip in _internal_trial_ips()
+                }
+                return len(found - skip)
+            finally:
+                await r.aclose()
+        except Exception as e:
+            logger.warning("PublicTrialDigest: Redis unique IP scan failed: %s", e)
+            return None
+
+    def _nginx_unique_ips(self, window_start: datetime) -> Optional[int]:
+        for path in (
+            os.getenv("PUBLIC_TRIAL_NGINX_ACCESS_LOG", ""),
+            "/var/log/nginx/access.log",
+            "/host/var/log/nginx/access.log",
+        ):
+            if not path:
+                continue
+            n = parse_try_html_unique_ips(path, window_start)
+            if n is not None:
+                return n
+        return None
 
     def _subject(self, data: Dict[str, Any], now: datetime) -> str:
         day = now.astimezone(ET).strftime("%b %-d")
@@ -551,23 +666,23 @@ class PublicTrialDigest:
         safety = self._mono_block([bleed_line, phi_line, flagged_line])
 
         budget_icon = "✅ healthy" if data["budget_ok"] else "⚠️ elevated"
-        ip_line = (
-            f"Unique IPs (excl. internal) {data['unique_ips']}"
-            if data.get("unique_ips") is not None
-            else "Unique IPs (excl. internal) n/a — set via nginx parse on send"
-        )
+        if data.get("unique_ips") is not None:
+            ip_line = f"Unique IPs (excl. internal) {data['unique_ips']}"
+        else:
+            ip_line = "Unique IPs (excl. internal) n/a"
         budget = self._mono_block([
-            f"Global trial turns today .. {data['global_turns']} / {data['global_cap']} "
+            f"Global trial turns (UTC cap) {data['global_turns']} / {data['global_cap']} "
             f"({data['budget_pct']}%) {budget_icon}",
+            f"Organic session-turns (24h) {data.get('organic_turns_24h', 0)}",
             f"Peak hour ................. {data['peak_hour']}",
-            "Depletion alerts .......... none",
+            f"Depletion alerts .......... {data.get('depletion_line', 'none')}",
             ip_line,
         ])
 
         ot, ow = data["organic_today"], data["organic_7d"]
         funnel = self._mono_block([
             "          Starts   ≥5 turns   ≥15   Converted",
-            f"Today      {ot['starts']:>5}      {ot['reached_5']:>5}     "
+            f"Last 24h   {ot['starts']:>5}      {ot['reached_5']:>5}     "
             f"{ot['reached_15']:>3}        {ot['converted']:>3}",
             f"7-day      {ow['starts']:>5}      {ow['reached_5']:>5}     "
             f"{ow['reached_15']:>3}        {ow['converted']:>3}",
@@ -633,8 +748,11 @@ class PublicTrialDigest:
         )
         note = (
             "<p style='color:#64748b;font-size:11px;margin-top:20px;'>"
-            "Internal/testing IPs and content-flagged probe sessions (jailbreak phrasing, "
-            "base64 payloads, red-team openers, test accounts) excluded from organic counts."
+            "Organic funnel is a rolling window to this send (Last 24h / 7-day). "
+            "Excluded: jailbreak/base64/red-team phrasing, Test*/e2e_trial_* accounts, "
+            "and abandoned starts (0 turns, empty history). Unique IPs omit "
+            "PUBLIC_TRIAL_INTERNAL_IPS (hashed Redis ip_daily keys; nginx /try.html "
+            "is fallback when Redis is empty)."
             "</p>"
         )
 

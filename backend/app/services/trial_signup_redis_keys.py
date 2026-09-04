@@ -33,6 +33,10 @@ def public_trial_ip_daily_key(ip_hash: str) -> str:
     return f"{_prefix()}:public_trial:ip_daily:{ip_hash}"
 
 
+def public_trial_ip_daily_scan_pattern() -> str:
+    return f"{_prefix()}:public_trial:ip_daily:*"
+
+
 def public_trial_global_daily_key() -> str:
     return f"{_prefix()}:public_trial:global_daily"
 

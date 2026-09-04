@@ -38,6 +38,8 @@ paths = (
     "version.json",
     "signup.html",
     "try.html",
+    "privacy.html",
+    "terms.html",
     "studio_livekit_room.html",
     "studio_nate_room.html",
     "livekit-client.umd.min.js",

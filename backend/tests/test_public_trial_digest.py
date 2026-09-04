@@ -53,6 +53,11 @@ def test_mixed_probe_session_is_probe():
 
 def test_empty_history_is_probe():
     assert _is_probe_session([], None) is True
+    assert _is_probe_session([], None, turns_used=0) is True
+
+
+def test_empty_history_with_turns_is_not_probe():
+    assert _is_probe_session([], None, turns_used=2) is False
 
 
 def test_base64_jailbreak_is_probe():
@@ -225,3 +230,157 @@ async def test_build_and_send_skips_when_already_sent_today():
     assert out["sent"] is False
     assert out["skipped"] == "already_sent_today"
     assert d._sent_date == "2026-07-23"
+
+
+def test_parse_try_html_unique_ips_window_and_internal(tmp_path):
+    log = tmp_path / "access.log"
+    log.write_text(
+        '1.1.1.1 - - [04/Sep/2026:14:00:00 +0000] "GET /try.html HTTP/1.1" 200 1 "-" "-"\n'
+        '170.62.100.237 - - [04/Sep/2026:14:00:00 +0000] "GET /try.html HTTP/1.1" 200 1 "-" "-"\n'
+        '2.2.2.2 - - [03/Sep/2026:14:00:00 +0000] "GET /try.html HTTP/1.1" 200 1 "-" "-"\n'
+    )
+    n = ptd.parse_try_html_unique_ips(
+        str(log),
+        datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc),
+    )
+    assert n == 1
+
+
+def test_parse_try_html_missing_log_returns_none(tmp_path):
+    assert ptd.parse_try_html_unique_ips(str(tmp_path / "nope.log"), datetime.now(timezone.utc)) is None
+
+
+def test_render_html_funnel_is_last_24h():
+    d = PublicTrialDigest(db_pool=None)
+    data = {
+        "verdict": "all clear", "emoji": "🟢", "bleed_flags": 0,
+        "bleeding_sessions": [],
+        "phi_status": "clean", "phi_last_sweep": "n/a",
+        "flagged_24h": [], "flagged_count": 0,
+        "global_turns": 1, "global_cap": 2000, "budget_pct": 0, "budget_ok": True,
+        "depletion_line": "none", "organic_turns_24h": 1,
+        "peak_hour": "n/a", "unique_ips": 2,
+        "organic_today": {"starts": 1, "reached_5": 0, "reached_15": 0, "converted": 0},
+        "organic_7d": {"starts": 1, "reached_5": 0, "reached_15": 0, "converted": 0},
+        "conversations": [], "organic_conv_count": 1,
+    }
+    html = d._render_html(data, datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc))
+    assert "Last 24h" in html
+    assert "Unique IPs (excl. internal) 2" in html
+    assert "Organic session-turns (24h) 1" in html
+    assert "set via nginx parse on send" not in html
+
+
+def test_append_history_sql_concatenates_arrays():
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "services"
+        / "public_trial_gate.py"
+    ).read_text()
+    assert "jsonb_build_array" in src
+    assert "json.dumps({\"user\": user_text" not in src
+
+
+class _DigestConn:
+    def __init__(self, rows):
+        self.rows = rows
+        self._fetch_n = 0
+
+    async def fetch(self, *a, **k):
+        self._fetch_n += 1
+        if self._fetch_n == 1:
+            return self.rows
+        return []
+
+    async def fetchrow(self, *a, **k):
+        return None
+
+    async def fetchval(self, *a, **k):
+        return 0
+
+
+class _DigestPool:
+    class _Ctx:
+        def __init__(self, c):
+            self.c = c
+
+        async def __aenter__(self):
+            return self.c
+
+        async def __aexit__(self, *a):
+            return False
+
+    def __init__(self, rows):
+        self._conn = _DigestConn(rows)
+
+    def acquire(self):
+        return _DigestPool._Ctx(self._conn)
+
+
+def _organic_row(**kwargs):
+    base = {
+        "device_uuid_hash": "abc",
+        "device_fingerprint": "fp",
+        "turns_used": 1,
+        "trial_history": [
+            {"user": "My son had a meltdown at school", "assistant": "I'm here."},
+        ],
+        "converted": False,
+        "converted_username": None,
+        "gated_at": None,
+        "trial_started_at": datetime(2026, 9, 4, 13, 48, tzinfo=timezone.utc),
+        "last_seen": datetime(2026, 9, 4, 13, 48, tzinfo=timezone.utc),
+    }
+    base.update(kwargs)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_collect_counts_prior_afternoon_in_next_morning_24h():
+    """Fri 09:48 ET chat must appear in Sat 08:00 ET digest Last-24h funnel."""
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    d = PublicTrialDigest(db_pool=_DigestPool([_organic_row()]), redis_url="")
+
+    async def _zero():
+        return 0
+
+    async def _ips():
+        return 2
+
+    d._redis_global_daily = _zero
+    d._redis_unique_trial_ips = _ips
+    data = await d._collect(now, {})
+    assert data["organic_today"]["starts"] == 1
+    assert data["organic_7d"]["starts"] == 1
+    assert data["organic_conv_count"] == 1
+    assert data["unique_ips"] == 2
+    assert data["organic_turns_24h"] == 1
+
+
+@pytest.mark.asyncio
+async def test_collect_excludes_abandoned_start_keeps_empty_history_with_turns():
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    rows = [
+        _organic_row(turns_used=0, trial_history=[]),
+        _organic_row(
+            device_uuid_hash="def",
+            turns_used=2,
+            trial_history=[],
+        ),
+    ]
+    d = PublicTrialDigest(db_pool=_DigestPool(rows), redis_url="")
+
+    async def _none():
+        return None
+
+    async def _zero():
+        return 0
+
+    d._redis_global_daily = _zero
+    d._redis_unique_trial_ips = _none
+    data = await d._collect(now, {})
+    assert data["organic_today"]["starts"] == 1
+    assert data["organic_conv_count"] == 1
+    assert data["conversations"][0]["opened"] == "(no text stored)"
+    assert data["unique_ips"] is None

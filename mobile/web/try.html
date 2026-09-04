@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://api.sovereignsanctuary.net https://api.sovereignsanctuary.net https://challenges.cloudflare.com; img-src 'self' data: https://challenges.cloudflare.com;">
+<link rel="canonical" href="https://app.sovereignsanctuary.net/try.html">
+<title>Talk to Little Nate — Free Trial</title>
+<style>
+:root {
+  --bg: #050505;
+  --surface: #0A0A0A;
+  --elevated: #111111;
+  --gold: #C9A962;
+  --gold-bright: #E8D5A3;
+  --gold-dim: #8B7355;
+  --cyan: #4ECDC4;
+  --purple: #9D4EDD;
+  --white: #FAFAFA;
+  --red: #EF4444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--gold-bright);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.container {
+  max-width: 680px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 16px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+h1 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 30px;
+  color: var(--gold);
+  text-align: center;
+  margin-bottom: 4px;
+}
+.subtitle {
+  text-align: center;
+  color: var(--gold-dim);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+/* Always-visible disclaimer */
+.disclaimer {
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--gold-dim);
+  text-align: center;
+  margin-bottom: 12px;
+}
+.disclaimer strong { color: var(--gold-bright); }
+
+/* Pinned crisis banner — stays visible for the rest of the session once triggered */
+.crisis-banner {
+  display: none;
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.5);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #FFD9D9;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+.crisis-banner.show { display: block; }
+.crisis-banner .cb-title { color: var(--red); font-weight: 700; margin-bottom: 4px; display: block; }
+
+/* Nudge banner (turn 15) */
+.nudge-banner {
+  display: none;
+  background: rgba(201,169,98,0.1);
+  border: 1px solid rgba(201,169,98,0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--gold-bright);
+  margin-bottom: 12px;
+}
+.nudge-banner.show { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.nudge-banner button {
+  background: transparent;
+  border: none;
+  color: var(--gold-dim);
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.turns-counter {
+  text-align: right;
+  font-size: 11px;
+  color: var(--gold-dim);
+  margin-bottom: 8px;
+}
+
+/* Chat window */
+.chat-window {
+  flex: 1;
+  min-height: 260px;
+  max-height: 52vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid rgba(201,169,98,0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.msg.user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+  color: var(--bg);
+  border-bottom-right-radius: 3px;
+}
+.msg.nate {
+  align-self: flex-start;
+  background: var(--elevated);
+  color: var(--gold-bright);
+  border-bottom-left-radius: 3px;
+}
+.msg.system {
+  align-self: center;
+  background: transparent;
+  color: var(--gold-dim);
+  font-size: 12px;
+  text-align: center;
+  max-width: 100%;
+}
+.msg.error {
+  align-self: center;
+  background: rgba(239,68,68,0.1);
+  color: #FFB4B4;
+  font-size: 12px;
+  text-align: center;
+  max-width: 100%;
+}
+
+/* Input row */
+.input-row {
+  display: flex;
+  gap: 10px;
+}
+.input-row input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid rgba(201,169,98,0.3);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--gold-bright);
+  outline: none;
+}
+.input-row input:focus { border-color: var(--gold); }
+.input-row input::placeholder { color: var(--gold-dim); }
+.input-row input:disabled { opacity: 0.5; }
+.input-row button {
+  background: linear-gradient(135deg, var(--cyan), #2AA89E);
+  border: none;
+  border-radius: 8px;
+  padding: 12px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bg);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Starter prompts — hidden after first user message */
+.starters {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.starters.show { display: flex; }
+.starter {
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--gold-bright);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.starter:hover {
+  border-color: var(--gold);
+  background: rgba(201,169,98,0.08);
+}
+
+/* Gate screen */
+.gate {
+  display: none;
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.25);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+.gate.show { display: block; }
+.gate p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gold-bright);
+  margin-bottom: 16px;
+}
+.btn {
+  display: inline-block;
+  background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 24px;
+  border-radius: 8px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+}
+.btn:hover { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); }
+.gate-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0;
+  color: var(--gold-dim);
+  font-size: 11px;
+}
+.gate-divider::before, .gate-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(201,169,98,0.2);
+}
+.email-form {
+  text-align: left;
+}
+.email-form input[type="email"] {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid rgba(201,169,98,0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--gold-bright);
+  outline: none;
+  margin-bottom: 12px;
+}
+.email-form input[type="email"]:focus { border-color: var(--gold); }
+.consent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.consent-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: var(--cyan);
+}
+.consent-row label {
+  font-size: 12.5px;
+  color: var(--gold-dim);
+  line-height: 1.5;
+}
+.email-btn {
+  background: transparent;
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+}
+.email-btn:hover { background: rgba(78,205,196,0.1); }
+.email-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.email-note {
+  font-size: 12px;
+  color: var(--gold-dim);
+  margin-top: 6px;
+}
+.checked-state {
+  display: none;
+  color: var(--cyan);
+  font-size: 13px;
+  padding: 10px;
+}
+.checked-state.show { display: block; }
+
+@media (max-width: 480px) {
+  h1 { font-size: 24px; }
+  .chat-window { max-height: 46vh; }
+}
+
+.turnstile-wrap { margin-top: 10px; min-height: 65px; display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Talk to Little Nate</h1>
+  <p class="subtitle">20 free full conversations — no account needed to start</p>
+
+  <div class="disclaimer">
+    <strong>Little Nate is an AI companion</strong> — not a crisis service or medical provider.
+    If you're in crisis, call or text <strong>988</strong> (Suicide &amp; Crisis Lifeline) or call <strong>911</strong>.
+    For ages 13 and up.
+    <div class="consent-row" id="startConsentRow" style="margin-top:10px;margin-bottom:0;justify-content:center;">
+      <input type="checkbox" id="startConsent" />
+      <label for="startConsent">I've read and understand the above</label>
+    </div>
+    <div class="turnstile-wrap" id="turnstileWrap"></div>
+  </div>
+
+  <div class="crisis-banner" id="crisisBanner">
+    <span class="cb-title">You're not alone</span>
+    If you're in crisis or thinking about harming yourself, please reach out now: call or text 988 (Suicide &amp; Crisis Lifeline) or call 911. You deserve support right now.
+  </div>
+
+  <div class="nudge-banner" id="nudgeBanner">
+    <span id="nudgeText"></span>
+    <button onclick="dismissNudge()" aria-label="Dismiss">&times;</button>
+  </div>
+
+  <div class="turns-counter" id="turnsCounter" style="display:none;"></div>
+
+  <div class="chat-window" id="chatWindow"></div>
+
+  <div class="starters" id="starters">
+    <button type="button" class="starter" data-starter-key="meltdown">My son had a meltdown today and I don't know if I handled it right</button>
+    <button type="button" class="starter" data-starter-key="afford">I can't afford therapy right now but I need someone to talk to</button>
+    <button type="button" class="starter" data-starter-key="autism">How would you help my autistic daughter understand her feelings?</button>
+  </div>
+
+  <div class="input-row" id="inputRow">
+    <input type="text" id="chatInput" placeholder="Type your message..." disabled />
+    <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+  </div>
+
+  <div class="gate" id="gate">
+    <p id="gateMessage"></p>
+    <a href="#" id="signupCta" class="btn">Create your free account</a>
+
+    <div class="gate-divider">or</div>
+
+    <div class="email-form" id="emailForm">
+      <input type="email" id="emailInput" placeholder="you@example.com" />
+      <div class="consent-row">
+        <input type="checkbox" id="emailConsent" />
+        <label for="emailConsent">Email me a link to pick up where we left off</label>
+      </div>
+      <button class="email-btn" id="emailBtn" onclick="captureEmail()">Send me the link</button>
+      <p class="email-note">We'll only use this to send your signup link. No spam.</p>
+    </div>
+    <div class="checked-state" id="checkedState">✓ Check your email for your link — it may take a minute to arrive.</div>
+  </div>
+</div>
+
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:8px;">© 2025–2026 Sovereign Sanctuary. All rights reserved.</div>
+
+<script>
+window.onTurnstileLoad = function() {
+  if (!startConsentGiven) return;
+  if (typeof window.__tryInitTurnstile === 'function') window.__tryInitTurnstile();
+};
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
+<script>
+// Public trial page — client gateway only (never promote command.* for this URL).
+var PUBLIC_TRY_PAGE_URL = 'https://app.sovereignsanctuary.net/try.html';
+if (location.hostname === 'command.sovereignsanctuary.net') {
+  location.replace(PUBLIC_TRY_PAGE_URL + location.search + location.hash);
+}
+var WS_URL = 'wss://api.sovereignsanctuary.net/ws';
+var TURNS_LIMIT = 20;
+var socket = null;
+var wsRetry = 0;
+var wsReconnectTimer = null;
+var gated = false;
+var trialDeviceId = getTrialDeviceId();
+// 2026-07: queued send/capture for the window where the socket is mid-reconnect
+// (server restart, network blip). Without this, sendTrialMessage/captureEmail
+// silently no-op on a closed socket and the user's text is lost with zero
+// feedback -- see production incident where "Send me the link" appeared to do
+// nothing during a deploy-triggered WS reconnect.
+var pendingChatSend = null; // { text, starterKey }
+var pendingEmailCapture = null; // { email }
+var startHandshakeSent = false; // true once public_trial_start has been sent on the current socket
+
+// 2026-07 bot-abuse hardening: required checkbox speed bump. Doesn't touch the
+// disclaimer's legal copy (age/crisis-service language) at all -- it just
+// requires an explicit tick acknowledging it before public_trial_start is
+// ever sent. Stacks with Turnstile: a scripted client now has to both solve
+// an invisible challenge AND simulate a checkbox interaction before it can
+// draw a single trial turn.
+var startConsentGiven = false;
+var startConsentEl = document.getElementById('startConsent');
+if (startConsentEl) {
+  startConsentEl.addEventListener('change', function() {
+    if (startConsentEl.checked) {
+      startConsentGiven = true;
+      startConsentEl.disabled = true; // one-shot -- no un-checking mid-session
+      if (!socket || socket.readyState === WebSocket.CLOSED) connectWS();
+      if (typeof window.__tryInitTurnstile === 'function') window.__tryInitTurnstile();
+      trySendStartAndPending();
+    }
+  });
+}
+
+// --- Cloudflare Turnstile (2026-07 bot-abuse hardening) ---
+// Identical render mode to signup.html. Widget + WebSocket only start AFTER the
+// consent checkbox (human gesture) — loading Turnstile on page load correlated
+// with client error 600010 on this domain.
+var TURNSTILE_SITE_KEY = '0x4AAAAAADyMnpRrA8SSCcIS';
+var turnstileWidgetId = null;
+var turnstileToken = '';
+var turnstileRequiredNoticeShown = false;
+
+var turnstileLoadTimeout = null;
+
+function resetTurnstile() {
+  turnstileToken = '';
+  if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null) {
+    try { turnstile.reset(turnstileWidgetId); } catch (e) {}
+  }
+}
+
+window.__tryInitTurnstile = function() {
+  if (!startConsentGiven) return;
+  if (typeof turnstile === 'undefined') return;
+  if (turnstileWidgetId !== null) return;
+  if (turnstileLoadTimeout) clearTimeout(turnstileLoadTimeout);
+  turnstileLoadTimeout = setTimeout(function() {
+    if (turnstileWidgetId === null) {
+      appendMessage("We couldn't load our security check — if you're using an ad-blocker or privacy extension, please allow challenges.cloudflare.com, or try a different browser.", 'system');
+    }
+  }, 8000);
+  turnstileWidgetId = turnstile.render('#turnstileWrap', {
+    sitekey: TURNSTILE_SITE_KEY,
+    theme: 'dark',
+    size: 'normal',
+    retry: 'auto',
+    callback: function(token) {
+      turnstileToken = token;
+      trySendStartAndPending();
+    },
+    'expired-callback': function() {
+      turnstileToken = '';
+    },
+    'error-callback': function() {
+      turnstileToken = '';
+      appendMessage('Verification could not complete — refresh the page. If this keeps happening, confirm app.sovereignsanctuary.net is listed under your Turnstile widget hostnames in the Cloudflare dashboard.', 'system');
+    }
+  });
+};
+
+// public_trial_start requires a Turnstile token (bot-abuse hardening). Sends
+// immediately if a token is already cached; otherwise kicks off
+// requestTurnstileToken() and the widget's callback re-invokes this once a
+// token lands. Also flushes anything queued while we were waiting.
+function trySendStartAndPending() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  if (startHandshakeSent) return;
+  if (!startConsentGiven) return; // waiting on the disclaimer checkbox
+  if (!turnstileToken) return; // widget auto-runs on render; wait for callback
+  var tok = turnstileToken;
+  turnstileToken = ''; // one-shot -- server marks the device verified from here
+  startHandshakeSent = true;
+  socket.send(JSON.stringify({ type: 'public_trial_start', device_fingerprint: trialDeviceId, turnstile_token: tok }));
+  if (pendingChatSend) {
+    var pc = pendingChatSend;
+    pendingChatSend = null;
+    socket.send(JSON.stringify({
+      type: 'public_trial_chat',
+      device_fingerprint: trialDeviceId,
+      text: pc.text,
+      starter_key: pc.starterKey || undefined,
+    }));
+  }
+  if (pendingEmailCapture) {
+    var pe = pendingEmailCapture;
+    pendingEmailCapture = null;
+    socket.send(JSON.stringify({
+      type: 'public_trial_capture_email',
+      device_fingerprint: trialDeviceId,
+      email: pe.email,
+      consent: true,
+    }));
+  }
+}
+
+function getTrialDeviceId() {
+  var KEY = 'ss_trial_device_id';
+  try {
+    var existing = localStorage.getItem(KEY);
+    if (existing) return existing;
+    var uuid = (crypto.randomUUID ? crypto.randomUUID() : (
+      [1e7]+-1e3+-4e3+-8e3+-1e11
+    ).replace(/[018]/g, function(c) {
+      return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
+    }));
+    localStorage.setItem(KEY, uuid);
+    return uuid;
+  } catch (e) {
+    return 'nostore-' + Date.now();
+  }
+}
+
+function appendMessage(text, cls) {
+  var win = document.getElementById('chatWindow');
+  var div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.textContent = text;
+  win.appendChild(div);
+  win.scrollTop = win.scrollHeight;
+  return div;
+}
+
+function setInputEnabled(enabled) {
+  document.getElementById('chatInput').disabled = !enabled;
+  document.getElementById('sendBtn').disabled = !enabled;
+}
+
+function updateTurnsCounter(used, limit) {
+  var el = document.getElementById('turnsCounter');
+  el.style.display = 'block';
+  el.textContent = used + ' / ' + (limit || TURNS_LIMIT) + ' conversations used';
+}
+
+function showCrisisBanner() {
+  document.getElementById('crisisBanner').classList.add('show');
+}
+
+function showNudge(text) {
+  document.getElementById('nudgeText').textContent = text;
+  document.getElementById('nudgeBanner').classList.add('show');
+}
+
+function dismissNudge() {
+  document.getElementById('nudgeBanner').classList.remove('show');
+}
+
+function hideStarters() {
+  var el = document.getElementById('starters');
+  if (el) el.classList.remove('show');
+}
+
+function showStarters() {
+  if (gated) return;
+  if (document.querySelector('#chatWindow .msg.user')) return;
+  var el = document.getElementById('starters');
+  if (el) el.classList.add('show');
+}
+
+function showGate(message, signupUrl) {
+  gated = true;
+  dismissNudge();
+  hideStarters();
+  setInputEnabled(false);
+  document.getElementById('inputRow').style.display = 'none';
+  document.getElementById('gateMessage').textContent = message ||
+    "We've had 20 wonderful conversations together — I'd love to keep remembering you. Create a free account and I'll carry everything we've talked about with us.";
+  var fallback = 'https://app.sovereignsanctuary.net/signup.html?src=trial'
+    + '&utm_source=trybottle&utm_medium=trybridge'
+    + (trialDeviceId ? '&fp=' + encodeURIComponent(trialDeviceId) : '');
+  document.getElementById('signupCta').href = signupUrl || fallback;
+  document.getElementById('gate').classList.add('show');
+}
+
+function connectWS() {
+  if (gated) return;
+  try {
+    socket = new WebSocket(WS_URL);
+  } catch (e) {
+    scheduleReconnect();
+    return;
+  }
+
+  socket.onopen = function() {
+    wsRetry = 0;
+    startHandshakeSent = false;
+    trySendStartAndPending();
+  };
+
+  socket.onmessage = function(evt) {
+    var data;
+    try {
+      data = JSON.parse(evt.data);
+    } catch (e) {
+      return;
+    }
+    handleServerMessage(data);
+  };
+
+  socket.onclose = function() {
+    if (gated) return;
+    appendMessage('Connection lost — reconnecting...', 'system');
+    scheduleReconnect();
+  };
+
+  socket.onerror = function() {
+    try { socket.close(); } catch (e) {}
+  };
+}
+
+function scheduleReconnect() {
+  if (gated) return;
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  var attempt = Math.min(wsRetry, 10);
+  var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+  var jitter = Math.floor(baseMs * 0.2 * Math.random());
+  wsRetry++;
+  wsReconnectTimer = setTimeout(connectWS, baseMs + jitter);
+}
+
+function handleServerMessage(data) {
+  switch (data.type) {
+    case 'trial_state':
+      turnstileRequiredNoticeShown = false;
+      updateTurnsCounter(data.turns_used || 0, data.turns_limit);
+      if ((data.turns_used || 0) >= (data.turns_limit || TURNS_LIMIT)) {
+        dismissNudge();
+        showGate();
+      } else {
+        setInputEnabled(true);
+        if ((document.getElementById('chatWindow').children.length) === 0) {
+          appendMessage("Hi, I'm Little Nate. What's on your mind today?", 'nate');
+        }
+        showStarters();
+      }
+      break;
+
+    case 'trial_response':
+      lastSentText = '';
+      appendMessage(data.text || '', 'nate');
+      updateTurnsCounter(data.turns_used || 0, data.turns_limit);
+      if (data.crisis_resources === true) {
+        showCrisisBanner();
+      }
+      if (data.trial_nudge) {
+        showNudge(data.trial_nudge);
+      }
+      setInputEnabled(true);
+      break;
+
+    case 'signup_required':
+      updateTurnsCounter(data.turns_used || 0, data.turns_limit);
+      showGate(data.message, data.signup_url);
+      break;
+
+    case 'trial_email_captured':
+      document.getElementById('emailForm').style.display = 'none';
+      document.getElementById('checkedState').classList.add('show');
+      break;
+
+    case 'turnstile_required':
+      // Rare: Cloudflare's risk engine wanted interactive proof, the one-shot
+      // token expired before the server processed it, or (for an in-progress
+      // chat) the device's verified window lapsed after a long idle gap.
+      // Fetch a fresh token and re-run the start handshake automatically --
+      // invisible to the user unless Turnstile itself renders a challenge. If
+      // this was a rejected chat turn, restore the text so a resend is one
+      // click away (same pattern as the fp_hourly_cap rate-limit case below).
+      turnstileToken = '';
+      startHandshakeSent = false;
+      resetTurnstile();
+      if (lastSentText) {
+        var inputElTs = document.getElementById('chatInput');
+        if (inputElTs && !inputElTs.value) {
+          inputElTs.value = lastSentText;
+        }
+        setInputEnabled(!gated);
+      }
+      if (!turnstileRequiredNoticeShown) {
+        turnstileRequiredNoticeShown = true;
+        appendMessage('One moment — verifying your connection...', 'system');
+      }
+      break;
+
+    case 'error':
+      appendMessage(data.message || 'Something went wrong. Please try again.', 'error');
+      setInputEnabled(!gated);
+      // 2026-07 trial audit fix: a personal rate-limit (fp_hourly_cap) or an
+      // in-flight collision must never make the user retype what they just
+      // wrote -- restore it to the input box so a resend is one click away.
+      if (data.rate_limited && lastSentText) {
+        var inputEl = document.getElementById('chatInput');
+        if (inputEl && !inputEl.value) {
+          inputEl.value = lastSentText;
+        }
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+var lastSentText = '';
+
+function sendTrialMessage(text, starterKey) {
+  if (!text || gated) return true;
+  if (!socket || socket.readyState !== WebSocket.OPEN || !startHandshakeSent) {
+    // Don't drop it -- queue for delivery once the socket (and the Turnstile
+    // start handshake) is ready, and say so. The bubble renders now
+    // (optimistic) so the user sees their words landed somewhere;
+    // trySendStartAndPending()/scheduleReconnect() guarantees the actual send
+    // follows shortly.
+    pendingChatSend = { text: text, starterKey: starterKey };
+    hideStarters();
+    lastSentText = text;
+    appendMessage(text, 'user');
+    appendMessage('Reconnecting... I\'ll deliver this the moment we\'re back.', 'system');
+    setInputEnabled(false);
+    return true;
+  }
+  hideStarters();
+  if (starterKey) {
+    try { localStorage.setItem('ss_trial_starter_key', starterKey); } catch (e) {}
+  }
+  lastSentText = text;
+  appendMessage(text, 'user');
+  setInputEnabled(false);
+  var payload = {
+    type: 'public_trial_chat',
+    device_fingerprint: trialDeviceId,
+    text: text,
+  };
+  if (starterKey) payload.starter_key = starterKey;
+  socket.send(JSON.stringify(payload));
+  return true;
+}
+
+function sendMessage() {
+  var input = document.getElementById('chatInput');
+  var text = input.value.trim();
+  if (!text) return;
+  var sent = sendTrialMessage(text, null);
+  if (sent) input.value = '';
+}
+
+function captureEmail() {
+  var emailInput = document.getElementById('emailInput');
+  var consent = document.getElementById('emailConsent');
+  var btn = document.getElementById('emailBtn');
+  var email = emailInput.value.trim();
+  if (!email) {
+    emailInput.focus();
+    return;
+  }
+  if (!consent.checked) {
+    consent.focus();
+    return;
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN || !startHandshakeSent) {
+    if (gated) {
+      btn.disabled = false;
+      btn.textContent = 'Send me the link';
+      appendMessage('Connection lost — reload the page to send your email link.', 'system');
+      return;
+    }
+    pendingEmailCapture = { email: email };
+    btn.disabled = true;
+    btn.textContent = 'Reconnecting... will send automatically';
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      trySendStartAndPending();
+    } else {
+      scheduleReconnect();
+    }
+    return;
+  }
+  btn.disabled = true;
+  socket.send(JSON.stringify({
+    type: 'public_trial_capture_email',
+    device_fingerprint: trialDeviceId,
+    email: email,
+    consent: true,
+  }));
+}
+
+document.getElementById('chatInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') sendMessage();
+});
+
+document.querySelectorAll('.starter').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    sendTrialMessage(btn.textContent.trim(), btn.getAttribute('data-starter-key'));
+  });
+});
+</script>
+</body>
+</html>
