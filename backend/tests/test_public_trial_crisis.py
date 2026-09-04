@@ -50,16 +50,20 @@ class _FakeTrialConn:
 
     async def fetchrow(self, query, *args):
         if "INSERT INTO public_summon_usage" in query:
-            fp_hash, device_uuid_hash = args
+            fp_hash, device_uuid_hash = args[0], args[1]
+            ip_hash = args[2] if len(args) > 2 else None
             row = self.store.get(device_uuid_hash)
             if row is None:
                 row = {
                     "turns_used": 0, "trial_history": [], "converted": False,
                     "gated_at": None, "device_fingerprint": fp_hash,
+                    "ip_hash": ip_hash,
                 }
                 self.store[device_uuid_hash] = row
             else:
                 row["device_fingerprint"] = fp_hash
+                if ip_hash:
+                    row["ip_hash"] = ip_hash
             return dict(row)
         if "SELECT turns_used, trial_history, converted, gated_at" in query:
             device_uuid_hash = args[0]
@@ -72,6 +76,8 @@ class _FakeTrialConn:
             device_uuid_hash = args[0]
             row = self.store[device_uuid_hash]
             row["turns_used"] = (row.get("turns_used") or 0) + 1
+            if len(args) > 1 and args[1]:
+                row["ip_hash"] = args[1]
             return row["turns_used"]
         raise AssertionError(f"unexpected fetchval query: {query}")
 

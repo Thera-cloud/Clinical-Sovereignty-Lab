@@ -30,7 +30,11 @@ import os
 import re
 import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +371,20 @@ def _ip_hash(ip: str) -> str:
     return hashlib.sha256((ip or "unknown").encode("utf-8")).hexdigest()
 
 
+def seconds_until_et_midnight(now: Optional[datetime] = None) -> int:
+    """Seconds until next America/New_York calendar midnight (min 60).
+
+    Daily Redis caps (IP / global / registration / email) expire here so the
+    budget resets with the ET day, not 86400s after the first INCR.
+    """
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now_et = now.astimezone(_ET)
+    nxt = now_et.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return max(60, int((nxt - now_et).total_seconds()))
+
+
 # ---------------------------------------------------------------------------
 # Redis abuse caps — fail CLOSED (never fail open) on any Redis error.
 # ---------------------------------------------------------------------------
@@ -389,6 +407,14 @@ async def _incr_with_cap(key: str, cap: int, ttl_seconds: int) -> "tuple[bool, O
         count = await r.incr(key)
         if count == 1:
             await r.expire(key, ttl_seconds)
+        else:
+            try:
+                remaining = await r.ttl(key)
+            except Exception:
+                remaining = None
+            # Shrink leftover 86400-from-first-INCR keys to ET midnight.
+            if isinstance(remaining, int) and remaining > ttl_seconds:
+                await r.expire(key, ttl_seconds)
         if count <= cap:
             return True, None
         try:
@@ -437,7 +463,9 @@ async def check_registration_ip_cap(ip: str) -> bool:
     from app.services.trial_signup_redis_keys import registration_ip_daily_key
 
     allowed, _retry_after = await _incr_with_cap(
-        registration_ip_daily_key(_ip_hash(ip)), _REGISTRATION_IP_DAILY_CAP, 86400
+        registration_ip_daily_key(_ip_hash(ip)),
+        _REGISTRATION_IP_DAILY_CAP,
+        seconds_until_et_midnight(),
     )
     return allowed
 
@@ -515,10 +543,11 @@ async def check_turn_abuse_caps(ip: str, fp_hash: str) -> "AbuseCheckResult":
         public_trial_global_hourly_key,
     )
 
-    allowed, retry_after = await _incr_with_cap(public_trial_ip_daily_key(_ip_hash(ip)), _IP_DAILY_CAP, 86400)
+    et_ttl = seconds_until_et_midnight()
+    allowed, retry_after = await _incr_with_cap(public_trial_ip_daily_key(_ip_hash(ip)), _IP_DAILY_CAP, et_ttl)
     if not allowed:
         return AbuseCheckResult(False, "ip_daily_cap", False, retry_after)
-    allowed, retry_after = await _incr_with_cap(public_trial_global_daily_key(), MAX_TRIAL_TURNS_PER_DAY, 86400)
+    allowed, retry_after = await _incr_with_cap(public_trial_global_daily_key(), MAX_TRIAL_TURNS_PER_DAY, et_ttl)
     if not allowed:
         await _alert_global_cap_depleted("global_daily_cap")
         return AbuseCheckResult(False, "global_daily_cap", False, retry_after)
@@ -730,23 +759,29 @@ def validate_device_fingerprint(data: Dict[str, Any]) -> Optional[str]:
 # DB: row identity is device_uuid_hash ONLY (never fp_hash/device_fingerprint)
 # ---------------------------------------------------------------------------
 
-async def db_start_trial(device_uuid_hash: str, fp_hash: str) -> Dict[str, Any]:
+async def db_start_trial(
+    device_uuid_hash: str, fp_hash: str, ip_hash: str = "",
+) -> Dict[str, Any]:
     """public_trial_start: creates the row on first hit; upserts last_seen +
     device_fingerprint (abuse-analytics only) on every subsequent hit. This is
-    the ONLY place device_uuid_hash gets populated."""
+    the ONLY place device_uuid_hash gets populated. ip_hash is sha256(ip) —
+    never a raw IP — for digest unique-IP counts."""
     pool = get_db_pool()
+    ip_hash_val = (ip_hash or "").strip() or None
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO public_summon_usage
-                (device_fingerprint, device_uuid_hash, trial_started_at, last_seen, turns_used, trial_history, converted)
-            VALUES ($1, $2, NOW(), NOW(), 0, '[]'::jsonb, FALSE)
+                (device_fingerprint, device_uuid_hash, trial_started_at, last_seen,
+                 turns_used, trial_history, converted, ip_hash)
+            VALUES ($1, $2, NOW(), NOW(), 0, '[]'::jsonb, FALSE, $3)
             ON CONFLICT (device_uuid_hash) WHERE device_uuid_hash IS NOT NULL DO UPDATE SET
                 last_seen = NOW(),
-                device_fingerprint = EXCLUDED.device_fingerprint
+                device_fingerprint = EXCLUDED.device_fingerprint,
+                ip_hash = COALESCE(EXCLUDED.ip_hash, public_summon_usage.ip_hash)
             RETURNING turns_used, trial_history, converted, gated_at
             """,
-            fp_hash, device_uuid_hash,
+            fp_hash, device_uuid_hash, ip_hash_val,
         )
     history = row["trial_history"]
     if isinstance(history, str):
@@ -786,14 +821,22 @@ async def db_get_trial_state(device_uuid_hash: str) -> Optional[Dict[str, Any]]:
     }
 
 
-async def db_increment_turn(device_uuid_hash: str) -> int:
+async def db_increment_turn(device_uuid_hash: str, ip_hash: str = "") -> int:
     """Increment BEFORE inference (crash-safety). Caller refunds on error."""
     pool = get_db_pool()
+    ip_hash_val = (ip_hash or "").strip() or None
     async with pool.acquire() as conn:
         new_count = await conn.fetchval(
-            "UPDATE public_summon_usage SET turns_used = COALESCE(turns_used, 0) + 1, last_seen = NOW() "
-            "WHERE device_uuid_hash = $1 RETURNING turns_used",
+            """
+            UPDATE public_summon_usage
+            SET turns_used = COALESCE(turns_used, 0) + 1,
+                last_seen = NOW(),
+                ip_hash = COALESCE($2, ip_hash)
+            WHERE device_uuid_hash = $1
+            RETURNING turns_used
+            """,
             device_uuid_hash,
+            ip_hash_val,
         )
     return int(new_count) if new_count is not None else 0
 
@@ -942,7 +985,7 @@ async def prepare_public_trial_start(data: Dict[str, Any], ip: str, ua: str) -> 
         await _mark_device_turnstile_verified(device_uuid_hash)
 
         fp_hash = compute_fp_hash(client_uuid, ip, ua)
-        state = await db_start_trial(device_uuid_hash, fp_hash)
+        state = await db_start_trial(device_uuid_hash, fp_hash, _ip_hash(ip))
         return {
             "type": "trial_state",
             "turns_used": state["turns_used"],
@@ -975,7 +1018,7 @@ async def prepare_public_trial_turn(data: Dict[str, Any], ip: str, ua: str) -> T
 
     state = await db_get_trial_state(device_uuid_hash)
     if state is None:
-        state = await db_start_trial(device_uuid_hash, fp_hash)
+        state = await db_start_trial(device_uuid_hash, fp_hash, _ip_hash(ip))
 
     # Crisis pre-check runs FIRST, before EITHER gate below -- the hard
     # 20-turn signup ceiling AND every abuse cap (IP daily, global daily,
@@ -1033,7 +1076,7 @@ async def prepare_public_trial_turn(data: Dict[str, Any], ip: str, ua: str) -> T
     turns_used = state["turns_used"]
     if not is_crisis:
         try:
-            turns_used = await db_increment_turn(device_uuid_hash)
+            turns_used = await db_increment_turn(device_uuid_hash, _ip_hash(ip))
         except Exception as e:
             logger.warning("public_trial_gate: turn increment failed: %s", e)
             await release_turn_inflight(fp_hash)
@@ -1249,7 +1292,11 @@ async def handle_public_trial_capture_email(data: Dict[str, Any], ip: str, ua: s
 
     from app.services.trial_signup_redis_keys import public_trial_email_ip_daily_key
     # Fail-closed: Redis unreachable => treat as cap-exceeded => silent ack, no send.
-    _email_allowed, _ = await _incr_with_cap(public_trial_email_ip_daily_key(_ip_hash(ip)), _EMAIL_IP_DAILY_CAP, 86400)
+    _email_allowed, _ = await _incr_with_cap(
+        public_trial_email_ip_daily_key(_ip_hash(ip)),
+        _EMAIL_IP_DAILY_CAP,
+        seconds_until_et_midnight(),
+    )
     if not _email_allowed:
         logger.info("public_trial_gate: email capture rate-limited or Redis down; silent ack")
         return ack
@@ -1258,7 +1305,7 @@ async def handle_public_trial_capture_email(data: Dict[str, Any], ip: str, ua: s
     device_uuid_hash = compute_device_uuid_hash(client_uuid)
 
     try:
-        await db_start_trial(device_uuid_hash, fp_hash)  # ensure row exists
+        await db_start_trial(device_uuid_hash, fp_hash, _ip_hash(ip))  # ensure row exists
         raw_token, signup_url, unsubscribe_url = await _upsert_trial_lead(fp_hash, device_uuid_hash, email, client_uuid)
         if raw_token:
             await _send_trial_signup_email(email, signup_url, unsubscribe_url)

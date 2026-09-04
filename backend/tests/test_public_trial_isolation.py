@@ -11,6 +11,7 @@ small fakes so this suite runs fully offline (see ci-gate-before-push.mdc).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
@@ -44,6 +45,9 @@ class _FakeRedis:
         # existed.
         return key in self.locks
 
+    async def ttl(self, key):
+        return 300 if key in self.counters else -1
+
     async def set(self, key, value, nx=False, ex=None):
         if nx and key in self.locks:
             return None
@@ -76,16 +80,20 @@ class _FakeTrialConn:
 
     async def fetchrow(self, query, *args):
         if "INSERT INTO public_summon_usage" in query:
-            fp_hash, device_uuid_hash = args
+            fp_hash, device_uuid_hash = args[0], args[1]
+            ip_hash = args[2] if len(args) > 2 else None
             row = self.store.get(device_uuid_hash)
             if row is None:
                 row = {
                     "turns_used": 0, "trial_history": [], "converted": False,
                     "gated_at": None, "device_fingerprint": fp_hash,
+                    "ip_hash": ip_hash,
                 }
                 self.store[device_uuid_hash] = row
             else:
                 row["device_fingerprint"] = fp_hash
+                if ip_hash:
+                    row["ip_hash"] = ip_hash
             return dict(row)
         if "SELECT turns_used, trial_history, converted, gated_at" in query:
             device_uuid_hash = args[0]
@@ -98,6 +106,8 @@ class _FakeTrialConn:
             device_uuid_hash = args[0]
             row = self.store[device_uuid_hash]
             row["turns_used"] = (row.get("turns_used") or 0) + 1
+            if len(args) > 1 and args[1]:
+                row["ip_hash"] = args[1]
             return row["turns_used"]
         raise AssertionError(f"unexpected fetchval query: {query}")
 
@@ -1007,6 +1017,18 @@ def _dispatch_function_source(source: str) -> str:
     # Grab a generous window; the function is well under 200 lines.
     end = source.index("\nasync def ", start + len(marker))
     return source[start:end]
+
+
+def test_seconds_until_et_midnight_is_about_one_hour_before_midnight():
+    # 23:00 EST on 2026-01-15 = 2026-01-16 04:00 UTC
+    now = datetime(2026, 1, 16, 4, 0, tzinfo=timezone.utc)
+    n = ptg.seconds_until_et_midnight(now)
+    assert 3500 <= n <= 3700
+
+
+def test_seconds_until_et_midnight_floors_at_60():
+    now = datetime(2026, 1, 16, 4, 59, 50, tzinfo=timezone.utc)
+    assert ptg.seconds_until_et_midnight(now) == 60
 
 
 def test_trial_dispatch_never_registers_on_cortex_sockets():

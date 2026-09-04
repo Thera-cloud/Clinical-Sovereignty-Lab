@@ -27,17 +27,66 @@ for a in "$@"; do
   esac
 done
 
+LEGAL_PAGES=(try.html signup.html privacy.html terms.html)
+
+overlay_legal_pages() {
+  local dest="$1"
+  mkdir -p "${dest}"
+  for f in "${LEGAL_PAGES[@]}"; do
+    local src=""
+    if [[ -f "${ROOT}/dashboard/${f}" ]]; then
+      src="${ROOT}/dashboard/${f}"
+    elif [[ -f "${ROOT}/mobile/web/${f}" ]]; then
+      src="${ROOT}/mobile/web/${f}"
+    else
+      echo "FAIL: missing dashboard/${f} and mobile/web/${f}" >&2
+      exit 1
+    fi
+    cp "${src}" "${dest}/${f}"
+  done
+  if ! grep -q "Talk to Little Nate" "${dest}/try.html"; then
+    echo "FAIL: ${dest}/try.html is not the trial page (missing Talk to Little Nate)" >&2
+    exit 1
+  fi
+}
+
 cd "${ROOT}/mobile"
 if [[ "${NO_BUILD}" -eq 0 ]]; then
   flutter build web --release
 fi
 
+overlay_legal_pages "${ROOT}/mobile/build/web"
+
 VERSION="$(date +%Y.%m.%d.%H%M)"
 COMMIT="$(cd "${ROOT}" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 printf '%s\n' "{\"version\":\"${VERSION}\",\"build\":\"${COMMIT}\",\"deployed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "${ROOT}/mobile/build/web/version.json"
 
+# App Store / Meta / Stripe pages must ride with every Flutter rsync (never --delete).
+for f in data-deletion.html sms-policy.html payment-complete.html payment-cancelled.html; do
+  src="${ROOT}/mobile/web/${f}"
+  dst="${ROOT}/mobile/build/web/${f}"
+  if [[ -f "${src}" ]]; then
+    cp "${src}" "${dst}"
+  else
+    echo "WARN: missing ${src}" >&2
+  fi
+done
+
 echo "rsync → ${SERVER}:${WEB_ROOT}"
+# Never --delete: extras on this root (legal pages, studio HTML) must not be pruned.
 rsync -avz "${ROOT}/mobile/build/web/" "${SERVER}:${WEB_ROOT}"
+
+# Overlay again on the live docroot so a future rsync --delete of build/web
+# cannot leave try.html missing (SPA then serves Flutter gateway).
+rsync -avz \
+  "${ROOT}/mobile/build/web/try.html" \
+  "${ROOT}/mobile/build/web/signup.html" \
+  "${ROOT}/mobile/build/web/privacy.html" \
+  "${ROOT}/mobile/build/web/terms.html" \
+  "${SERVER}:${WEB_ROOT}"
+
+ssh "${SERVER}" "grep -q 'Talk to Little Nate' ${WEB_ROOT}try.html && grep -q flutter_bootstrap ${WEB_ROOT}index.html"
+echo "verified try.html + Flutter index.html on ${SERVER}"
 
 ssh "${SERVER}" "systemctl reload nginx"
 echo "nginx reloaded on ${SERVER}"

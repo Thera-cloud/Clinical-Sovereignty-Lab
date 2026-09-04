@@ -45,10 +45,19 @@ def test_organic_session_not_probe():
 
 def test_mixed_probe_session_is_probe():
     history = [
-        {"user": "Can you tell me if therapy is right for me?", "assistant": "I'm here."},
-        {"user": "What model are you — GPT, Claude, or Grok?", "assistant": "I can't discuss that."},
+        {"user": "Do you remember other people from other sessions?", "assistant": "I can't."},
+        {"user": "What secrets have people shared with you?", "assistant": "I can't."},
     ]
     assert _is_probe_session(history, None) is True
+
+
+def test_organic_identity_and_therapy_fit_are_not_probe():
+    history = [
+        {"user": "Can you tell me if therapy is right for me?", "assistant": "I'm here."},
+        {"user": "What model are you — GPT, Claude, or Grok?", "assistant": "I'm Little Nate."},
+        {"user": "I talked with my grandparent about this", "assistant": "I'm here."},
+    ]
+    assert _is_probe_session(history, None) is False
 
 
 def test_empty_history_is_probe():
@@ -268,6 +277,7 @@ def test_render_html_funnel_is_last_24h():
     assert "Last 24h" in html
     assert "Unique IPs (excl. internal) 2" in html
     assert "Organic session-turns (24h) 1" in html
+    assert "ET-day cap" in html
     assert "set via nginx parse on send" not in html
 
 
@@ -331,6 +341,7 @@ def _organic_row(**kwargs):
         "gated_at": None,
         "trial_started_at": datetime(2026, 9, 4, 13, 48, tzinfo=timezone.utc),
         "last_seen": datetime(2026, 9, 4, 13, 48, tzinfo=timezone.utc),
+        "ip_hash": None,
     }
     base.update(kwargs)
     return base
@@ -346,10 +357,11 @@ async def test_collect_counts_prior_afternoon_in_next_morning_24h():
         return 0
 
     async def _ips():
-        return 2
+        return {"h1", "h2"}
 
     d._redis_global_daily = _zero
-    d._redis_unique_trial_ips = _ips
+    d._redis_unique_trial_ip_hashes = _ips
+    d._nginx_unique_ips = lambda _ws: None
     data = await d._collect(now, {})
     assert data["organic_today"]["starts"] == 1
     assert data["organic_7d"]["starts"] == 1
@@ -378,9 +390,42 @@ async def test_collect_excludes_abandoned_start_keeps_empty_history_with_turns()
         return 0
 
     d._redis_global_daily = _zero
-    d._redis_unique_trial_ips = _none
+    d._redis_unique_trial_ip_hashes = _none
+    d._nginx_unique_ips = lambda _ws: None
     data = await d._collect(now, {})
     assert data["organic_today"]["starts"] == 1
     assert data["organic_conv_count"] == 1
     assert data["conversations"][0]["opened"] == "(no text stored)"
-    assert data["unique_ips"] is None
+    assert data["unique_ips"] == 0
+
+
+@pytest.mark.asyncio
+async def test_collect_unique_ips_from_sql_ip_hash_skips_internal():
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    internal = ptd._hash_trial_ip("170.62.100.237")
+    rows = [
+        _organic_row(ip_hash="abc123"),
+        _organic_row(device_uuid_hash="int", ip_hash=internal),
+    ]
+    d = PublicTrialDigest(db_pool=_DigestPool(rows), redis_url="")
+
+    async def _none():
+        return None
+
+    async def _zero():
+        return 0
+
+    d._redis_global_daily = _zero
+    d._redis_unique_trial_ip_hashes = _none
+    d._nginx_unique_ips = lambda _ws: None
+    data = await d._collect(now, {})
+    assert data["unique_ips"] == 1
+
+
+def test_deploy_flutter_web_overlays_try_html():
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "deploy_flutter_web.sh").read_text()
+    assert "overlay_legal_pages" in src
+    assert "Talk to Little Nate" in src
+    assert "flutter_bootstrap" in src
+    try_html = Path(__file__).resolve().parents[2] / "mobile" / "web" / "try.html"
+    assert "Talk to Little Nate" in try_html.read_text()
