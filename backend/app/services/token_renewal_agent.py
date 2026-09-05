@@ -363,11 +363,10 @@ class TokenRenewalAgent:
         else:
             await self._log_activity(
                 platform, "token_renewal_validation_failed",
-                f"Token saved but validation failed — re-entering notification cycle",
+                f"Token saved but validation failed — outbound notify skipped",
                 severity="warning"
             )
-            logger.warning("TokenRenewalAgent: %s validation failed, re-notifying", platform)
-            await self._notify_admin(platform, now)
+            logger.warning("TokenRenewalAgent: %s validation failed, not re-paging", platform)
 
     # ── step 6: retry failed content ─────────────────────────────────────
 

@@ -113,3 +113,20 @@ def test_notify_skips_when_already_alerted():
         asyncio.run(agent._notify_admin("x", now))
     agent._log_activity.assert_awaited()
     assert agent._log_activity.await_args.args[1] == "token_renewal_suppressed"
+
+
+def test_audit_gap_does_not_sms():
+    from app.services.token_audit_agent import TokenAuditAgent
+
+    ns = MagicMock()
+    ns.send_sms = AsyncMock()
+    ns._send_email = AsyncMock()
+    agent = TokenAuditAgent(
+        db_pool=MagicMock(),
+        notification_system=ns,
+        admin_phone="+15555550100",
+        admin_email="ops@example.com",
+    )
+    asyncio.run(agent._send_gap_notification("x"))
+    ns.send_sms.assert_not_called()
+    ns._send_email.assert_not_called()

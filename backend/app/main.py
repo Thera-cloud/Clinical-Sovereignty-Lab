@@ -1964,9 +1964,13 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.token_guardian import TokenGuardian
         _token_guardian = TokenGuardian(db_pool, interval_seconds=2700)
-        await _token_guardian.start()
         app.state.token_guardian = _token_guardian
-        print("   ✅ Token Guardian started (45-min sweep, proactive refresh)")
+        # QUANTUM-CRYSTAL-ARCH: clone shares PG — dual Guardian/Renewal SMS
+        if _is_clone:
+            print("   ⚡ Token Guardian skipped (IS_CLONE)")
+        else:
+            await _token_guardian.start()
+            print("   ✅ Token Guardian started (45-min sweep, proactive refresh)")
     except Exception as tg_err:
         print(f"   ⚠️  Token Guardian init failed: {tg_err}")
 
@@ -1992,9 +1996,13 @@ async def lifespan(app: FastAPI):
             admin_email=_admin_email,
             interval_seconds=900,
         )
-        await _token_renewal_agent.start()
         app.state.token_renewal_agent = _token_renewal_agent
-        print("   ✅ Token Renewal Agent started (15-min sweep, SMS/email notify)")
+        # QUANTUM-CRYSTAL-ARCH: clone must not send a second copy of token SMS
+        if _is_clone:
+            print("   ⚡ Token Renewal Agent skipped (IS_CLONE)")
+        else:
+            await _token_renewal_agent.start()
+            print("   ✅ Token Renewal Agent started (15-min sweep, SMS/email notify)")
     except Exception as tra_err:
         print(f"   ⚠️  Token Renewal Agent init failed: {tra_err}")
 
@@ -2015,9 +2023,13 @@ async def lifespan(app: FastAPI):
             admin_phone=_audit_phone,
             admin_email=_audit_email,
         )
-        await _token_audit_agent.start()
         app.state.token_audit_agent = _token_audit_agent
-        print("   ✅ Token Audit Agent started (30-min audit cycle)")
+        # QUANTUM-CRYSTAL-ARCH: clone must not send AUDIT gap SMS
+        if _is_clone:
+            print("   ⚡ Token Audit Agent skipped (IS_CLONE)")
+        else:
+            await _token_audit_agent.start()
+            print("   ✅ Token Audit Agent started (30-min audit cycle)")
     except Exception as taa_err:
         print(f"   ⚠️  Token Audit Agent init failed: {taa_err}")
 
@@ -2046,9 +2058,13 @@ async def lifespan(app: FastAPI):
             admin_email=_tlp_email,
             interval_seconds=43200,
         )
-        await _token_predictor.start()
         app.state.token_lifecycle_predictor = _token_predictor
-        print("   ✅ TokenLifecyclePredictor started (12h scan, stagger 80s)")
+        # QUANTUM-CRYSTAL-ARCH: clone must not dual-send expiry warning SMS
+        if _is_clone:
+            print("   ⚡ TokenLifecyclePredictor skipped (IS_CLONE)")
+        else:
+            await _token_predictor.start()
+            print("   ✅ TokenLifecyclePredictor started (12h scan, stagger 80s)")
     except Exception as tlp_err:
         print(f"   ⚠️  TokenLifecyclePredictor init failed: {tlp_err}")
 

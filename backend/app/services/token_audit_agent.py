@@ -189,7 +189,11 @@ class TokenAuditAgent:
                     notified = await conn.fetchval("""
                         SELECT COUNT(*) FROM skyeye_activity
                         WHERE platform = $1
-                          AND type = 'token_renewal_notification'
+                          AND type IN (
+                            'token_renewal_notification',
+                            'token_renewal_unresolvable',
+                            'token_renewal_suppressed'
+                          )
                           AND created_at > NOW() - INTERVAL '90 days'
                     """, plat)
 
@@ -201,9 +205,7 @@ class TokenAuditAgent:
                         )
                         report["details"].append(detail)
                         await self._log_discrepancy(plat, detail)
-
-                        if self._notification_system_available():
-                            await self._send_gap_notification(plat)
+                        await self._send_gap_notification(plat)
 
         except Exception as e:
             logger.error(f"Notification gap check failed: {e}")
@@ -347,21 +349,8 @@ class TokenAuditAgent:
         return self.notifications is not None and (self.admin_phone or self.admin_email)
 
     async def _send_gap_notification(self, platform: str):
-        if not self.notifications:
-            return
-        msg = (
-            f"Sovereign Sanctuary AUDIT: {platform} token is expired but "
-            f"the renewal agent never sent a notification. Investigate."
+        """Log only. Outbound SMS/email for social tokens is Renewal Agent's job."""
+        logger.warning(
+            "Token Audit: gap for %s logged — no SMS/email (renewal agent owns outbound)",
+            platform,
         )
-        try:
-            if self.admin_phone:
-                await self.notifications.send_sms(self.admin_phone, msg)
-            if self.admin_email:
-                await self.notifications._send_email(
-                    self.admin_email,
-                    f"Audit Alert — {platform} Missed Notification",
-                    f"<p>{msg}</p>",
-                    notification_type="security"
-                )
-        except Exception as e:
-            logger.error(f"Audit gap notification failed: {e}")

@@ -142,7 +142,25 @@ class TokenGuardian:
             return None
 
     async def _mark_needs_reauth(self, platform: str, error_msg: str = None) -> str:
+        from app.services.token_alert_policy import oauth_error_is_unresolvable
+
         msg = (error_msg or "Token expired, manual re-authorization required")[:500]
+        if oauth_error_is_unresolvable(msg):
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE skyeye_platform_tokens
+                        SET error_message = $2
+                        WHERE platform = $1
+                          AND COALESCE(error_message, '') IS DISTINCT FROM $2
+                        """,
+                        platform,
+                        msg,
+                    )
+            except Exception as e:
+                logger.error(f"Token Guardian: Failed to store unresolvable error for {platform}: {e}")
+            return "still_expired"
         try:
             async with self.db_pool.acquire() as conn:
                 result = await conn.execute(
