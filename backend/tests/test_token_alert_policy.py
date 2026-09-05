@@ -1,4 +1,9 @@
-from app.services.token_alert_policy import social_token_outbound_alerts_allowed
+from app.services.token_alert_policy import (
+    oauth_error_is_unresolvable,
+    outage_already_alerted,
+    social_token_outbound_alerts_allowed,
+)
+from datetime import datetime, timezone
 
 
 def test_when_global_disabled_no_alerts_even_if_not_in_paused_list():
@@ -57,4 +62,22 @@ def test_global_enabled_empty_pause_allows_all():
         emails_enabled_globally=True,
         paused_platform_csv="",
     )
+
+
+def test_oauth_error_is_unresolvable():
+    assert oauth_error_is_unresolvable(
+        "Client application is not allowed for this operation."
+    )
+    assert oauth_error_is_unresolvable("not allowed for this operation")
+    assert not oauth_error_is_unresolvable("invalid_grant")
+    assert not oauth_error_is_unresolvable("")
+
+
+def test_outage_already_alerted():
+    earlier = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    later = datetime(2026, 9, 5, tzinfo=timezone.utc)
+    assert outage_already_alerted(None, earlier) is False
+    assert outage_already_alerted(later, None) is True
+    assert outage_already_alerted(later, earlier) is True
+    assert outage_already_alerted(earlier, later) is False
 

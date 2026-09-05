@@ -8,8 +8,29 @@ Token Renewal Agent skips SMS/email — and Token Audit must not interpret the m
 from __future__ import annotations
 
 
+_UNRESOLVABLE_SNIPPETS = (
+    "client application is not allowed",
+    "not allowed for this operation",
+)
+
+
 def normalize_paused_platform_csv(paused_csv: str) -> frozenset[str]:
     return frozenset(p.strip().lower() for p in (paused_csv or "").split(",") if p.strip())
+
+
+def oauth_error_is_unresolvable(error_message: str) -> bool:
+    """True when clicking OAuth Authorize cannot fix the vendor error (e.g. X app blocked)."""
+    text = (error_message or "").lower()
+    return any(snippet in text for snippet in _UNRESOLVABLE_SNIPPETS)
+
+
+def outage_already_alerted(last_sms, last_recovery) -> bool:
+    """One outbound alert per outage until a live recovery event is logged."""
+    if last_sms is None:
+        return False
+    if last_recovery is None:
+        return True
+    return last_sms >= last_recovery
 
 
 def social_token_outbound_alerts_allowed(

@@ -68,7 +68,10 @@ class TokenGuardian:
 
         connected = [p for p, r in results.items() if r == "connected"]
         refreshed = [p for p, r in results.items() if r == "refreshed"]
-        failed = [p for p, r in results.items() if r not in ("connected", "refreshed", "no_tokens", "skipped")]
+        failed = [
+            p for p, r in results.items()
+            if r not in ("connected", "refreshed", "no_tokens", "skipped", "still_expired")
+        ]
         no_tokens = [p for p, r in results.items() if r == "no_tokens"]
 
         logger.info(
@@ -112,8 +115,7 @@ class TokenGuardian:
                     authed = await adapter.authenticate()
                     if authed:
                         return "connected"
-                    await self._mark_needs_reauth(name, adapter.last_error)
-                    return f"refresh_failed: {adapter.last_error}"
+                    return await self._mark_needs_reauth(name, adapter.last_error)
 
         authed = await adapter.authenticate()
         if authed:
@@ -125,8 +127,7 @@ class TokenGuardian:
             logger.info(f"Token Guardian: {name} recovered via refresh")
             return "refreshed"
 
-        await self._mark_needs_reauth(name, adapter.last_error)
-        return f"auth_failed: {adapter.last_error}"
+        return await self._mark_needs_reauth(name, adapter.last_error)
 
     async def _get_token_row(self, platform: str):
         try:
@@ -140,16 +141,38 @@ class TokenGuardian:
         except Exception:
             return None
 
-    async def _mark_needs_reauth(self, platform: str, error_msg: str = None):
+    async def _mark_needs_reauth(self, platform: str, error_msg: str = None) -> str:
+        msg = (error_msg or "Token expired, manual re-authorization required")[:500]
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute("""
+                result = await conn.execute(
+                    """
                     UPDATE skyeye_platform_tokens
                     SET status = 'expired', error_message = $2, updated_at = NOW()
                     WHERE platform = $1
-                """, platform, (error_msg or "Token expired, manual re-authorization required")[:500])
+                      AND status IS DISTINCT FROM 'expired'
+                    """,
+                    platform,
+                    msg,
+                )
+                n = int(str(result).split()[-1])
+                if n == 0:
+                    await conn.execute(
+                        """
+                        UPDATE skyeye_platform_tokens
+                        SET error_message = $2
+                        WHERE platform = $1
+                          AND status = 'expired'
+                          AND COALESCE(error_message, '') IS DISTINCT FROM $2
+                        """,
+                        platform,
+                        msg,
+                    )
+                    return "still_expired"
+                return "needs_reauth"
         except Exception as e:
             logger.error(f"Token Guardian: Failed to mark {platform} as expired: {e}")
+            return "still_expired"
 
     async def get_platform_status(self) -> dict:
         """Return a snapshot of token health for all platforms (used by audit agent)."""

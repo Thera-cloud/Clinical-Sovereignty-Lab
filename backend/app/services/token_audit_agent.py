@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.services.token_alert_policy import (
+    oauth_error_is_unresolvable,
     social_token_outbound_alerts_allowed_for_platform,
 )
 
@@ -166,7 +167,7 @@ class TokenAuditAgent:
         try:
             async with self.db_pool.acquire() as conn:
                 expired_platforms = await conn.fetch("""
-                    SELECT platform, updated_at
+                    SELECT platform, updated_at, error_message
                     FROM skyeye_platform_tokens
                     WHERE status = 'expired'
                       AND updated_at < NOW() - INTERVAL '30 minutes'
@@ -178,15 +179,19 @@ class TokenAuditAgent:
                         continue
                     if not social_token_outbound_alerts_allowed_for_platform(plat):
                         continue
+                    if oauth_error_is_unresolvable(row["error_message"] or ""):
+                        continue
                     if await self._verify_platform_live(plat):
                         continue
 
+                    # Any SMS this outage window counts — Guardian must not
+                    # re-bump updated_at and re-page as a "missed" alert.
                     notified = await conn.fetchval("""
                         SELECT COUNT(*) FROM skyeye_activity
                         WHERE platform = $1
                           AND type = 'token_renewal_notification'
-                          AND created_at > $2
-                    """, plat, row["updated_at"])
+                          AND created_at > NOW() - INTERVAL '90 days'
+                    """, plat)
 
                     if notified == 0:
                         report["missed_notifications"] += 1

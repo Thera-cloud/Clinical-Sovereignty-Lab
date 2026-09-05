@@ -14,6 +14,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from app.services.token_alert_policy import (
+    oauth_error_is_unresolvable,
+    outage_already_alerted,
+    social_token_outbound_alerts_allowed_for_platform,
+)
+
 logger = logging.getLogger("skyeye.token_renewal_agent")
 
 
@@ -124,6 +130,14 @@ class TokenRenewalAgent:
                     await self._on_renewal_success(platform_name, adapter, now)
                 continue
 
+            err = (row or {}).get("error_message") or ""
+            if oauth_error_is_unresolvable(err):
+                await self._log_activity(
+                    platform_name, "token_renewal_unresolvable",
+                    "Vendor rejected this app — Authorize will not fix it, no repeat SMS",
+                    severity="warning",
+                )
+                continue
             if admin_alert_required(refresh_ok=False, live_ok=False):
                 await self._notify_admin(platform_name, now)
 
@@ -204,17 +218,19 @@ class TokenRenewalAgent:
     # ── step 3: notify admin ─────────────────────────────────────────────
 
     async def _notify_admin(self, platform: str, now: datetime):
-        from app.services.token_alert_policy import (
-            social_token_outbound_alerts_allowed_for_platform,
-        )
-
-        # Paused in ops — no renewal SMS/email; Token Audit must treat this as intentional
-        # (not a “missed notification” gap).
         if not social_token_outbound_alerts_allowed_for_platform(platform):
             logger.debug(
                 "TokenRenewalAgent: outbound token alerts suppressed for %s "
                 "(global flag off or SKYEYE_TOKEN_ALERT_PAUSED_PLATFORMS), skipping notify",
                 platform,
+            )
+            return
+
+        if await self._already_alerted_this_outage(platform):
+            await self._log_activity(
+                platform, "token_renewal_suppressed",
+                "Already notified this outage — no repeat SMS/email",
+                severity="info",
             )
             return
 
@@ -273,6 +289,34 @@ class TokenRenewalAgent:
         )
 
         logger.info("TokenRenewalAgent: notified admin for %s (attempt #%d)", platform, attempts)
+
+    async def _already_alerted_this_outage(self, platform: str) -> bool:
+        try:
+            async with self.db_pool.acquire() as conn:
+                last_sms = await conn.fetchval(
+                    """
+                    SELECT MAX(created_at) FROM skyeye_activity
+                    WHERE platform = $1 AND type = 'token_renewal_notification'
+                    """,
+                    platform,
+                )
+                last_ok = await conn.fetchval(
+                    """
+                    SELECT MAX(created_at) FROM skyeye_activity
+                    WHERE platform = $1
+                      AND type IN (
+                        'token_renewal_validated',
+                        'token_renewal_live_ok',
+                        'oauth_callback_success',
+                        'token_refresh_success'
+                      )
+                    """,
+                    platform,
+                )
+            return outage_already_alerted(last_sms, last_ok)
+        except Exception as e:
+            logger.warning("TokenRenewalAgent: outage-alert check failed for %s: %s", platform, e)
+            return False
 
     # ── step 4: check if pending renewals resolved ───────────────────────
 
