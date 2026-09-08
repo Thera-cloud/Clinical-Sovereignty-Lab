@@ -180,9 +180,15 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
             params.append(filters["coach_id"])
             idx += 1
         if filters.get("status"):
-            conditions.append(f"status = ${idx}")
+            conditions.append(f"LOWER(status) = LOWER(${idx})")
             params.append(filters["status"])
             idx += 1
+        if filters.get("statuses"):
+            _st = [str(s).lower() for s in (filters.get("statuses") or []) if s]
+            if _st:
+                conditions.append(f"LOWER(status) = ANY(${idx}::text[])")
+                params.append(_st)
+                idx += 1
 
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         query = f"""SELECT session_id, client_id, coach_id, family_id, client_name,
@@ -191,7 +197,8 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                            zoom_meeting_id, zoom_host_url, notes, coach_notes,
                            topics_covered, homework_assigned, mood_at_start,
                            mood_at_end, nate_summary, recording_url, session_data,
-                           payment_status, created_at, updated_at,
+                           payment_status, price_cents, cancellation_deadline,
+                           created_at, updated_at,
                            session_data->>'consultation_email' AS consultation_email,
                            session_data->>'consultation_name' AS consultation_name,
                            session_data->>'consultation_subject' AS consultation_subject
@@ -227,6 +234,10 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                     "nate_summary": r.get("nate_summary") or "",
                     "recording_url": r.get("recording_url") or "",
                     "payment_status": r.get("payment_status") or "pending",
+                    "price_cents": r.get("price_cents"),
+                    "cancellation_deadline": (
+                        str(r["cancellation_deadline"]) if r.get("cancellation_deadline") else None
+                    ),
                     "created_at": str(r["created_at"]) if r.get("created_at") else "",
                     "consultation_email": r.get("consultation_email") or "",
                     "consultation_name": r.get("consultation_name") or "",

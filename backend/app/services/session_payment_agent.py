@@ -17,6 +17,11 @@ from app.utils.timezone_resolver import format_session_start_for_profile
 
 logger = logging.getLogger("nate.session_payment_agent")
 
+
+def _is_clone_node() -> bool:
+    return os.getenv("IS_CLONE", "").lower() in ("true", "1", "yes")
+
+
 PAYMENT_WINDOW_HOURS = 72
 CANCELLATION_WINDOW_HOURS = 24
 MIN_FEE_CENTS = 3000  # $30 minimum
@@ -48,6 +53,9 @@ class SessionPaymentAgent:
         self._running = False
 
     async def start(self):
+        if _is_clone_node():
+            logger.info("SessionPaymentAgent: skipped (IS_CLONE) — GREEN owns charges")
+            return
         if self._running:
             return
         self._running = True
@@ -74,6 +82,8 @@ class SessionPaymentAgent:
             await asyncio.sleep(1800)  # 30 minutes
 
     async def _run_one_cycle(self):
+        if _is_clone_node():
+            return
         if not self.db_pool:
             return
 

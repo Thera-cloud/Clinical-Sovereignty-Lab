@@ -70,6 +70,70 @@ async def test_merge_pg_pendings_appends_missing():
 
 
 @pytest.mark.asyncio
+async def test_merge_pg_upcoming_appends_and_drops_cancelled(monkeypatch):
+    monkeypatch.setenv("SCHEDULE_PG_MERGE_CLIENT", "true")
+    sessions = [
+        {
+            "session_id": "SES_JSON",
+            "client_id": "CLIENT_A",
+            "status": "scheduled",
+        },
+        {
+            "session_id": "SES_DEAD",
+            "client_id": "CLIENT_A",
+            "status": "scheduled",
+        },
+    ]
+    pg_rows = [
+        {
+            "session_id": "SES_PG",
+            "client_id": "CLIENT_A",
+            "status": "SCHEDULED",
+            "payment_status": "pending",
+            "price_cents": 12500,
+        },
+        {
+            "session_id": "SES_DEAD",
+            "client_id": "CLIENT_A",
+            "status": "cancelled",
+            "payment_status": "cancelled",
+            "price_cents": 0,
+        },
+        {
+            "session_id": "SES_JSON",
+            "client_id": "CLIENT_A",
+            "status": "scheduled",
+            "payment_status": "paid",
+            "price_cents": 9000,
+        },
+    ]
+    changed = await approval.merge_pg_upcoming_for_client(
+        object(), sessions, "CLIENT_A", _pg_loader=AsyncMock(return_value=pg_rows)
+    )
+    assert changed is True
+    ids = {s.get("session_id") for s in sessions}
+    assert "SES_PG" in ids
+    assert "SES_DEAD" not in ids
+    json_row = next(s for s in sessions if s["session_id"] == "SES_JSON")
+    assert json_row.get("payment_status") == "paid"
+    assert json_row.get("price_cents") == 9000
+
+
+@pytest.mark.asyncio
+async def test_merge_pg_upcoming_respects_flag_off(monkeypatch):
+    monkeypatch.setenv("SCHEDULE_PG_MERGE_CLIENT", "false")
+    sessions = []
+    changed = await approval.merge_pg_upcoming_for_client(
+        object(),
+        sessions,
+        "CLIENT_A",
+        _pg_loader=AsyncMock(return_value=[{"session_id": "SES_X", "status": "scheduled"}]),
+    )
+    assert changed is False
+    assert sessions == []
+
+
+@pytest.mark.asyncio
 async def test_book_session_refuses_clinical_chat_notes():
     out = await executor._book_session_executor(
         None,

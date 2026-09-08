@@ -367,6 +367,83 @@ async def merge_pg_pendings(
     return changed
 
 
+_CLIENT_UPCOMING_STATUSES = frozenset({
+    "scheduled", "active", "pending_approval", "confirmed",
+})
+_CLIENT_GONE_STATUSES = frozenset({
+    "cancelled", "canceled", "cancelled_by_google", "no_show",
+    "declined", "rejected", "expired",
+})
+
+
+def schedule_pg_merge_client_enabled() -> bool:
+    return os.getenv("SCHEDULE_PG_MERGE_CLIENT", "true").lower() in (
+        "1", "true", "yes",
+    )
+
+
+async def merge_pg_upcoming_for_client(
+    db_pool, sessions: List[Dict], client_id: str, *, _pg_loader=None,
+) -> bool:
+    """PG-on-read for client Schedule: hydrate REST bookings, drop PG-cancelled."""
+    cid = (client_id or "").strip()
+    if not db_pool or not cid:
+        return False
+    if not schedule_pg_merge_client_enabled():
+        return False
+    try:
+        loader = _pg_loader
+        if loader is None:
+            from app.services.pg_data_helpers import load_sessions_pg
+            loader = load_sessions_pg
+        rows = await loader(
+            db_pool,
+            client_id=cid,
+            statuses=list(_CLIENT_UPCOMING_STATUSES | _CLIENT_GONE_STATUSES),
+        )
+    except Exception as e:
+        logger.warning("session_approval: merge_pg_upcoming_for_client failed: %s", e)
+        return False
+
+    by_id = {(r.get("session_id") or ""): r for r in rows if r.get("session_id")}
+    changed = False
+    keep: List[Dict] = []
+    for s in sessions:
+        sid = s.get("session_id") or ""
+        pg = by_id.get(sid)
+        if pg:
+            st = str(pg.get("status") or "").lower()
+            if st in _CLIENT_GONE_STATUSES:
+                changed = True
+                continue
+            s["status"] = pg.get("status") or s.get("status")
+            if pg.get("payment_status") is not None:
+                s["payment_status"] = pg.get("payment_status")
+            if "price_cents" in pg:
+                s["price_cents"] = pg.get("price_cents")
+            if pg.get("cancellation_deadline") is not None:
+                s["cancellation_deadline"] = pg.get("cancellation_deadline")
+        keep.append(s)
+    if len(keep) != len(sessions):
+        sessions[:] = keep
+        changed = True
+    elif changed:
+        sessions[:] = keep
+
+    existing = {(s.get("session_id") or "") for s in sessions}
+    for r in rows:
+        sid = r.get("session_id") or ""
+        st = str(r.get("status") or "").lower()
+        if not sid or sid in existing:
+            continue
+        if st not in _CLIENT_UPCOMING_STATUSES:
+            continue
+        sessions.append(r)
+        existing.add(sid)
+        changed = True
+    return changed
+
+
 async def close_pending_negotiation(db_pool, session_id: str, terminal_status: str = "declined") -> None:
     if not db_pool or not session_id:
         return

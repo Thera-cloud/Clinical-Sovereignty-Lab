@@ -120,6 +120,19 @@ async def test_payment_agent_does_not_cancel_free_coach_booking():
     assert any("COALESCE(price_cents, 0) > 0" in q for q in captured)
 
 
+@pytest.mark.asyncio
+async def test_payment_agent_clone_skip_does_not_start_or_cycle(monkeypatch):
+    monkeypatch.setenv("IS_CLONE", "true")
+    conn = AsyncMock()
+    conn.fetch = AsyncMock()
+    agent = SessionPaymentAgent(db_pool=_MockPool(conn), app_state=None)
+    await agent.start()
+    assert agent._running is False
+    assert agent._task is None
+    await agent._run_one_cycle()
+    conn.fetch.assert_not_awaited()
+
+
 def test_calendar_pg_status_filter_is_case_insensitive():
     from pathlib import Path
 

@@ -15952,6 +15952,13 @@ async def handle_client(websocket, path=None):
                     client_id = (current_profile.get("hardware_id") or "").strip()
                     try:
                         sessions = load_json_file(SESSIONS_FILE, [])
+                        # QUANTUM-CRYSTAL-ARCH
+                        try:
+                            from app.services.session_approval import merge_pg_upcoming_for_client
+                            if db_pool:
+                                await merge_pg_upcoming_for_client(db_pool, sessions, client_id)
+                        except Exception:
+                            pass
                         # Build coach lookup once
                         _registry_for_coach = load_registry()
                         _coach_lookup = {}
@@ -15972,7 +15979,9 @@ async def handle_client(websocket, path=None):
                         for s in sessions:
                             if s.get("client_id") != client_id:
                                 continue
-                            if s.get("status") not in ("scheduled", "active", "pending_approval", "confirmed"):
+                            if str(s.get("status") or "").lower() not in (
+                                "scheduled", "active", "pending_approval", "confirmed",
+                            ):
                                 continue
                             # SOVEREIGN-VOICE: only real coach/zoom bookings — must have scheduled_start AND not be an AI chat session
                             _st_iso = (s.get("scheduled_start") or "").strip()
@@ -16006,6 +16015,8 @@ async def handle_client(websocket, path=None):
                                 "time": _time_str,
                                 "duration_minutes": _dur_min,
                                 "status": s.get("status"),
+                                "payment_status": s.get("payment_status") or "",
+                                "price_cents": s.get("price_cents"),
                                 "zoom_link": s.get("zoom_link", ""),
                                 "session_type": s.get("session_type", "COACH"),
                                 "client_name": s.get("client_name", ""),
