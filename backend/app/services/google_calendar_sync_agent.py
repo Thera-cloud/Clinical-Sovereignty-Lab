@@ -51,6 +51,38 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_WS_CLIENT_ID = os.getenv("GOOGLE_WS_CLIENT_ID", "")
 GOOGLE_WS_CLIENT_SECRET = os.getenv("GOOGLE_WS_CLIENT_SECRET", "")
 
+
+def _is_clone_node() -> bool:
+    return os.getenv("IS_CLONE", "").lower() in ("true", "1", "yes")
+
+
+def parse_gcal_datetime(value: Any) -> Optional[datetime]:
+    """Google dateTime JSON is a str; asyncpg timestamptz requires datetime.
+
+    Cindy 2026-09-07: apply_event failed … expected datetime.date or
+    datetime.datetime, got 'str' for '2026-09-07T19:00:00-04:00'.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if "T" not in raw and " " in raw:
+        raw = raw.replace(" ", "T", 1)
+    if raw.endswith("+00"):
+        raw += ":00"
+    raw = raw.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 _ALLOWED_TOKEN_TABLES = frozenset({
     "google_calendar_connection",
     "google_workspace_connection",
@@ -116,6 +148,9 @@ class GoogleCalendarSyncAgent:
         self.coach_busy_cache: Dict[str, List[Dict[str, str]]] = {}
 
     async def start(self):
+        if _is_clone_node():
+            logger.info("GoogleCalendarSyncAgent: skipped (IS_CLONE) — GREEN owns the pull")
+            return
         if not self._pool:
             logger.warning("GoogleCalendarSyncAgent: no db_pool, skipping start")
             return
@@ -360,14 +395,16 @@ class GoogleCalendarSyncAgent:
                 else:
                     start_iso = (ev.get("start") or {}).get("dateTime")
                     end_iso = (ev.get("end") or {}).get("dateTime")
-                    if not start_iso or not end_iso:
+                    start_dt = parse_gcal_datetime(start_iso)
+                    end_dt = parse_gcal_datetime(end_iso)
+                    if not start_dt or not end_dt:
                         return False
                     await conn.execute(
                         "UPDATE coaching_sessions SET scheduled_start = $1, "
                         "scheduled_end = $2, google_etag = $3, "
                         "google_last_synced = NOW(), sync_state = 'synced' "
                         "WHERE session_id = $4",
-                        start_iso, end_iso, etag, session_id,
+                        start_dt, end_dt, etag, session_id,
                     )
             return True
         except Exception as e:
@@ -392,8 +429,10 @@ class GoogleCalendarSyncAgent:
                 async with conn.transaction():
                     for r in rows:
                         try:
-                            start_dt = datetime.fromisoformat(r["start"].replace("Z", "+00:00"))
-                            end_dt = datetime.fromisoformat(r["end"].replace("Z", "+00:00"))
+                            start_dt = parse_gcal_datetime(r["start"])
+                            end_dt = parse_gcal_datetime(r["end"])
+                            if not start_dt or not end_dt:
+                                continue
                         except Exception:
                             continue
                         await conn.execute(
