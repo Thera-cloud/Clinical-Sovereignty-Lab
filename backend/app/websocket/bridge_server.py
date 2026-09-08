@@ -15895,43 +15895,25 @@ async def handle_client(websocket, path=None):
                     else:
                         try:
                             sessions = load_json_file(SESSIONS_FILE, [])
-                            found = False
-                            cancelled_session = None
-                            for s in sessions:
-                                if s.get("session_id") == session_id and s.get("client_id") == client_id:
-                                    s["status"] = "cancelled"
-                                    s["cancelled_at"] = str(datetime.datetime.now())
-                                    s["cancelled_by"] = "CLIENT"
-                                    cancelled_session = s
-                                    found = True
-                                    break
-                            if found:
-                                save_json_file(SESSIONS_FILE, sessions)
-                                # QUANTUM-CRYSTAL-ARCH: refund if paid and cancel ≥24h before start
-                                _refund_outcome, _refund_detail = "skipped", ""
-                                if db_pool and cancelled_session:
-                                    try:
-                                        from app.services.session_booking_billing import refund_on_client_cancel
-                                        _refund_outcome, _refund_detail = await refund_on_client_cancel(
-                                            db_pool, cancelled_session
-                                        )
-                                        print(f">>> [CANCEL] refund={_refund_outcome} {_refund_detail}")
-                                    except Exception as _rf_e:
-                                        print(f">>> [CANCEL] refund skipped: {_rf_e}")
-                                # QUANTUM-CRYSTAL-ARCH: PG dual-write so the cancellation frees the slot everywhere
-                                if db_pool and cancelled_session:
-                                    try:
-                                        from app.services.pg_data_helpers import upsert_session_pg
-                                        await upsert_session_pg(db_pool, cancelled_session)
-                                    except Exception as _pg_e:
-                                        print(f">>> [CANCEL] PG upsert failed (non-blocking): {_pg_e}")
+                            # QUANTUM-CRYSTAL-ARCH
+                            from app.services.session_approval import cancel_client_session
+                            _cx = await cancel_client_session(
+                                db_pool, sessions, session_id, client_id,
+                                notification_system=notification_system,
+                            )
+                            cancelled_session = _cx.get("session")
+                            _refund_outcome = _cx.get("refund_outcome", "skipped")
+                            _refund_detail = _cx.get("refund_detail", "")
+                            if _cx.get("ok"):
+                                if _cx.get("json_changed"):
+                                    save_json_file(SESSIONS_FILE, sessions)
+                                print(f">>> [CANCEL] refund={_refund_outcome} {_refund_detail}")
                                 await websocket.send(json.dumps({
                                     "type": "session_cancelled",
                                     "session_id": session_id,
                                     "refund_status": _refund_outcome,
                                     "refund_detail": _refund_detail,
                                 }))
-                                # Fire-and-forget Google Calendar delete for both participants.
                                 try:
                                     from app.services.google_calendar_session_sync import (
                                         sync_session_for_participants as _gcal_push,

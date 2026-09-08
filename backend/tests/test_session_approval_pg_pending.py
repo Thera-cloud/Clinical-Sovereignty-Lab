@@ -134,7 +134,104 @@ async def test_merge_pg_upcoming_respects_flag_off(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_book_session_refuses_clinical_chat_notes():
+async def test_cancel_pg_only_refunds_once_and_notifies():
+    sessions = []
+    pg_row = {
+        "session_id": "SES_PG_ONLY",
+        "client_id": "CLIENT_A",
+        "coach_id": "COACH_A",
+        "status": "scheduled",
+        "scheduled_start": "2026-10-01T18:00:00+00:00",
+        "client_name": "Audit Client",
+        "payment_status": "paid",
+    }
+    refund = AsyncMock(return_value=("refunded", "re_test"))
+    upsert = AsyncMock(return_value=True)
+    notify = AsyncMock(return_value={"email": True, "sms": True})
+    out = await approval.cancel_client_session(
+        object(),
+        sessions,
+        "SES_PG_ONLY",
+        "CLIENT_A",
+        _pg_loader=AsyncMock(return_value=[pg_row]),
+        _refund=refund,
+        _upsert=upsert,
+        _notify=notify,
+    )
+    assert out["ok"] is True
+    assert out["json_changed"] is False
+    assert out["refund_outcome"] == "refunded"
+    assert sessions == []
+    refund.assert_awaited_once()
+    upsert.assert_awaited_once()
+    notify.assert_awaited_once()
+    cancelled = out["session"]
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["cancelled_by"] == "CLIENT"
+
+
+@pytest.mark.asyncio
+async def test_cancel_inside_24h_too_late_still_cancels():
+    sessions = [{
+        "session_id": "SES_JSON",
+        "client_id": "CLIENT_A",
+        "status": "scheduled",
+        "scheduled_start": "2026-09-09T12:00:00+00:00",
+    }]
+    refund = AsyncMock(return_value=("too_late", "inside 24h cancellation window — no refund"))
+    upsert = AsyncMock(return_value=True)
+    notify = AsyncMock(return_value={"email": False, "sms": False})
+    out = await approval.cancel_client_session(
+        object(),
+        sessions,
+        "SES_JSON",
+        "CLIENT_A",
+        _refund=refund,
+        _upsert=upsert,
+        _notify=notify,
+    )
+    assert out["ok"] is True
+    assert out["json_changed"] is True
+    assert sessions[0]["status"] == "cancelled"
+    assert out["refund_outcome"] == "too_late"
+    refund.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_notify_coach_of_client_cancel_email_and_sms():
+    sent = {}
+
+    async def fake_lookup(_pool, hw):
+        return {
+            "email": "audit_coach@example.com",
+            "phone": "+15555550100",
+            "name": "Audit Coach",
+            "timezone": "UTC",
+        }
+
+    async def fake_email(to_email, template_name, context):
+        sent["email"] = (to_email, template_name, context)
+        return True
+
+    ns = AsyncMock()
+    ns.send_sms = AsyncMock(return_value=True)
+    result = await approval.notify_coach_of_client_cancel(
+        object(),
+        {
+            "session_id": "SES_X",
+            "coach_id": "audit_coach_hw",
+            "client_name": "Audit Client",
+            "scheduled_start": "2026-10-01T18:00:00+00:00",
+        },
+        notification_system=ns,
+        _lookup=fake_lookup,
+        _send_email=fake_email,
+    )
+    assert result["email"] is True
+    assert result["sms"] is True
+    assert sent["email"][1] == "session_cancelled_coach"
+    ns.send_sms.assert_awaited_once()
+
     out = await executor._book_session_executor(
         None,
         "CLIENT_LONGRA_ID",

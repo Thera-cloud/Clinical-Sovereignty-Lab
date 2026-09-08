@@ -516,6 +516,23 @@ TEMPLATES = {
 </div></body></html>
 """,
     },
+    "session_cancelled_coach": {
+        "subject": "{{ client_name }} cancelled a session — {{ session_time }}",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Session cancelled</h2>
+  <p><strong>{{ client_name }}</strong> cancelled a coaching session.</p>
+  <table style="width:100%;background:#0a0a0a;border-radius:6px;padding:12px;color:#cbd5e1;">
+    <tr><td style="padding:6px 12px;color:#94a3b8;">When</td><td style="padding:6px 12px;"><strong>{{ session_time }}</strong></td></tr>
+    <tr><td style="padding:6px 12px;color:#94a3b8;">Session</td><td style="padding:6px 12px;">{{ session_id }}</td></tr>
+  </table>
+  <p style="color:#94a3b8;font-size:13px;">The slot is free on your calendar. No action is required.</p>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Coach Command scheduling.</p>
+</div></body></html>
+""",
+    },
     "pending_booking_coach": {
         "subject": "Session request from {{ client_name }} — {{ session_time }}",
         "html": """

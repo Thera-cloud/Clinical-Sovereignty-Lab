@@ -179,6 +179,10 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
             conditions.append(f"coach_id = ${idx}")
             params.append(filters["coach_id"])
             idx += 1
+        if filters.get("session_id"):
+            conditions.append(f"session_id = ${idx}")
+            params.append(filters["session_id"])
+            idx += 1
         if filters.get("status"):
             conditions.append(f"LOWER(status) = LOWER(${idx})")
             params.append(filters["status"])

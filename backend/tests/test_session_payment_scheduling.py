@@ -140,3 +140,52 @@ def test_calendar_pg_status_filter_is_case_insensitive():
     text = src.read_text(encoding="utf-8")
     assert "LOWER(status) IN ('scheduled', 'active', 'pending_approval')" in text
     assert '.lower() not in ["scheduled", "active", "pending_approval"]' in text
+
+
+@pytest.mark.asyncio
+async def test_refund_on_client_cancel_too_late_inside_24h(monkeypatch):
+    from app.services.session_booking_billing import refund_on_client_cancel
+
+    monkeypatch.setenv("ENABLE_SESSION_BOOKING_BILLING", "true")
+    start = datetime.now(timezone.utc) + timedelta(hours=12)
+    outcome, detail = await refund_on_client_cancel(
+        None,
+        {
+            "scheduled_start": start.isoformat(),
+            "payment_status": "paid",
+            "stripe_payment_intent_id": "pi_x",
+        },
+    )
+    assert outcome == "too_late"
+    assert "24h" in detail
+
+
+@pytest.mark.asyncio
+async def test_refund_on_client_cancel_ge_24h_paid(monkeypatch):
+    import sys
+    import types
+    from app.services.session_booking_billing import refund_on_client_cancel
+
+    monkeypatch.setenv("ENABLE_SESSION_BOOKING_BILLING", "true")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_s3")
+    stripe_mod = types.ModuleType("stripe")
+
+    class _Refund:
+        @staticmethod
+        def create(**_kw):
+            return types.SimpleNamespace(amount=5000, id="re_s3")
+
+    stripe_mod.Refund = _Refund
+    monkeypatch.setitem(sys.modules, "stripe", stripe_mod)
+    start = datetime.now(timezone.utc) + timedelta(hours=48)
+    outcome, detail = await refund_on_client_cancel(
+        None,
+        {
+            "session_id": "SES_PAID",
+            "scheduled_start": start.isoformat(),
+            "payment_status": "paid",
+            "stripe_payment_intent_id": "pi_paid",
+        },
+    )
+    assert outcome == "refunded"
+    assert detail == "re_s3"

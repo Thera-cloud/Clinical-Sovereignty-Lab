@@ -105,6 +105,7 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
             row = await conn.fetchrow(
                 """SELECT username,
                           COALESCE(profile_data->>'email', '') AS email,
+                          COALESCE(profile_data->>'phone', '') AS phone,
                           COALESCE(profile_data->>'name', username) AS name,
                           COALESCE(profile_data->>'timezone', '') AS timezone
                    FROM users
@@ -116,6 +117,7 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
                 return {
                     "username": row["username"],
                     "email": row["email"],
+                    "phone": row["phone"],
                     "name": row["name"],
                     "timezone": row["timezone"],
                 }
@@ -442,6 +444,166 @@ async def merge_pg_upcoming_for_client(
         existing.add(sid)
         changed = True
     return changed
+
+
+def schedule_client_cancel_pg_enabled() -> bool:
+    return os.getenv("SCHEDULE_CLIENT_CANCEL_PG", "true").lower() in (
+        "1", "true", "yes",
+    )
+
+
+async def notify_coach_of_client_cancel(
+    db_pool,
+    session: Dict,
+    *,
+    notification_system=None,
+    _lookup=None,
+    _send_email=None,
+) -> Dict[str, bool]:
+    """Email + SMS the assigned coach after a client cancel."""
+    result = {"email": False, "sms": False}
+    if not session:
+        return result
+    lookup = _lookup or lookup_user_contact
+    coach = await lookup(db_pool, session.get("coach_id", "")) if db_pool else {}
+    client_name = session.get("client_name") or session.get("client_id") or "A client"
+    when = format_session_time(session, {"timezone": (coach or {}).get("timezone")})
+    dest = ((coach or {}).get("email") or "").strip()
+    sender = _send_email
+    if sender is None and dest:
+        try:
+            from app.services.notifications_service import EmailService
+            sender = EmailService().send_email
+        except Exception as e:
+            logger.warning("session_approval: EmailService unavailable: %s", e)
+    if dest and sender:
+        try:
+            result["email"] = bool(await sender(
+                dest,
+                "session_cancelled_coach",
+                {
+                    "client_name": client_name,
+                    "session_time": when,
+                    "session_id": session.get("session_id") or "",
+                },
+            ))
+        except Exception as e:
+            logger.warning("session_approval: cancel email failed: %s", e)
+    phone = ((coach or {}).get("phone") or "").strip()
+    if phone and notification_system is not None:
+        try:
+            body = f"Sanctuary: {client_name} cancelled their session {when}."
+            result["sms"] = bool(await notification_system.send_sms(phone, body))
+        except Exception as e:
+            logger.warning("session_approval: cancel SMS failed: %s", e)
+    logger.info(
+        "session_approval: client cancel notify email=%s sms=%s sid=%s",
+        result["email"], result["sms"], session.get("session_id"),
+    )
+    return result
+
+
+async def cancel_client_session(
+    db_pool,
+    sessions: List[Dict],
+    session_id: str,
+    client_id: str,
+    *,
+    notification_system=None,
+    _pg_loader=None,
+    _refund=None,
+    _upsert=None,
+    _notify=None,
+) -> Dict:
+    """JSON then PG lookup; one refund_on_client_cancel; upsert; coach notify.
+
+    Does not write sessions.json (caller saves when json_changed).
+    """
+    sid = (session_id or "").strip()
+    cid = (client_id or "").strip()
+    if not sid or not cid:
+        return {"ok": False, "reason": "missing"}
+
+    json_changed = False
+    cancelled: Optional[Dict] = None
+    for s in sessions:
+        if s.get("session_id") != sid or s.get("client_id") != cid:
+            continue
+        if str(s.get("status") or "").lower() in _CLIENT_GONE_STATUSES:
+            return {"ok": False, "reason": "already_gone"}
+        s["status"] = "cancelled"
+        s["cancelled_at"] = str(datetime.now())
+        s["cancelled_by"] = "CLIENT"
+        cancelled = s
+        json_changed = True
+        break
+
+    if cancelled is None and db_pool and schedule_client_cancel_pg_enabled():
+        try:
+            loader = _pg_loader
+            if loader is None:
+                from app.services.pg_data_helpers import load_sessions_pg
+                loader = load_sessions_pg
+            rows = await loader(db_pool, client_id=cid, session_id=sid)
+        except Exception as e:
+            logger.warning("session_approval: cancel PG load failed: %s", e)
+            rows = []
+        for r in rows:
+            if r.get("session_id") != sid or r.get("client_id") != cid:
+                continue
+            if str(r.get("status") or "").lower() in _CLIENT_GONE_STATUSES:
+                return {"ok": False, "reason": "already_gone"}
+            r = dict(r)
+            r["status"] = "cancelled"
+            r["cancelled_at"] = str(datetime.now())
+            r["cancelled_by"] = "CLIENT"
+            cancelled = r
+            break
+
+    if cancelled is None:
+        return {"ok": False, "reason": "not_found"}
+
+    refund_outcome, refund_detail = "skipped", ""
+    refund_fn = _refund
+    if refund_fn is None and db_pool:
+        try:
+            from app.services.session_booking_billing import refund_on_client_cancel
+            refund_fn = refund_on_client_cancel
+        except Exception as e:
+            logger.warning("session_approval: refund import failed: %s", e)
+    if refund_fn and db_pool:
+        try:
+            refund_outcome, refund_detail = await refund_fn(db_pool, cancelled)
+        except Exception as e:
+            logger.warning("session_approval: refund_on_client_cancel: %s", e)
+            refund_outcome, refund_detail = "error", str(e)
+
+    upsert = _upsert
+    if upsert is None and db_pool:
+        try:
+            from app.services.pg_data_helpers import upsert_session_pg
+            upsert = upsert_session_pg
+        except Exception as e:
+            logger.warning("session_approval: upsert import failed: %s", e)
+    if upsert and db_pool:
+        try:
+            await upsert(db_pool, cancelled)
+        except Exception as e:
+            logger.warning("session_approval: cancel upsert failed: %s", e)
+
+    notify = _notify if _notify is not None else notify_coach_of_client_cancel
+    try:
+        await notify(db_pool, cancelled, notification_system=notification_system)
+    except Exception as e:
+        logger.warning("session_approval: cancel notify failed: %s", e)
+
+    return {
+        "ok": True,
+        "session": cancelled,
+        "refund_outcome": refund_outcome,
+        "refund_detail": refund_detail,
+        "json_changed": json_changed,
+    }
 
 
 async def close_pending_negotiation(db_pool, session_id: str, terminal_status: str = "declined") -> None:
