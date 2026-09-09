@@ -10044,7 +10044,25 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final moodHistory = List<dynamic>.from(brief['mood_history'] ?? []);
     final recentConversations =
         List<dynamic>.from(brief['recent_conversations'] ?? []);
-    final recentTopics = List<String>.from(brief['recent_topics'] ?? []);
+    final recentTopics = <String>[];
+    for (final t in List<dynamic>.from(brief['recent_topics'] ?? const [])) {
+      if (t is String && t.trim().isNotEmpty) {
+        recentTopics.add(t.trim());
+      }
+    }
+    if (recentTopics.isEmpty) {
+      for (final t in List<dynamic>.from(
+          brief['recent_conversation_topics'] ?? const [])) {
+        if (t is String && t.trim().isNotEmpty) {
+          recentTopics.add(t.trim());
+        } else if (t is Map) {
+          final s = (t['topic_summary'] ?? t['text'] ?? t['topic'] ?? '')
+              .toString()
+              .trim();
+          if (s.isNotEmpty) recentTopics.add(s);
+        }
+      }
+    }
 
     return SingleChildScrollView(
       controller: scrollController,
@@ -10310,6 +10328,50 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     style: const TextStyle(color: Colors.white60, fontSize: 12)),
               ),
             const SizedBox(height: 24),
+          ],
+
+          if ((brief['dual_coo_insights'] is List) &&
+              (brief['dual_coo_insights'] as List).isNotEmpty) ...[
+            const Text(
+              "DUAL-COO INSIGHTS",
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                  fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            ...(brief['dual_coo_insights'] as List).take(8).map((raw) {
+              final m = raw is Map
+                  ? Map<String, dynamic>.from(raw)
+                  : <String, dynamic>{};
+              final title = (m['title'] ?? '').toString();
+              final body = (m['body'] ?? '').toString();
+              final source = (m['source'] ?? '').toString();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (title.isNotEmpty)
+                      Text(title,
+                          style: const TextStyle(
+                              color: Color(0xFFC9A962),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                    if (source.isNotEmpty)
+                      Text(source,
+                          style: const TextStyle(
+                              color: Color(0xFF8B7355), fontSize: 11)),
+                    if (body.isNotEmpty)
+                      Text(body,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13, height: 1.4)),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 16),
           ],
 
           if ((brief['prior_session_summaries'] is List) &&

@@ -20382,14 +20382,40 @@ async def handle_client(websocket, path=None):
             # === COACH: GET PRE-SESSION BRIEF ===
             elif t in ("get_presession_brief", "fetch_presession_brief"):
                 if current_profile and current_profile.get("role") in ["COACH", "ADMIN"]:
-                    client_id = d.get("client_id")
+                    # QUANTUM-CRYSTAL-ARCH — S7 brief identity: username, hardware_id, PG
+                    client_id = (d.get("client_id") or "").strip()
                     registry = load_registry()
                     client_profile = None
                     for k, v in registry.items():
-                        if v.get("profile", {}).get("hardware_id") == client_id:
-                            client_profile = v["profile"]
+                        p = v.get("profile", {}) if isinstance(v, dict) else {}
+                        if not isinstance(p, dict):
+                            continue
+                        if client_id in (
+                            p.get("hardware_id"),
+                            p.get("username"),
+                            v.get("username"),
+                            k,
+                        ):
+                            client_profile = dict(p)
+                            if not client_profile.get("username"):
+                                client_profile["username"] = v.get("username") or k
                             break
-                    
+                    if not client_profile and db_pool:
+                        try:
+                            from app.services.pg_data_helpers import find_user_pg, find_user_by_username_pg
+                            client_profile = await find_user_pg(db_pool, client_id)
+                            if not client_profile:
+                                client_profile = await find_user_by_username_pg(db_pool, client_id)
+                        except Exception as _brief_id_err:
+                            logger.warning("get_presession_brief: identity lookup: %s", _brief_id_err)
+                    if not client_profile:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "Client not found",
+                            "context": "brief",
+                        }))
+                        continue
+
                     if client_profile:
                         metrics = parietal.load_metrics(client_profile)
                         topics = hippocampus.get_topics_discussed(client_profile)
@@ -20729,6 +20755,13 @@ async def handle_client(websocket, path=None):
                                 )
                             except Exception as _zlb_err:
                                 logger.debug("presession zoom learning: %s", _zlb_err)
+                            try:
+                                from app.services.presession_brief_overlay import enrich_dual_coo_insights
+                                brief = await enrich_dual_coo_insights(
+                                    db_pool, client_id, brief
+                                )
+                            except Exception as _dc_err:
+                                logger.debug("get_presession_brief: dual_coo: %s", _dc_err)
 
                         # QUANTUM-CRYSTAL-ARCH — S7 View Brief overlay conversation_history
                         try:

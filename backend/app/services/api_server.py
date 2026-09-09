@@ -987,8 +987,14 @@ async def get_presession_brief(client_id: str, coach: Dict = Depends(require_coa
 
             if not await _coach_can_access_client(conn, coach, client):
                 raise HTTPException(status_code=403, detail="Client not on your caseload")
-            
-            # Get recent memory
+
+            safe_client = {
+                "id": str(client["id"]),
+                "username": client["username"],
+                "name": client["name"],
+                "role": client["role"],
+                "hardware_id": client["hardware_id"],
+            }
             memories = await conn.fetch("""
                 SELECT * FROM memory_ledger 
                 WHERE user_id = $1 
@@ -1011,7 +1017,7 @@ async def get_presession_brief(client_id: str, coach: Dict = Depends(require_coa
                 """, client['family_id'], client_id)
             
             return {
-                "client": dict(client),
+                "client": safe_client,
                 "recent_topics": [m['content'][:100] for m in memories],
                 "nevedal_state": dict(metrics) if metrics else None,
                 "family_context": [dict(f) for f in family_members],

@@ -389,70 +389,12 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
             )
         except Exception as _zle:
             _logger.debug("presession zoom learning enrich: %s", _zle)
-        # QUANTUM-CRYSTAL-ARCH — Dual-COO insight_route → coach pre-session
         try:
-            from app.services.rls_context import set_rls_admin
+            from app.services.presession_brief_overlay import enrich_dual_coo_insights
 
-            set_rls_admin()
-            async with db_pool.acquire() as conn:
-                # Match hardware_id OR username OR users.id — briefs store any of these
-                _id_row = await conn.fetchrow(
-                    """
-                    SELECT id::text AS uid, username, hardware_id
-                    FROM users
-                    WHERE hardware_id = $1 OR username = $1 OR id::text = $1
-                    LIMIT 1
-                    """,
-                    client_id,
-                )
-                _match_ids = [client_id]
-                if _id_row:
-                    for _k in ("uid", "username", "hardware_id"):
-                        _v = _id_row.get(_k)
-                        if _v and str(_v) not in _match_ids:
-                            _match_ids.append(str(_v))
-                _ibriefs = await conn.fetch(
-                    """
-                    SELECT id, source, title, body, created_at, client_user_id
-                    FROM coach_insight_briefs
-                    WHERE status = 'queued'
-                      AND (
-                          client_user_id = 'broadcast'
-                          OR client_user_id = ANY($1::text[])
-                      )
-                    ORDER BY created_at DESC
-                    LIMIT 8
-                    """,
-                    _match_ids,
-                )
-                if _ibriefs:
-                    brief_payload["dual_coo_insights"] = [
-                        {
-                            "id": r["id"],
-                            "source": r["source"],
-                            "title": r["title"],
-                            "body": (r["body"] or "")[:800],
-                            "created_at": r["created_at"].isoformat()
-                            if r["created_at"] else None,
-                        }
-                        for r in _ibriefs
-                    ]
-                    # Client-targeted briefs: mark delivered. Broadcast stays queued
-                    # so other coaches still see them (first-viewer must not consume).
-                    _targeted = [
-                        r["id"]
-                        for r in _ibriefs
-                        if str(r["client_user_id"] or "") != "broadcast"
-                    ]
-                    if _targeted:
-                        await conn.execute(
-                            """
-                            UPDATE coach_insight_briefs
-                            SET status = 'delivered', delivered_at = NOW()
-                            WHERE id = ANY($1::bigint[])
-                            """,
-                            _targeted,
-                        )
+            brief_payload = await enrich_dual_coo_insights(
+                db_pool, client_id, brief_payload
+            )
         except Exception as _ib_err:
             _logger.debug("presession dual_coo insights: %s", _ib_err)
     # QUANTUM-CRYSTAL-ARCH — S7 View Brief overlay conversation_history

@@ -416,13 +416,42 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
                 for (var i = convos.length - 1; i >= 0 && i >= convos.length - 5; i--) {
                     var entry = convos[i];
                     var ts = entry.timestamp || entry.time || "";
-                    var userMsg = entry.user || entry.message || entry.content || "";
-                    var nateMsg = entry.nate || entry.response || entry.assistant || "";
+                    var userMsg = entry.user || entry.user_text || entry.message || entry.content || entry.preview || "";
+                    var nateMsg = entry.ai || entry.ai_text || entry.nate || entry.response || entry.assistant || "";
                     if (!userMsg && !nateMsg) continue;
                     html += '<div class="convo-entry">';
                     if (ts) html += '<div class="convo-time">' + String(ts).slice(0, 19).replace("T", " ") + '</div>';
                     if (userMsg) html += '<div class="convo-label" style="color:var(--text-secondary)">User</div><div class="convo-user">' + escapeHtml(String(userMsg).slice(0, 200)) + '</div>';
                     if (nateMsg) html += '<div class="convo-label" style="color:var(--cyan);margin-top:6px">Nate</div><div class="convo-nate">' + escapeHtml(String(nateMsg).slice(0, 300)) + '</div>';
+                    html += '</div>';
+                }
+            }
+
+            var dualCoo = brief.dual_coo_insights || [];
+            if (dualCoo.length > 0) {
+                html += '<div class="sidebar-section-title" style="margin-top:16px">DUAL-COO INSIGHTS</div>';
+                for (var di = 0; di < dualCoo.length && di < 8; di++) {
+                    var ins = dualCoo[di] || {};
+                    html += '<div class="convo-entry">';
+                    if (ins.title) html += '<div class="convo-label" style="color:var(--gold)">' + escapeHtml(String(ins.title)) + '</div>';
+                    if (ins.source) html += '<div class="convo-time">' + escapeHtml(String(ins.source)) + '</div>';
+                    if (ins.body) html += '<div class="convo-user">' + escapeHtml(String(ins.body).slice(0, 400)) + '</div>';
+                    html += '</div>';
+                }
+            }
+
+            var priorSums = brief.prior_session_summaries || [];
+            if (priorSums.length > 0) {
+                html += '<div class="sidebar-section-title" style="margin-top:16px">PRIOR SESSION SUMMARIES</div>';
+                for (var pi = 0; pi < priorSums.length && pi < 8; pi++) {
+                    var ps = priorSums[pi] || {};
+                    var psum = ps.summary || "";
+                    if (!psum) continue;
+                    html += '<div class="convo-entry">';
+                    html += '<div class="convo-time">' + escapeHtml(String(ps.occurred_at || '').slice(0, 19).replace("T", " "));
+                    if (ps.source) html += ' · ' + escapeHtml(String(ps.source));
+                    html += '</div>';
+                    html += '<div class="convo-user">' + escapeHtml(String(psum).slice(0, 400)) + '</div>';
                     html += '</div>';
                 }
             }

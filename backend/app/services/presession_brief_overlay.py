@@ -27,6 +27,26 @@ PAYMENT_SECRET_KEYS = frozenset(
     }
 )
 
+# last_session on REST briefs is a full coaching_sessions row + flattened
+# session_data. View Brief only needs clinical leftovers — not money or host URLs.
+LAST_SESSION_KEEP = frozenset(
+    {
+        "session_id",
+        "status",
+        "scheduled_start",
+        "scheduled_end",
+        "actual_start",
+        "actual_end",
+        "nate_summary",
+        "homework_assigned",
+        "topics_covered",
+        "mood_at_start",
+        "mood_at_end",
+        "client_name",
+        "session_type",
+    }
+)
+
 
 def overlay_enabled() -> bool:
     return os.getenv("ENABLE_BRIEF_PG_OVERLAY", "true").strip().lower() not in (
@@ -48,6 +68,14 @@ def strip_payment_secrets(obj: Any) -> Any:
     if isinstance(obj, list):
         return [strip_payment_secrets(v) for v in obj]
     return obj
+
+
+def sanitize_last_session(raw: Any) -> Optional[Dict[str, Any]]:
+    """Allowlist clinical last-session fields. Drops session_data / Stripe / URLs."""
+    if not isinstance(raw, dict):
+        return None
+    kept = {k: raw.get(k) for k in LAST_SESSION_KEEP if k in raw}
+    return strip_payment_secrets(kept)
 
 
 def _row_get(row: Any, key: str, default: Any = None) -> Any:
@@ -77,7 +105,14 @@ def sanitize_conversation_entry(raw: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
     user = (raw.get("user") or raw.get("user_text") or raw.get("preview") or "").strip()
-    ai = (raw.get("ai") or raw.get("ai_text") or "").strip()
+    ai = (
+        raw.get("ai")
+        or raw.get("ai_text")
+        or raw.get("nate")
+        or raw.get("response")
+        or raw.get("assistant")
+        or ""
+    ).strip()
     if not user and not ai:
         return None
     ts = raw.get("timestamp") or raw.get("created_at") or ""
@@ -181,6 +216,80 @@ async def _history_user_ids(
     return ids
 
 
+async def enrich_dual_coo_insights(
+    db_pool: Any,
+    client_id: str,
+    brief: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Attach queued Dual-COO coach_insight_briefs. Broadcast stays queued."""
+    out = dict(brief or {})
+    if not db_pool or not (client_id or "").strip():
+        return out
+    try:
+        from app.services.rls_context import set_rls_admin
+
+        set_rls_admin()
+        async with db_pool.acquire() as conn:
+            id_row = await conn.fetchrow(
+                """
+                SELECT id::text AS uid, username, hardware_id
+                FROM users
+                WHERE hardware_id = $1 OR username = $1 OR id::text = $1
+                LIMIT 1
+                """,
+                (client_id or "").strip(),
+            )
+            match_ids = [client_id]
+            if id_row:
+                for key in ("uid", "username", "hardware_id"):
+                    val = id_row.get(key)
+                    if val and str(val) not in match_ids:
+                        match_ids.append(str(val))
+            rows = await conn.fetch(
+                """
+                SELECT id, source, title, body, created_at, client_user_id
+                FROM coach_insight_briefs
+                WHERE status = 'queued'
+                  AND (
+                      client_user_id = 'broadcast'
+                      OR client_user_id = ANY($1::text[])
+                  )
+                ORDER BY created_at DESC
+                LIMIT 8
+                """,
+                match_ids,
+            )
+            if rows:
+                out["dual_coo_insights"] = [
+                    {
+                        "id": r["id"],
+                        "source": r["source"],
+                        "title": r["title"],
+                        "body": (r["body"] or "")[:800],
+                        "created_at": r["created_at"].isoformat()
+                        if r["created_at"] else None,
+                    }
+                    for r in rows
+                ]
+                targeted = [
+                    r["id"]
+                    for r in rows
+                    if str(r["client_user_id"] or "") != "broadcast"
+                ]
+                if targeted:
+                    await conn.execute(
+                        """
+                        UPDATE coach_insight_briefs
+                        SET status = 'delivered', delivered_at = NOW()
+                        WHERE id = ANY($1::bigint[])
+                        """,
+                        targeted,
+                    )
+    except Exception as e:
+        logger.debug("presession dual_coo insights: %s", e)
+    return out
+
+
 async def overlay_presession_brief(
     db_pool: Any,
     client_id: str,
@@ -192,6 +301,11 @@ async def overlay_presession_brief(
     """Merge PG conversation + session summaries onto an existing View Brief dict."""
     out = dict(brief or {})
     vault = list(out.get("recent_conversations") or [])
+    client_block = out.get("client")
+    if isinstance(client_block, dict) and "last_session" in client_block:
+        client_block = dict(client_block)
+        client_block["last_session"] = sanitize_last_session(client_block.get("last_session"))
+        out["client"] = client_block
     if not overlay_enabled() or not db_pool:
         out["recent_conversations"] = merge_conversation_turns(vault, [], limit=limit)
         return strip_payment_secrets(out)
@@ -227,8 +341,11 @@ async def overlay_presession_brief(
                         "word_count_user": int(_row_get(row, "word_count_user") or 0),
                         "word_count_ai": int(_row_get(row, "word_count_ai") or 0),
                     })
-            hw_ids = [i for i in (hardware_id, (client_id or "").strip()) if i]
-            if hw_ids:
+            session_keys = list(user_ids)
+            for extra in (hardware_id, (client_id or "").strip()):
+                if extra and extra not in session_keys:
+                    session_keys.append(extra)
+            if session_keys:
                 sum_rows = await conn.fetch(
                     """
                     SELECT session_id,
@@ -248,7 +365,7 @@ async def overlay_presession_brief(
                               DESC NULLS LAST
                      LIMIT 8
                     """,
-                    hw_ids,
+                    session_keys,
                 )
                 for row in sum_rows or []:
                     parsed = session_summary_from_row(row)
@@ -259,7 +376,7 @@ async def overlay_presession_brief(
 
     merged = merge_conversation_turns(vault, pg_turns, limit=limit)
     out["recent_conversations"] = merged
-    if merged:
+    if merged and not out.get("recent_conversation_topics"):
         out["recent_conversation_topics"] = rebuild_conversation_topics(merged)
     if summaries:
         out["prior_session_summaries"] = summaries

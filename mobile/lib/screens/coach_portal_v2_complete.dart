@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'settings_screen.dart';
 import '../config/app_config.dart' as central_config;
 import '../main.dart' show ReConsentScreen;
+import '../widgets/conversation_log_view.dart';
 
 // -----------------------------------------------------------------------------
 // CONFIGURATION
@@ -2322,8 +2323,11 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
     _briefSub = widget.socket!.stream.listen((msg) {
       try {
         final data = jsonDecode(msg);
-        if (data['type'] == 'presession_brief') {
-          if (mounted) setState(() { _briefData = data['brief'] ?? data; _isLoading = false; });
+        if (data['type'] == 'presession_brief' || data['type'] == 'presession_brief_data') {
+          if (mounted) setState(() {
+            _briefData = _normalizeBrief(data);
+            _isLoading = false;
+          });
           _briefSub?.cancel();
         } else if (data['type'] == 'error' && (data['context'] ?? '').toString().contains('brief')) {
           if (mounted) setState(() { _error = data['message'] ?? 'Failed to load brief'; _isLoading = false; });
@@ -2340,6 +2344,55 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
         setState(() { _isLoading = false; _error = 'Request timed out'; });
       }
     });
+  }
+
+  Map<String, dynamic> _normalizeBrief(dynamic data) {
+    final root = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+    final brief = Map<String, dynamic>.from(
+      root['brief'] is Map
+          ? root['brief']
+          : (root['data'] is Map ? root['data'] : root),
+    );
+    final client = brief['client'] is Map
+        ? Map<String, dynamic>.from(brief['client'])
+        : <String, dynamic>{};
+    final metrics = brief['metrics'] is Map
+        ? Map<String, dynamic>.from(brief['metrics'])
+        : <String, dynamic>{};
+    brief['client_name'] ??= client['name'];
+    brief['tier'] ??= client['tier'];
+    brief['sessions_total'] ??= client['total_sessions'];
+    brief['client_since'] ??= client['joined_date'];
+    brief['recent_mood'] ??= metrics['mood_current'] ?? metrics['mood'] ?? 'neutral';
+    brief['mood_date'] ??= metrics['mood_trend'] ?? '';
+    if (brief['topics'] == null) {
+      final topics = brief['recent_topics'] ?? brief['recent_conversation_topics'];
+      if (topics is List) {
+        brief['topics'] = topics
+            .map((t) => t is Map
+                ? t
+                : {'text': t.toString(), 'type': 'normal'})
+            .toList();
+      } else {
+        brief['topics'] = [];
+      }
+    }
+    brief['breakthroughs'] ??= brief['recent_breakthroughs'] ?? [];
+    if (brief['family'] == null) {
+      final ctx = brief['family_context'];
+      if (ctx is Map) {
+        brief['family'] = ctx['members'] ?? [];
+      } else {
+        brief['family'] = brief['family_members'] ?? [];
+      }
+    }
+    if (brief['nate_suggestion'] == null) {
+      final suggestions = brief['nate_suggestions'];
+      if (suggestions is List && suggestions.isNotEmpty) {
+        brief['nate_suggestion'] = suggestions.first.toString();
+      }
+    }
+    return brief;
   }
 
   @override
@@ -2388,8 +2441,93 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
           const SizedBox(height: 14), _buildBreakthroughsCard(),
           const SizedBox(height: 14), _buildFamilyCard(),
           const SizedBox(height: 14), _buildNateSuggestion(),
+          const SizedBox(height: 14),
+          _buildDualCooInsights(),
+          _buildPriorSessionSummaries(),
+          ConversationLogView(
+            entries: ConversationLogView.parseEntries(
+                _briefData!['recent_conversations'] ?? []),
+            clientFirstName: (_briefData!['client_name'] ?? 'Client').toString(),
+            emptyText: 'No conversation history in vault or PostgreSQL.',
+          ),
         ])),
       ]),
+    );
+  }
+
+  Widget _buildDualCooInsights() {
+    final raw = _briefData!['dual_coo_insights'];
+    if (raw is! List || raw.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("DUAL-COO INSIGHTS",
+              style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+          const SizedBox(height: 8),
+          ...raw.take(8).map((item) {
+            final m = item is Map ? Map<String, dynamic>.from(item) : <String, dynamic>{};
+            final title = (m['title'] ?? '').toString();
+            final body = (m['body'] ?? '').toString();
+            final source = (m['source'] ?? '').toString();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (title.isNotEmpty)
+                    Text(title, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 13, fontWeight: FontWeight.w600)),
+                  if (source.isNotEmpty)
+                    Text(source, style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
+                  if (body.isNotEmpty)
+                    Text(body, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4)),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriorSessionSummaries() {
+    final raw = _briefData!['prior_session_summaries'];
+    if (raw is! List || raw.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("PRIOR SESSION SUMMARIES",
+              style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+          const SizedBox(height: 8),
+          ...raw.take(8).map((item) {
+            final m = item is Map ? Map<String, dynamic>.from(item) : <String, dynamic>{};
+            final when = (m['occurred_at'] ?? '').toString();
+            final summary = (m['summary'] ?? '').toString();
+            final source = (m['source'] ?? '').toString();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (when.isNotEmpty || source.isNotEmpty)
+                    Text(
+                      [
+                        if (when.isNotEmpty) ConversationLogView.formatTimestamp(when),
+                        if (source.isNotEmpty) source,
+                      ].join(' · '),
+                      style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
+                    ),
+                  if (summary.isNotEmpty)
+                    Text(summary, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4)),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 

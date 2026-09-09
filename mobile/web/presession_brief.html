@@ -629,11 +629,44 @@
                         <span class="card-title">Recent AI Conversations</span>
                     </div>
                     <div class="card-body">
-                        ${recentConversations.slice(0, 3).map(conv => `
+                        ${recentConversations.slice(0, 8).map(conv => `
                             <div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 10px;">
                                 <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">${conv.timestamp || ''}</div>
-                                <div style="font-size: 12px; color: var(--text-secondary);"><strong>User:</strong> ${conv.user || ''}</div>
-                                <div style="font-size: 12px; color: var(--cyan); margin-top: 6px;"><strong>Nate:</strong> ${conv.ai?.slice(0, 150) || ''}...</div>
+                                <div style="font-size: 12px; color: var(--text-secondary);"><strong>User:</strong> ${conv.user || conv.user_text || conv.preview || ''}</div>
+                                <div style="font-size: 12px; color: var(--cyan); margin-top: 6px;"><strong>Nate:</strong> ${((conv.ai || conv.ai_text || conv.nate) || '').toString().slice(0, 150)}${((conv.ai || conv.ai_text || conv.nate) || '').length > 150 ? '...' : ''}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+                ${(brief.dual_coo_insights || []).length > 0 ? `
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⬡</span>
+                        <span class="card-title">Dual-COO Insights</span>
+                    </div>
+                    <div class="card-body">
+                        ${(brief.dual_coo_insights || []).slice(0, 8).map(ins => `
+                            <div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 10px;">
+                                <div style="font-size: 12px; color: var(--gold); font-weight: 600;">${ins.title || ''}</div>
+                                ${ins.source ? `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">${ins.source}</div>` : ''}
+                                <div style="font-size: 12px; color: var(--text-secondary);">${ins.body || ''}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+                ${(brief.prior_session_summaries || []).length > 0 ? `
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📝</span>
+                        <span class="card-title">Prior Session Summaries</span>
+                    </div>
+                    <div class="card-body">
+                        ${(brief.prior_session_summaries || []).slice(0, 8).map(ps => `
+                            <div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 10px;">
+                                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">${(ps.occurred_at || '').toString().slice(0, 19).replace('T', ' ')}${ps.source ? ' · ' + ps.source : ''}</div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">${ps.summary || ''}</div>
                             </div>
                         `).join('')}
                     </div>

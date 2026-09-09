@@ -181,8 +181,8 @@ class _ConversationLogViewState extends State<ConversationLogView> {
       initialized = true;
 
       final tsLabel = ConversationLogView.formatTimestamp(e['timestamp']);
-      final userText = (e['user'] ?? '').toString();
-      final aiText = (e['ai'] ?? '').toString();
+      final userText = (e['user'] ?? e['user_text'] ?? e['preview'] ?? '').toString();
+      final aiText = (e['ai'] ?? e['ai_text'] ?? e['nate'] ?? '').toString();
 
       if (userText.replaceAll(RegExp(r'\s'), '').isNotEmpty) {
         children.add(_bubble(
