@@ -233,3 +233,42 @@ def test_hide_schedule_link_does_not_call_refund():
     assert "refund" not in chunk
     assert "apply_coach_session_cancel" not in chunk
     assert "notify_client_of_coach_cancel" not in chunk
+
+
+def test_send_session_link_notifies_without_zoom():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("async def _send_session_link(")
+    end = text.index("# Zoom meeting map")
+    chunk = text[start:end]
+    assert 'result["error"] = "no_zoom_link"' not in chunk
+    assert "if join_url:" in chunk
+    assert "Join Zoom:" in chunk
+
+
+def test_schedule_session_quotes_price_and_always_notifies():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("async def schedule_session(")
+    end = text.index("async def resend_session_link(")
+    chunk = text[start:end]
+    assert "quote_session_price_cents" in chunk
+    assert '0 if _is_consultation else None' not in chunk
+    assert 'if (session.get("zoom_link") or "").strip():' not in chunk
+    assert "await _send_session_link(request, session)" in chunk
+    assert '"payment_status": "waived" if _is_consultation else "pending"' in chunk
+
+
+def test_resend_session_link_allows_empty_zoom():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("async def resend_session_link(")
+    end = text.index("@router.get(\"/upcoming/{user_id}\")")
+    chunk = text[start:end]
+    assert "has no Zoom link to resend" not in chunk

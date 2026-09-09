@@ -415,7 +415,11 @@ TEMPLATES = {
             <div class="note">
                 <p>Nate will brief {{ coach_name }} before your session with relevant context from your journey. Your privacy settings determine what is shared.</p>
             </div>
-            <a href="{{ join_url }}" class="cta">Add to Calendar</a>
+            {% if join_url %}
+            <a href="{{ join_url }}" class="cta">Join Zoom</a>
+            {% else %}
+            <p>Your coach will share the meeting link before the session.</p>
+            {% endif %}
         </div>
         <div class="footer">
             <p>Need to reschedule? You can do so up to 24 hours before the session.</p>

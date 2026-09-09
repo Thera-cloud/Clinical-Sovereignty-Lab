@@ -528,12 +528,13 @@ async def _lookup_client_contact(db_pool, client_id: str) -> dict:
 async def _lookup_coach_display(db_pool, coach_id: str) -> dict:
     """Resolve coach display name / credentials from users.profile_data."""
     if not db_pool or not coach_id:
-        return {"name": "Your coach", "credentials": ""}
+        return {"name": "Your coach", "credentials": "", "coaching_fee": 0.0}
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT profile_data->>'name' AS name, "
                 "       profile_data->>'credentials' AS credentials, "
+                "       profile_data->>'coaching_fee' AS coaching_fee, "
                 "       username "
                 "FROM users "
                 "WHERE hardware_id = $1 OR username = $1 "
@@ -541,27 +542,30 @@ async def _lookup_coach_display(db_pool, coach_id: str) -> dict:
                 coach_id,
             )
         if not row:
-            return {"name": "Your coach", "credentials": ""}
+            return {"name": "Your coach", "credentials": "", "coaching_fee": 0.0}
         nm = (row["name"] or row["username"] or "Your coach").strip()
+        try:
+            fee = float(row["coaching_fee"] or 0)
+        except (TypeError, ValueError):
+            fee = 0.0
         return {
             "name": nm,
             "credentials": (row["credentials"] or "").strip(),
+            "coaching_fee": fee,
         }
     except Exception:
-        return {"name": "Your coach", "credentials": ""}
+        return {"name": "Your coach", "credentials": "", "coaching_fee": 0.0}
 
 
 async def _send_session_link(request: Request, session: dict) -> dict:
     """
-    Email + SMS the Zoom join link to the client (and external consultee, if present).
-    Mirrors what Zoom sends natively: subject, time, host, agenda, join URL.
+    Email + SMS session confirmation to the client (and external consultee, if present).
+    Zoom join URL is included when present; time + coach still go out without Zoom.
     Returns a dict with per-channel delivery results.
     """
     result = {"email": False, "sms": False, "channels": []}
     join_url = (session.get("zoom_link") or "").strip()
-    if not join_url:
-        result["error"] = "no_zoom_link"
-        return result
+    result["has_zoom"] = bool(join_url)
 
     db = _get_db(request)
     client_id = (session.get("client_id") or "").strip()
@@ -633,8 +637,9 @@ async def _send_session_link(request: Request, session: dict) -> dict:
                 f"Sanctuary: Your session with {coach_name}"
                 + (f" on {date_str}" if date_str else "")
                 + (f" at {time_str}" if time_str else "")
-                + f"\nJoin Zoom: {join_url}"
             )
+            if join_url:
+                body += f"\nJoin Zoom: {join_url}"
             ok = await notify_sys.send_sms(phone, body)
             result["sms"] = bool(ok)
             if ok:
@@ -742,6 +747,25 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     session_id = generate_session_id()
 
     _is_consultation = req.session_type == "MASTER_CONSULTATION"
+    db = _get_db(request)
+    _price_cents = 0
+    if not _is_consultation:
+        try:
+            from app.services.session_booking_billing import quote_session_price_cents
+            _coach_info = await _lookup_coach_display(db, req.coach_id)
+            _price_cents = int(
+                await quote_session_price_cents(
+                    db,
+                    client_hardware_id=req.client_id,
+                    family_id=req.family_id or "",
+                    coach_fee_dollars=_coach_info.get("coaching_fee") or 0,
+                    scheduled_start=req.scheduled_start,
+                )
+                or 0
+            )
+        except Exception as e:
+            _logger.warning("schedule_session: quote_session_price_cents failed: %s", e)
+            _price_cents = 0
 
     session = {
         "session_id": session_id,
@@ -767,7 +791,7 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
         "nate_summary": "",
         "recording_url": "",
         "created_at": str(datetime.now()),
-        "price_cents": 0 if _is_consultation else None,
+        "price_cents": _price_cents,
         "payment_status": "waived" if _is_consultation else "pending",
     }
 
@@ -844,14 +868,13 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
         except Exception:
             pass
 
-    # Auto-send Zoom join link via email + SMS if a link exists.
+    # Email + SMS confirmation even when Zoom auto-create failed / was skipped.
     notify_result = None
-    if (session.get("zoom_link") or "").strip():
-        try:
-            notify_result = await _send_session_link(request, session)
-            print(f">>> [SESSION] Auto-sent link for {session_id}: {notify_result}")
-        except Exception as e:
-            print(f">>> [SESSION] Auto-send link failed for {session_id}: {e}")
+    try:
+        notify_result = await _send_session_link(request, session)
+        print(f">>> [SESSION] Auto-sent confirmation for {session_id}: {notify_result}")
+    except Exception as e:
+        print(f">>> [SESSION] Auto-send confirmation failed for {session_id}: {e}")
 
     resp = {"session": session}
     if zoom_error:
@@ -864,15 +887,13 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
 @router.post("/{session_id}/resend-link")
 async def resend_session_link(session_id: str, request: Request):
     """
-    Resend the Zoom join link to the client via email + SMS.
+    Resend session confirmation (time + coach; Zoom join URL when present).
     Triggered from the coach's Schedule tab "Resend Link" action.
     """
     sessions = await _load_sessions_pf(request)
     session = next((s for s in sessions if s.get("session_id") == session_id), None)
     if not session:
         raise HTTPException(404, f"Session {session_id} not found")
-    if not (session.get("zoom_link") or "").strip():
-        raise HTTPException(400, "Session has no Zoom link to resend")
 
     notify_result = await _send_session_link(request, session)
     if not notify_result.get("email") and not notify_result.get("sms"):
@@ -1975,16 +1996,15 @@ async def booking_action_from_email(token: str, request: Request):
         except Exception:
             pass
 
-        # Email + SMS the client: decision email always; join-link email if Zoom exists
+        # Email + SMS the client: decision email always; confirmation even without Zoom
         try:
             asyncio.create_task(send_booking_decision_email(db, session, "approved"))
         except Exception:
             pass
-        if (session.get("zoom_link") or "").strip():
-            try:
-                await _send_session_link(request, session)
-            except Exception as ne:
-                _logger.warning("booking-action: session link send failed: %s", ne)
+        try:
+            await _send_session_link(request, session)
+        except Exception as ne:
+            _logger.warning("booking-action: session confirmation send failed: %s", ne)
 
         when = session.get("scheduled_start", "")
         return _action_page(
