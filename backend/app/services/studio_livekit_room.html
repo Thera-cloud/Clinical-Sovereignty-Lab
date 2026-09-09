@@ -15,16 +15,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px;grid-template-rows:minmax(0,1fr) auto;gap:12px;padding:12px;min-height:0}
 #hosts{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;align-items:stretch}
 #shareTile{display:none}
-#hosts.sharing{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
-#hosts.sharing #lnTile{grid-row:1;grid-column:1}
-#hosts.sharing #hostTile{grid-row:2;grid-column:1}
-#hosts.sharing #shareTile{display:flex;grid-row:1 / -1;grid-column:2}
+#hosts.sharing{grid-template-columns:1fr 1fr minmax(240px,1.15fr);grid-template-rows:minmax(0,1fr)}
+#hosts.sharing #hostTile{grid-row:1;grid-column:1}
+#hosts.sharing #lnTile{grid-row:1;grid-column:2}
+#hosts.sharing #shareTile{display:flex;grid-row:1;grid-column:3}
+#hosts.sharing .tile .box video{object-fit:contain;object-position:center}
 #shareBox .cards{position:absolute;inset:0;overflow:auto;padding:10px;z-index:2}
 #shareBox .card{background:#111;border:1px solid #333;border-radius:6px;padding:8px;margin:0 0 8px;color:#E8D5A3;font-size:12px}
 #shareBox .card a{color:#4ECDC4}
 #shareBox img.share-img,#shareBox object.share-doc,#shareBox iframe.share-doc{position:absolute;inset:0;width:100%;height:100%;border:0;object-fit:contain;background:#050505;z-index:1}
 #rail{display:flex;flex-direction:column;gap:8px;min-height:0;background:#111;border:1px solid #222;border-radius:8px;padding:8px}
-#joinCall{text-align:center;font-size:11px;letter-spacing:1px;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px}
+#joinCall{text-align:center;font-size:11px;letter-spacing:1px;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px;cursor:pointer}
 #activeCard{flex:1.1;min-height:110px;background:#0A0A0A;border:1px solid #C9A962;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
 #activeCard h4,#prompt0 h4,#prompt1 h4,#prompt2 h4{margin:0;padding:6px 8px;font-size:10px;color:#C9A962;letter-spacing:1px}
 #activeMedia{flex:1;position:relative;min-height:72px;background:#050505}
@@ -40,7 +41,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #waitCount{display:block;font-size:22px;line-height:1.3;color:#C9A962;letter-spacing:1px;padding-left:1px}
 #waitHint{display:block;font-size:10px;color:#8B7355;margin-top:2px}
 .tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
-.tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto}
+.tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+#btnShareClose{background:#111;color:#E8D5A3;border:1px solid #8B7355;border-radius:4px;padding:3px 8px;font-size:10px;letter-spacing:1px;cursor:pointer}
 #shareTabs{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px;flex:0 0 auto}
 #shareTabs button{background:#111;color:#8B7355;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:10px;letter-spacing:1px;cursor:pointer}
 #shareTabs button.on{border-color:#C9A962;color:#C9A962}
@@ -67,10 +69,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #dock button.on{border-color:#C9A962;color:#C9A962}
 #dock button.warn{border-color:#EF4444;color:#EF4444}
 #dock .meta{color:#8B7355;font-size:11px;align-self:center}
+#sfxIn{display:none;width:110px;background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px}
 @media (max-width:960px){
   #stage{grid-template-columns:1fr;grid-template-rows:auto auto auto}
   #hosts{grid-template-columns:1fr;min-height:280px}
-  #hosts.sharing{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr);min-height:280px}
+  #hosts.sharing{grid-template-columns:1fr;grid-template-rows:auto auto auto;min-height:280px}
+  #hosts.sharing #hostTile,#hosts.sharing #lnTile,#hosts.sharing #shareTile{grid-column:1;grid-row:auto}
   .tile .box{min-height:160px}
   #rail{min-height:220px}
   #transcript{max-height:34vh}
@@ -87,8 +91,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="https://coach.sovereignsanctuary.net/avatar-modes/studio_portrait.html?v=20260901q" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
-    <div class="tile" id="shareTile"><h3>ON SCREEN</h3><div id="shareTabs"><button type="button" id="tabShareScreen" data-share="screen">Screen</button><button type="button" id="tabShareImage" data-share="image">Image</button><button type="button" id="tabShareDoc" data-share="doc">Document</button><button type="button" id="tabShareVideo" data-share="video">Video</button><button type="button" id="tabShareLookup" data-share="lookup">Lookup</button></div><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or ask Nate to look it up</div></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260909a" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="shareTile"><h3>ON SCREEN <button type="button" id="btnShareClose">Close</button></h3><div id="shareTabs"><button type="button" id="tabShareScreen" data-share="screen">Screen</button><button type="button" id="tabShareImage" data-share="image">Image</button><button type="button" id="tabShareDoc" data-share="doc">Document</button><button type="button" id="tabShareVideo" data-share="video">Video</button><button type="button" id="tabShareLookup" data-share="lookup">Lookup</button></div><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or look it up</div></div></div>
   </div>
   <aside id="rail">
     <div id="joinCall">JOIN THE CALL</div>
@@ -120,6 +124,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   <button id="btnFile" type="button">File</button>
   <button id="btnLookup" type="button">Look up</button>
   <button id="btnSfx" type="button">Sound</button>
+  <input id="sfxIn" type="text" maxlength="48" placeholder="any word" autocomplete="off"/>
   <input id="shareFile" type="file" accept="image/*,video/*,.pdf,.txt,.doc,.docx,.md,.mp4,.webm,.mov" hidden/>
   <input id="shareFileImage" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden/>
   <input id="shareFileDoc" type="file" accept=".pdf,.txt,.doc,.docx,.md,application/pdf,text/plain" hidden/>
@@ -131,7 +136,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   <button id="btnDrop" type="button">Drop</button>
   <button id="btnEnd" class="warn" type="button">End session</button>
   <button id="btnDump" type="button" disabled>Dump locked</button>
-  <span class="meta">Delay 45s · RTMP pending</span>
+  <span class="meta" id="dockMeta">Dump delay 45s · RTMP pending</span>
 </div>
 <script src="/livekit-client.umd.min.js"></script>
 <script>
@@ -151,8 +156,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var holdDraft = {id:0, text:'', event:'', reply:'', blob:null, abort:false, release:false, inflight:false, releaseText:'', releaseEvent:''};
   var turnQ = [], turnBusy = false, speakGen = 0;
   var shareState = {on:false, kind:'', note:''};
-  var sharePub = null, shareStream = null, shareObjUrl = '', sfxCtx = null;
+  var sharePub = null, shareAudioPub = null, shareStream = null, shareObjUrl = '', sfxCtx = null;
   var shareFrameTimer = 0, shareFrameArmed = false;
+  var queueSelf = false, lastNateMs = 0, dumpArmed = false, nateTurnAt = 0;
+  var lookupQuery = '';
   function holdFloorMs(text){
     var t = (text || '').replace(/\s+/g, ' ').trim();
     if (!t) return LISTEN_SILENCE_MS;
@@ -230,7 +237,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (j && j.ok && j.note) shareState.note = j.note;
       if (j && j.ok && !shareFrameArmed){
         shareFrameArmed = true;
-        setStatus(j.seen ? 'On screen — Nate can see the page.' : 'On screen — Nate has the still.');
+        setStatus(j.seen ? 'On screen — Nate can see the page when you Toss.' : 'On screen — still only. Toss when you want Nate on it.');
       }
     }).catch(function(){});
   }
@@ -262,32 +269,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       return;
     }
     if (holdDraft.reply && !holdDraft.abort) {
-      if (shareState.on && shareState.kind !== 'search') {
-        abortHoldDraft();
-        nateTurn(text, false, event || 'line');
-        return;
-      }
-      var reply = holdDraft.reply;
-      var blob = holdDraft.blob;
-      var persistText = text || holdDraft.text;
       abortHoldDraft();
-      addLine('Nate', reply);
-      pendingCaps.push('NATE: ' + reply);
-      if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
-      sendData({op:'nate_line', text: reply});
-      persistPrime(persistText);
-      setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
-      if (blob && blob.size >= 80) {
-        var gen = ++speakGen;
-        nateSpeaking = true;
-        playNateBlob(blob, gen);
-      } else speakNate(reply);
+      nateTurn(text, false, event || 'line');
       return;
     }
     nateTurn(text, false, event || 'line');
   }
   function primeHold(text, event){
     if (!guest && shareState.on && shareState.kind !== 'search') return;
+    if (event === 'caption' && !hostAimed(text)) return;
     var t = (text || '').replace(/\s+/g, ' ').trim();
     if (!t || t.length < 12 || lnPaused || !cfg.session || !cfg.token) return;
     if (holdDraft.inflight && holdDraft.text === t) return;
@@ -328,8 +318,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function maybePrime(text, event){
     var t = (text || '').replace(/\s+/g, ' ').trim();
     if (t.length < 12) return;
-    if (event === 'caption' && !shouldAskCaps(t)) return;
-    if (holdDraft.inflight && holdDraft.text && t.indexOf(holdDraft.text) === 0 && t.length - holdDraft.text.length < 28)
+    if (event === 'caption' && !hostAimed(t)) return;
+    if (holdDraft.inflight && holdDraft.text && t.indexOf(holdDraft.text) === 0 && t.length - holdDraft.text.length < 12)
       return;
     primeHold(t, event);
   }
@@ -403,9 +393,21 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (live) try { el.play(); } catch (e) {}
     }
   }
+  function boothQueue(op, extra){
+    if (guest || !cfg.session || !cfg.token) return;
+    var body = {op: op || 'sync', caller_id: '', active: activeId || '', waiting: waiting.slice()};
+    if (extra){ for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) body[k] = extra[k]; }
+    queueSelf = true;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/queue', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify(body)
+    }).catch(function(){}).then(function(){ queueSelf = false; });
+  }
   function broadcastQueue(){
     if (guest) return;
     sendData({op:'queue', active: activeId, waiting: waiting.slice()});
+    boothQueue('sync', {active: activeId, waiting: waiting.slice()});
   }
   function applyQueue(msg){
     if (!msg) return;
@@ -437,7 +439,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     syncCallerAudio();
     renderWait();
     broadcastQueue();
-    if (!guest && activeId){
+    if (!guest && activeId && !lnPaused){
       setStatus(callerName(activeId) + ' is on air.');
       nateTurn(callerName(activeId) + ' just came on.', false, 'caller_join');
     }
@@ -461,7 +463,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var gone = activeId;
     activeId = '';
     waiting = waiting.filter(function(n){ return n !== gone; });
-    if (!guest) nateTurn(callerName(gone) + ' left the line. Next up if anyone is waiting.', false, 'line');
+    boothQueue('drop', {caller_id: gone});
+    if (!guest && !lnPaused) nateTurn(callerName(gone) + ' left the line. Next up if anyone is waiting.', false, 'line');
     promoteNext();
     setStatus('Dropped ' + callerName(gone) + ' — next on the line fills in.');
   }
@@ -583,12 +586,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       drainTurns();
     });
   }
-  function fitMedia(el){
+  function fitMedia(el, contain){
     if (!el) return;
     el.removeAttribute('width'); el.removeAttribute('height');
     el.style.width = '100%';
     el.style.height = '100%';
-    el.style.objectFit = 'cover';
+    el.style.objectFit = contain ? 'contain' : 'cover';
     el.style.objectPosition = 'center';
     el.muted = true; el.autoplay = true; el.playsInline = true;
   }
@@ -649,14 +652,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     try { if (recd.state !== 'inactive') recd.stop(); } catch (e) {}
     delete capRecs[id];
   }
+  function hostAimed(blob){
+    var low = (blob || '').toLowerCase();
+    if (!low) return false;
+    if (/\b@nate\b|\bnate\b|\bco-host\b|\bcohost\b/.test(low)) return true;
+    return false;
+  }
   function shouldAskCaps(blob){
     if (!blob || blob.length < 12) return false;
-    var low = blob.toLowerCase();
-    if (low.indexOf('caller:') !== -1) return true;
-    if (blob.indexOf('?') !== -1) return true;
-    if (low.indexOf('nate') !== -1 || low.indexOf('co-host') !== -1 || low.indexOf('cohost') !== -1) return true;
-    if (blob.length < 24) return false;
-    return blob.length >= 40;
+    return hostAimed(blob);
   }
   function freshCaps(){
     var cutoff = Date.now() - CAP_FRESH_MS;
@@ -723,6 +727,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function startCap(id){
     if (guest || lnPaused || !cfg.session || !cfg.token || capRecs[id]) return;
+    if (listenOn && room && room.localParticipant && id === room.localParticipant.identity) return;
     var mst = audioTracks[id];
     if (!mst || !window.MediaRecorder) return;
     var stream = new MediaStream([mst]);
@@ -759,7 +764,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function nateTurn(text, toss, event){
     if (!cfg.session || !cfg.token){ setStatus('Nate chat needs a live session token.'); return; }
     if (event !== 'commit') abortHoldDraft();
-    if (lnPaused && !toss && event !== 'caller_join') return;
+    if (lnPaused && !toss) return;
     var kind = event || (toss ? 'toss' : 'line');
     if (toss) turnQ = [];
     else if (kind === 'caption') turnQ = turnQ.filter(function(j){ return j.event !== 'caption'; });
@@ -768,6 +773,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function runNateTurn(text, toss, event){
     turnBusy = true;
+    nateTurnAt = Date.now();
     if (toss) { lnPaused = false; document.getElementById('btnPause').textContent = 'Pause LN'; document.getElementById('btnPause').classList.remove('on'); }
     var ctx = roomCtx();
     var kind = event || (toss ? 'toss' : 'line');
@@ -799,6 +805,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       sendData({op:'nate_line', text:t});
       setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
+      lastNateMs = Date.now() - nateTurnAt;
+      paintDockMeta();
       return speakNate(t);
     }).catch(function(e){ setStatus('Nate chat failed: ' + e); }).then(function(){
       realmShift = false;
@@ -862,8 +870,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (query){
       var h = document.createElement('div');
       h.className = 'card';
-      h.textContent = 'Nate looked up: ' + query;
+      h.textContent = 'Looked up: ' + query;
       cards.appendChild(h);
+      var talk = document.createElement('button');
+      talk.type = 'button';
+      talk.id = 'btnTalkLookup';
+      talk.textContent = 'Talk about this';
+      talk.style.cssText = 'background:#111;color:#C9A962;border:1px solid #C9A962;border-radius:4px;padding:6px 10px;font-size:11px;cursor:pointer;margin:0 0 8px';
+      talk.onclick = function(){
+        nateTurn('I asked you to look up: ' + query + '. Bring the room onto what you found.', true, 'toss');
+      };
+      cards.appendChild(talk);
     }
     (rows || []).forEach(function(r){
       var d = document.createElement('div');
@@ -916,7 +933,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!track) return;
     var el = track.attach ? track.attach() : null;
     if (!el) return;
-    fitMedia(el);
+    fitMedia(el, true);
     el.muted = true;
     var box = document.getElementById('shareBox');
     var vid = document.getElementById('shareVid');
@@ -929,6 +946,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!shareState.kind) shareState.kind = 'screen';
   }
   function unpublishShare(){
+    if (shareAudioPub && room && room.localParticipant && shareAudioPub.unpublishTrack) {
+      try { room.localParticipant.unpublishTrack(shareAudioPub.track || shareAudioPub); } catch (e) {}
+    } else if (shareAudioPub && room && room.localParticipant && room.localParticipant.unpublishTrack) {
+      try { room.localParticipant.unpublishTrack(shareAudioPub); } catch (e) {}
+    }
+    shareAudioPub = null;
     if (sharePub && room && room.localParticipant && sharePub.unpublishTrack) {
       try { room.localParticipant.unpublishTrack(sharePub.track || sharePub); } catch (e) {}
     } else if (sharePub && room && room.localParticipant && room.localParticipant.unpublishTrack) {
@@ -960,10 +983,14 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!track) return Promise.resolve();
     track.onended = function(){ stopShare(); };
     var opts = {name:'studio-share'};
-    return room.localParticipant.publishTrack(track, opts).then(function(pub){
-      sharePub = pub || track;
+    var jobs = [room.localParticipant.publishTrack(track, opts)];
+    var at = stream.getAudioTracks()[0];
+    if (at) jobs.push(room.localParticipant.publishTrack(at, {name:'studio-share-audio'}));
+    return Promise.all(jobs).then(function(pubs){
+      sharePub = pubs[0] || track;
+      if (pubs[1]) shareAudioPub = pubs[1];
       var vid = document.getElementById('shareVid');
-      if (vid){ vid.srcObject = stream; fitMedia(vid); }
+      if (vid){ vid.srcObject = stream; fitMedia(vid, true); }
       shareState.on = true;
       shareState.kind = kind || 'screen';
       shareState.note = note || 'Host is sharing a window.';
@@ -973,17 +1000,20 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       document.getElementById('btnShare').classList.add('on');
       broadcastShare();
       armShareFrames();
-    }).catch(function(){ setStatus('Could not publish the share track.'); });
+    }).catch(function(err){ setStatus('Could not publish the share track.'); throw err || new Error('publish'); });
   }
   function startScreenShare(){
     if (guest) return;
-    if (shareState.on && shareState.kind === 'screen'){ stopShare(); return; }
+    if (shareState.on){ stopShare(); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
       setStatus('This browser cannot share a screen — try Chrome or the File button.');
       return;
     }
     navigator.mediaDevices.getDisplayMedia({video:true, audio:true}).then(function(ms){
-      return publishShareStream(ms, 'screen', 'Host is sharing a window.');
+      return publishShareStream(ms, 'screen', 'Host is sharing a window.').catch(function(){
+        ms.getTracks().forEach(function(t){ try { t.stop(); } catch (e2) {} });
+        throw new Error('publish');
+      });
     }).then(function(){
       markShareTab('screen');
       setStatus('On screen — sending Nate a still of the page.');
@@ -1129,10 +1159,13 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function doLookup(query){
     if (guest || !cfg.session || !cfg.token) return;
     var q = (query || '').replace(/\s+/g, ' ').trim();
-    if (!q || /^(this|that|it)$/i.test(q)) q = (lastHeard || '').replace(/^(HOST|CALLER):\s*/i, '').trim();
-    if (!q){ q = window.prompt('What should Nate look up?') || ''; q = q.trim(); }
+    if (!q || /^(this|that|it)$/i.test(q)) {
+      q = window.prompt('What should Nate look up?') || '';
+      q = q.replace(/\s+/g, ' ').trim();
+    }
     if (!q) return;
-    setStatus('Nate is looking that up…');
+    lookupQuery = q;
+    setStatus('Looking that up…');
     fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/share', {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
@@ -1149,8 +1182,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       document.getElementById('btnShare').textContent = 'Stop share';
       document.getElementById('btnShare').classList.add('on');
       broadcastShare({kind:'search', query:j.query || q, results:j.results || [], note:j.note || ''});
-      setStatus('On screen — Nate brought the lookup in.');
-      nateTurn('I asked you to look up: ' + q + '. Bring the room onto what you found.', false, 'line');
+      setStatus('On screen — cards only. Toss or Talk about this when you want Nate on it.');
     }).catch(function(){ setStatus('Lookup failed.'); });
   }
   function playStudioSfx(id){
@@ -1195,9 +1227,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     } else if (key === 'hit'){
       tone('square', 140, 0.18, 0.1, t0);
       tone('sawtooth', 70, 0.22, 0.08, t0);
-    } else {
+    } else if (key === 'sting'){
       tone('sawtooth', 196, 0.28, 0.08, t0);
       tone('triangle', 392, 0.32, 0.06, t0 + 0.02);
+    } else {
+      var h = 0;
+      for (var i = 0; i < key.length; i++) h = ((h << 5) - h) + key.charCodeAt(i);
+      var freq = 140 + (Math.abs(h) % 420);
+      tone('sawtooth', freq, 0.28, 0.08, t0);
+      tone('triangle', freq * 1.5, 0.32, 0.05, t0 + 0.02);
     }
   }
   function doSfx(soundId){
@@ -1208,9 +1246,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       body: JSON.stringify({sound_id: soundId || 'sting'})
     }).then(function(r){ return r.json(); }).then(function(j){
       if (!j || !j.ok){ setStatus('Sound is host-only.'); return; }
-      playStudioSfx(j.sound_id);
-      sendData({op:'sfx', sound_id:j.sound_id});
-      setStatus('Nate hit the ' + (j.label || j.sound_id) + '.');
+      playStudioSfx(j.sound_id || soundId);
+      sendData({op:'sfx', sound_id:j.sound_id || soundId});
+      setStatus('Sound: ' + (j.label || j.sound_id || soundId) + '.');
     }).catch(function(){});
   }
   function hostShareIntent(text){
@@ -1255,14 +1293,43 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(applyRealm).catch(function(){});
   }
+  function paintDockMeta(extra){
+    var el = document.getElementById('dockMeta');
+    if (!el) return;
+    var dump = dumpArmed ? 'Dump armed' : 'Dump locked';
+    var lag = lastNateMs ? ('Nate last reply ' + (lastNateMs / 1000).toFixed(1) + 's') : 'Nate reply —';
+    var rtmp = (extra && extra.rtmp) || 'pending';
+    var delay = (extra && extra.delay_s) || 45;
+    el.textContent = 'Dump delay ' + delay + 's · ' + lag + ' · RTMP ' + rtmp;
+    var dumpBtn = document.getElementById('btnDump');
+    if (dumpBtn){
+      dumpBtn.disabled = !dumpArmed;
+      dumpBtn.textContent = dumpArmed ? 'Dump' : 'Dump locked';
+    }
+  }
+  function pollBoothStatus(){
+    if (guest || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth-status', {
+      headers: {'Authorization':'Bearer ' + cfg.token}
+    }).then(function(r){ return r.ok ? r.json() : null; }).then(function(j){
+      if (!j || !j.ok) return;
+      dumpArmed = j.dump === 'armed';
+      paintDockMeta(j);
+    }).catch(function(){});
+  }
   pollRealm();
   setInterval(pollRealm, 20000);
+  paintDockMeta();
+  pollBoothStatus();
+  setInterval(pollBoothStatus, 8000);
   renderWait();
     if (guest) {
     ['btnCam','btnShare','btnFile','btnLookup','btnSfx'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
+    var sfx = document.getElementById('sfxIn');
+    if (sfx) sfx.style.display = 'none';
     var tabs = document.getElementById('shareTabs');
     if (tabs) tabs.style.display = 'none';
   }
@@ -1384,9 +1451,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (msg.op === 'caption' && msg.text){ addLine(msg.speaker || 'HOST', msg.text); lastHeard = msg.text; }
       if (msg.op === 'chat' && msg.text){ addLine(msg.who || 'Host', msg.text); lastHeard = msg.text; }
       if (msg.op === 'queue') applyQueue(msg);
-      if (msg.op === 'bring_on' && !guest) bringOn();
-      if (msg.op === 'hold' && !guest) holdActive();
-      if (msg.op === 'drop' && !guest) dropActive();
+      if (msg.op === 'bring_on' && !guest && !queueSelf) bringOn();
+      if (msg.op === 'hold' && !guest && !queueSelf) holdActive();
+      if (msg.op === 'drop' && !guest && !queueSelf) dropActive();
       if (msg.op === 'share') applyShareMeta(msg);
       if (msg.op === 'sfx' && msg.sound_id) playStudioSfx(msg.sound_id);
     } catch (e) {}
@@ -1457,7 +1524,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
     var intent = hostShareIntent(text);
     if (intent && intent.kind === 'search') doLookup(intent.q);
-    else if (intent && intent.kind === 'sound') { doSfx(intent.id); nateTurn(text, false, 'line'); }
+    else if (intent && intent.kind === 'sound') { doSfx(intent.id); }
     else nateTurn(text, false, 'line');
   };
   function armListenCommit(){
@@ -1485,7 +1552,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (intent && intent.kind === 'search') doLookup(intent.q);
       else {
         if (intent && intent.kind === 'sound') doSfx(intent.id);
-        deliverHold(text, 'line');
+        else deliverHold(text, 'line');
       }
     }, holdFloorMs(live));
   }
@@ -1536,6 +1603,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
     listenOn = true;
     listenBuf = '';
+    if (room && room.localParticipant) stopCap(room.localParticipant.identity);
     btn.classList.add('on');
     btn.textContent = 'Listening';
     startListenRec(btn);
@@ -1554,6 +1622,21 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     this.classList.toggle('on', camOn);
   };
   document.getElementById('btnShare').onclick = function(){ startScreenShare(); };
+  var btnShareClose = document.getElementById('btnShareClose');
+  if (btnShareClose) btnShareClose.onclick = function(){ if (!guest) stopShare(); };
+  document.getElementById('joinCall').onclick = function(){
+    if (guest || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/guest-link', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token}
+    }).then(function(r){ return r.json(); }).then(function(j){
+      var url = (j && (j.room_url || j.roomUrl)) || '';
+      if (!url){ setStatus('Guest link unavailable.'); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(url).then(function(){ setStatus('Guest join link copied.'); });
+      else setStatus(url);
+    }).catch(function(){ setStatus('Guest link failed.'); });
+  };
   document.getElementById('btnFile').onclick = function(){
     if (guest) return;
     document.getElementById('shareFile').click();
@@ -1588,9 +1671,22 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   document.getElementById('btnLookup').onclick = function(){ doLookup(''); };
   document.getElementById('btnSfx').onclick = function(){
     if (guest) return;
-    var pick = window.prompt('Sound: sting, hit, whoosh, chime, bed', 'sting');
-    if (pick) doSfx(pick);
+    var el = document.getElementById('sfxIn');
+    if (!el) return;
+    el.style.display = 'inline-block';
+    el.focus();
   };
+  (function(){
+    var el = document.getElementById('sfxIn');
+    if (!el) return;
+    el.addEventListener('keydown', function(ev){
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      var w = (el.value || '').trim();
+      if (w) doSfx(w);
+      el.value = '';
+    });
+  })();
   (function(){
     var box = document.getElementById('shareBox');
     if (!box || guest) return;
@@ -1602,23 +1698,44 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   })();
   document.getElementById('btnToss').onclick = function(){
-    var tossCtx = pendingCaps.slice(-24).join('\n') || lastHeard
-      || 'Host tossed the floor to you. Address the room and take the next question.';
+    var tossCtx = (lastHeard || '').trim()
+      || (pendingCaps.length ? pendingCaps[pendingCaps.length - 1] : '')
+      || 'Host tossed the floor to you. Address the room.';
     nateTurn(tossCtx, true);
   };
   document.getElementById('btnPause').onclick = function(){
     lnPaused = !lnPaused;
     this.textContent = lnPaused ? 'Resume LN' : 'Pause LN';
     this.classList.toggle('on', lnPaused);
-    if (lnPaused) stopNateVoice();
+    if (lnPaused) {
+      abortHoldDraft();
+      turnQ = [];
+      stopNateVoice();
+    }
     lnAvatar(lnPaused ? 'neutral' : 'attentive', lnPaused ? 'idle' : 'idle');
     sendData({op: lnPaused ? 'pause_ln' : 'resume_ln'});
   };
   document.getElementById('btnBring').onclick = function(){ bringOn(); };
   document.getElementById('btnHold').onclick = function(){ holdActive(); };
   document.getElementById('btnDrop').onclick = function(){ dropActive(); };
+  document.getElementById('btnDump').onclick = function(){
+    if (guest || !dumpArmed || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/dump', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token}
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (j && j.ok) setStatus('Dump started — delayed cut in ' + (j.delay_s || 45) + 's.');
+      else setStatus('Dump: ' + ((j && (j.detail || j.reason)) || 'locked'));
+    }).catch(function(){ setStatus('Dump failed.'); });
+  };
   document.getElementById('btnEnd').onclick = function(){
     stopShare();
+    if (cfg.session && cfg.token && !guest) {
+      fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/end', {
+        method: 'POST',
+        headers: {'Authorization':'Bearer ' + cfg.token}
+      }).catch(function(){});
+    }
     if (room) room.disconnect();
     setStatus('Session ended. Close this tab or End → review in Studio.');
   };

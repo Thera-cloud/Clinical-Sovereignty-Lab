@@ -22,6 +22,39 @@ def delay_status(live_unlocked: bool) -> Dict[str, Any]:
     }
 
 
+async def booth_status(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT s.id, sh.id AS show_id, sh.rtmp_url,
+              (SELECT COUNT(*) FROM studio_episodes e
+                WHERE e.show_id = sh.id AND e.state = 'published'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM studio_compliance_flags f
+                    WHERE f.episode_id = e.id AND f.status = 'open'
+                  )
+              ) AS clean_published
+            FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE s.id = $1::uuid AND sh.coach_id = $2
+            """,
+            session_id,
+            coach_id,
+        )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    unlocked = dump_allowed(int(row["clean_published"] or 0))
+    rtmp = (row.get("rtmp_url") or "").strip()
+    out = delay_status(unlocked)
+    out["session_id"] = session_id
+    out["show_id"] = str(row["show_id"])
+    out["rtmp_url_set"] = bool(rtmp)
+    out["rtmp"] = "set" if rtmp else "pending"
+    return out
+
+
 async def store_rtmp(db_pool, show_id: str, coach_id: str, rtmp_url: str) -> Dict[str, Any]:
     url = (rtmp_url or "").strip()
     if not url.startswith("rtmp"):

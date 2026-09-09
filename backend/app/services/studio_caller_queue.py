@@ -198,6 +198,8 @@ async def apply_queue_op(
     coach_id: str,
     op: str,
     caller_id: str = "",
+    snapshot_active: Optional[str] = None,
+    snapshot_waiting: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     if not await _owns_session(db_pool, session_id, coach_id):
         return {"ok": False, "reason": "not_found", "code": 404}
@@ -217,6 +219,7 @@ async def apply_queue_op(
     active = q.get("active")
     labels = dict(q.get("labels") or {})
     cid = (caller_id or "").strip()
+    hang_id = ""
 
     if op == "move_up" and cid:
         waiting = move_waiting(waiting, cid, -1)
@@ -224,13 +227,27 @@ async def apply_queue_op(
         waiting = move_waiting(waiting, cid, 1)
     elif op == "bring_on" and cid and cid in waiting:
         waiting = [cid] + [w for w in waiting if w != cid]
+    elif op == "hold" and active:
+        waiting = [str(active)] + [w for w in waiting if w != str(active)]
+        active = None
+    elif op == "drop":
+        hang_id = cid or (str(active) if active else "")
+        if hang_id:
+            waiting = [w for w in waiting if w != hang_id]
+            if str(active or "") == hang_id:
+                active = None
+    elif op == "sync":
+        if snapshot_waiting is not None:
+            waiting = [str(w).strip() for w in snapshot_waiting if str(w).strip()]
+        if snapshot_active is not None:
+            active = (snapshot_active or "").strip() or None
 
     q = {"active": active, "waiting": waiting, "labels": labels}
     await _save_queue(redis, session_id, q)
 
-    from app.services.studio_livekit import send_room_data
+    from app.services.studio_livekit import remove_participant, send_room_data
 
-    if op in ("move_up", "move_down", "sync", "bring_on"):
+    if op in ("move_up", "move_down", "sync", "bring_on", "hold", "drop"):
         await _broadcast_queue(session_id, q)
 
     if op == "bring_on":
@@ -239,6 +256,8 @@ async def apply_queue_op(
         await send_room_data(session_id, {"op": "hold"})
     elif op == "drop":
         await send_room_data(session_id, {"op": "drop"})
+        if hang_id:
+            await remove_participant(session_id, hang_id)
 
     board = await get_board(db_pool, redis, session_id, coach_id)
     board["op"] = op

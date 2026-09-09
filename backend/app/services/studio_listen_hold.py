@@ -106,7 +106,7 @@ def prime_match(cached: str, blob: str) -> bool:
         return False
     if a == b:
         return True
-    if b.startswith(a) and len(b) - len(a) <= 48:
+    if b.startswith(a) and len(b) - len(a) <= 12:
         return True
     if a.startswith(b) and len(a) - len(b) <= 24:
         return True

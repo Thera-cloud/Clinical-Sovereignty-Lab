@@ -332,7 +332,8 @@ async def cohost_turn(
         "Radio co-host energy, not therapy. "
         "Track THIS_SHOW moment to moment and answer the latest line. "
         "Finish the thought — do not stop mid-idea. "
-        "4–8 spoken sentences when the topic is live; shorter only for a one-liner toss. "
+        "Talk like a person on a live show: one to a few sentences is fine. "
+        "Go longer only when you actually have more to say. Do not pad. "
         "Land on a take more often than a question. "
         "No mirroring their words back, no interviewing.\n\n"
         + SHOW_VOICE
@@ -354,8 +355,8 @@ async def cohost_turn(
         system += (
             f"\n\nWHERE YOU ARE: {where}. "
             "The realm behind you shifts on its own during the show. "
-            "Know it, let it color your mood, and only name it out loud when it "
-            "genuinely fits the moment. Never announce it as a status update."
+            "Let it color your mood only. Never name the realm, backdrop, or place "
+            "unless the host asks where you are. Never announce it as a status update."
         )
     room = f"Room: {live} live caller(s), {hold} waiting."
     if realm_name:
@@ -399,8 +400,9 @@ async def cohost_turn(
         and ("caller:" in blob.lower() or blob.lower().lstrip().startswith("host:"))
     ):
         prefix = (
-            f"{room} Live captions. If this is aimed at you, finish a take in 4–8 sentences. "
-            "If they are mid-thought, one short reaction is fine. Never trail off mid-idea. "
+            f"{room} Live captions. If this is aimed at you, react like a co-host. "
+            "If they are mid-thought, stay quiet or one short reaction. Never trail off mid-idea. "
+            "Do not say you just looked something up unless the host asked you to. "
             "No product pitch unless they asked.\n"
         )
     else:

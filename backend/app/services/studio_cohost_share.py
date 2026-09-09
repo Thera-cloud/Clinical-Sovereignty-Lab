@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -302,6 +303,9 @@ async def ingest_share_asset(
     }
 
 
+_SOUND_WORD = re.compile(r"^[a-zA-Z][a-zA-Z0-9 '\-]{0,47}$")
+
+
 def resolve_sound(sound_id: str) -> Dict[str, Any]:
     key = (sound_id or "").strip().lower().replace(" ", "_")
     aliases = {
@@ -313,9 +317,20 @@ def resolve_sound(sound_id: str) -> Dict[str, Any]:
     }
     key = aliases.get(key, key)
     meta = SOUND_CATALOG.get(key)
-    if not meta:
+    if meta:
+        return {"ok": True, "sound_id": key, "generated": False, **meta}
+    word = (sound_id or "").strip()
+    if not word or not _SOUND_WORD.match(word):
         return {"ok": False, "reason": "unknown_sound", "code": 422}
-    return {"ok": True, "sound_id": key, **meta}
+    slug = re.sub(r"[^a-z0-9]+", "_", word.lower()).strip("_")[:32] or "sting"
+    return {
+        "ok": True,
+        "sound_id": slug,
+        "label": word,
+        "hint": "typed sting",
+        "generated": True,
+        "word": word,
+    }
 
 
 def sound_catalog() -> List[Dict[str, str]]:

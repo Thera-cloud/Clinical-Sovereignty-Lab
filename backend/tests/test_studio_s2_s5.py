@@ -289,7 +289,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260901q" in html
+    assert "v=20260909a" in html
     assert "}, 2500);" in html
     assert "}, 450);" not in html
     assert "function waitLabel" in html
@@ -308,8 +308,9 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "time() + 10.0" not in voice_src
     assert "expression_viewer.html" not in html
     assert "speakGen" in html
-    assert "pendingCaps.slice(-24)" in html
+    assert "pendingCaps.slice(-24)" not in html
     assert "pendingCaps.slice(-8)" not in html
+    assert "var tossCtx = (lastHeard || '').trim()" in html
     portrait = (ROOT / "mobile/web/avatar-modes/studio_portrait.html").read_text()
     assert "thera_world_bg.jpg" in portrait
     assert "function keyPlate" in portrait
@@ -365,7 +366,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260903a" in url
+    assert "v=20260909a" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -615,6 +616,17 @@ def test_studio_realm_rotation():
         assert "getDisplayMedia" in room, rel
         assert "function playStudioSfx" in room, rel
         assert "function doLookup" in room, rel
+        assert "q = (lastHeard" not in room, rel
+        assert 'id="btnShareClose"' in room, rel
+        assert "btnTalkLookup" in room, rel
+        assert "if (shareState.on){ stopShare(); return; }" in room, rel
+        assert "booth-status" in room, rel
+        assert 'id="sfxIn"' in room, rel
+        assert "booth/dump" in room, rel
+        assert "booth/end" in room, rel
+        assert "function hostAimed" in room, rel
+        assert "pendingCaps.slice(-24)" not in room, rel
+        assert "studio_portrait.html?v=20260909a" in room, rel
         assert "share_kind" in room, rel
         assert "function grabShareJpeg" in room, rel
         assert "function pushShareFrame" in room, rel
@@ -635,7 +647,8 @@ def test_studio_share_host_only():
     assert not share.is_studio_host_identity("egress")
     assert share.resolve_sound("sting")["ok"]
     assert share.resolve_sound("sting hit")["ok"]
-    assert share.resolve_sound("explode")["ok"] is False
+    assert share.resolve_sound("explode")["ok"] is True
+    assert share.resolve_sound("explode")["generated"] is True
     assert share.safe_https_url("https://example.com/a") 
     assert share.safe_https_url("http://example.com") is None
     assert share.safe_https_url("https://127.0.0.1/x") is None

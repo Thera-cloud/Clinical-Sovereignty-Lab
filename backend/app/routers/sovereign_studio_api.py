@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -85,6 +85,8 @@ class YoutubeGoLiveBody(BaseModel):
 class QueueBody(BaseModel):
     op: str
     caller_id: str = ""
+    active: str = ""
+    waiting: Optional[List[str]] = None
 
 
 class ConsentRecordBody(BaseModel):
@@ -389,6 +391,8 @@ async def session_queue_op(
             _hw(user),
             body.op,
             body.caller_id,
+            snapshot_active=body.active if (body.op or "").lower() == "sync" else None,
+            snapshot_waiting=body.waiting if (body.op or "").lower() == "sync" else None,
         )
     )
 
@@ -806,6 +810,69 @@ async def avatar_envelope(level: float = 0.35):
     from app.services.studio_avatar import envelope_frame
 
     return envelope_frame(level)
+
+
+@public_router.get("/sessions/{session_id}/booth-status")
+async def booth_status(session_id: UUID, request: Request):
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_tier2 import booth_status as _status
+
+    return _raise(await _status(_pool(request), str(session_id), str(checked.get("identity") or "")))
+
+
+@public_router.post("/sessions/{session_id}/booth/queue")
+async def booth_queue(session_id: UUID, body: QueueBody, request: Request):
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_caller_queue import apply_queue_op
+
+    return _raise(
+        await apply_queue_op(
+            _pool(request),
+            await _redis(request),
+            str(session_id),
+            str(checked.get("identity") or ""),
+            body.op,
+            body.caller_id,
+            snapshot_active=body.active if (body.op or "").lower() == "sync" else None,
+            snapshot_waiting=body.waiting if (body.op or "").lower() == "sync" else None,
+        )
+    )
+
+
+@public_router.post("/sessions/{session_id}/booth/end")
+async def booth_end(session_id: UUID, request: Request):
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_episode_service import create_from_session
+    from app.services.studio_session_service import end_session as _end
+
+    hid = str(checked.get("identity") or "")
+    ended = await _end(_pool(request), str(session_id), hid)
+    if not ended.get("ok"):
+        return _raise(ended)
+    ep = await create_from_session(_pool(request), str(session_id), hid)
+    ended["episode"] = ep
+    return ended
+
+
+@public_router.post("/sessions/{session_id}/booth/dump")
+async def booth_dump(session_id: UUID, request: Request):
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_tier2 import dump_session as _dump
+
+    return _raise(await _dump(_pool(request), str(session_id), str(checked.get("identity") or "")))
+
+
+@public_router.post("/sessions/{session_id}/booth/guest-link")
+async def booth_guest_link(session_id: UUID, request: Request):
+    _flag()
+    _require_host_jwt(request, session_id)
+    from app.services.studio_livekit import join_token as _join
+
+    return _join(str(session_id), "guest")
 
 
 @public_router.post("/sessions/{session_id}/cohost/turn")

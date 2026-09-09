@@ -38,7 +38,7 @@ def room_embed_url(lk_url: str, token: str, role: str, session_id: str = "") -> 
             "api": api,
         }
     )
-    return f"{room_origin()}/studio_nate_room.html?v=20260903a#{q}"
+    return f"{room_origin()}/studio_nate_room.html?v=20260909a#{q}"
 
 
 def verify_livekit_jwt(token: str) -> Dict[str, Any]:
@@ -586,6 +586,21 @@ async def list_room_participants(session_id: str) -> Dict[str, Any]:
                 }
             )
     return {"ok": bool(resp.get("ok")), "participants": out, "http": resp.get("http")}
+
+
+async def remove_participant(session_id: str, identity: str) -> Dict[str, Any]:
+    sid = (session_id or "").strip()
+    ident = (identity or "").strip()
+    if not sid or not ident:
+        return {"ok": False, "reason": "no_session"}
+    room = f"studio-{sid}"
+    sent = await _twirp(
+        "/twirp/livekit.RoomService/RemoveParticipant",
+        {"room": room, "identity": ident},
+        room=room,
+        timeout=5.0,
+    )
+    return {"ok": bool(sent.get("ok")), "http": sent.get("http"), "reason": sent.get("reason")}
 
 
 async def send_room_data(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
