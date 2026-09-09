@@ -189,3 +189,47 @@ async def test_refund_on_client_cancel_ge_24h_paid(monkeypatch):
     )
     assert outcome == "refunded"
     assert detail == "re_s3"
+
+
+@pytest.mark.asyncio
+async def test_refund_on_coach_cancel_inside_24h_still_refunds_if_paid(monkeypatch):
+    import sys
+    import types
+    from app.services.session_booking_billing import refund_on_coach_cancel
+
+    monkeypatch.setenv("ENABLE_SESSION_BOOKING_BILLING", "true")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_s4")
+    stripe_mod = types.ModuleType("stripe")
+
+    class _Refund:
+        @staticmethod
+        def create(**_kw):
+            return types.SimpleNamespace(amount=5000, id="re_s4")
+
+    stripe_mod.Refund = _Refund
+    monkeypatch.setitem(sys.modules, "stripe", stripe_mod)
+    start = datetime.now(timezone.utc) + timedelta(hours=12)
+    outcome, detail = await refund_on_coach_cancel(
+        None,
+        {
+            "session_id": "SES_COACH_PAID",
+            "scheduled_start": start.isoformat(),
+            "payment_status": "paid",
+            "stripe_payment_intent_id": "pi_paid",
+        },
+    )
+    assert outcome == "refunded"
+    assert detail == "re_s4"
+
+
+def test_hide_schedule_link_does_not_call_refund():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("async def hide_schedule_link(")
+    end = text.index("async def cancel_session(")
+    chunk = text[start:end].lower()
+    assert "refund" not in chunk
+    assert "apply_coach_session_cancel" not in chunk
+    assert "notify_client_of_coach_cancel" not in chunk

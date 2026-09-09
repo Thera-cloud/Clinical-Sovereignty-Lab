@@ -21496,7 +21496,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         title: const Text('Cancel this session?',
             style: TextStyle(color: Colors.white)),
         content: Text(
-          '$clientName${when.isNotEmpty ? ' • $when' : ''}\n\nThe client will be notified and the slot reopens for booking.',
+          '$clientName${when.isNotEmpty ? ' • $when' : ''}\n\nWe notify the client if email or SMS is on file. The slot reopens for booking.',
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
         actions: [
@@ -21525,9 +21525,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
       if (resp.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Session cancelled. The client has been notified.'),
-          backgroundColor: Color(0xFF22C55E),
+        String msg = 'Session cancelled.';
+        try {
+          final body = jsonDecode(resp.body) as Map<String, dynamic>;
+          final notify = body['notify'] is Map
+              ? Map<String, dynamic>.from(body['notify'] as Map)
+              : <String, dynamic>{};
+          final emailed = notify['email'] == true;
+          final sms = notify['sms'] == true;
+          if (emailed || sms) {
+            msg = 'Session cancelled. The client was notified.';
+          } else {
+            msg =
+                'Session cancelled. Client notify skipped (no email/SMS on file).';
+          }
+          final refund = (body['refund_status'] ?? '').toString();
+          if (refund == 'refunded') {
+            msg = '$msg Refund issued.';
+          }
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: const Color(0xFF22C55E),
         ));
         _emitFetchCoachCalendar();
       } else {

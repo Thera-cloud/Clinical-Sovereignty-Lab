@@ -1702,7 +1702,8 @@ async def cancel_session(session_id: str, request: Request, current_user: str = 
 
     for i, s in enumerate(sessions):
         if s.get("session_id") == session_id:
-            if current_user not in (s.get("client_id"), s.get("coach_id")):
+            user_role = getattr(request.state, "user_role", "")
+            if current_user not in (s.get("client_id"), s.get("coach_id")) and user_role != "ADMIN":
                 raise HTTPException(403, "Access denied: you are not a participant in this session")
             if hard_delete:
                 if has_archived_transcript(s):
@@ -1730,18 +1731,26 @@ async def cancel_session(session_id: str, request: Request, current_user: str = 
                         pass
                 return {"message": "Session permanently deleted", "session": deleted_session}
             else:
-                s["status"] = "cancelled"
-                s["cancellation_reason"] = reason
-                s["cancelled_at"] = str(datetime.now())
+                from app.services.session_approval import apply_coach_session_cancel
+                db_pool = _get_db(request)
+                ns = getattr(request.app.state, "notification_system", None)
+                applied = await apply_coach_session_cancel(
+                    db_pool, s, reason=reason, notification_system=ns,
+                )
                 await _save_session_dual(request, s, sessions)
                 if _gcal_sync:
                     try:
-                        db_pool = getattr(request.app.state, "db_pool", None)
                         if db_pool:
                             asyncio.create_task(_gcal_sync(db_pool, s, action="delete"))
                     except Exception:
                         pass
-                return {"message": "Session cancelled", "session": s}
+                return {
+                    "message": "Session cancelled",
+                    "session": s,
+                    "refund_status": applied.get("refund_outcome"),
+                    "refund_detail": applied.get("refund_detail"),
+                    "notify": applied.get("notify") or {"email": False, "sms": False},
+                }
 
     raise HTTPException(404, "Session not found")
 

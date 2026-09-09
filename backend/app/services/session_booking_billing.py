@@ -24,7 +24,8 @@ SESSION_PAYMENT_POLICY = (
     "After your coach accepts, your card on file will be charged in the "
     "72-hour window before the session. Payment is due before the session. "
     "Cancel at least 24 hours before the start time for a full refund. "
-    "Cancellations inside 24 hours are not refundable."
+    "Cancellations inside 24 hours are not refundable. "
+    "If your coach cancels, a paid session is refunded even inside 24 hours."
 )
 
 # Membership discounts off the coach's listed rate (cents). CoachN $175 →
@@ -257,24 +258,13 @@ def _parse_start(session: Dict[str, Any]) -> Optional[datetime]:
         return None
 
 
-async def refund_on_client_cancel(
+async def _issue_session_refund(
     db_pool,
     session: Dict[str, Any],
+    *,
+    source: str,
 ) -> Tuple[str, str]:
-    """Refund if paid and cancel is ≥24h before start.
-
-    Returns (outcome, detail) where outcome is one of:
-    refunded | not_paid | too_late | no_intent | error | skipped
-    """
-    if not booking_billing_enabled():
-        return "skipped", "billing disabled"
-    start = _parse_start(session)
-    if not start:
-        return "error", "missing scheduled_start"
-    now = datetime.now(timezone.utc)
-    if start - now < timedelta(hours=24):
-        return "too_late", "inside 24h cancellation window — no refund"
-
+    """Stripe refund if payment_status is paid. Caller owns the 24h gate."""
     intent_id = (
         session.get("stripe_payment_intent_id")
         or session.get("stripe_payment_intent")
@@ -282,7 +272,6 @@ async def refund_on_client_cancel(
     ).strip()
     payment_status = (session.get("payment_status") or "").lower()
 
-    # Prefer PG truth for paid + intent
     if db_pool and session.get("session_id"):
         try:
             async with db_pool.acquire() as conn:
@@ -295,7 +284,7 @@ async def refund_on_client_cancel(
                     payment_status = (row["payment_status"] or payment_status or "").lower()
                     intent_id = (row["stripe_payment_intent_id"] or intent_id or "").strip()
         except Exception as e:
-            logger.warning("refund_on_client_cancel PG read: %s", e)
+            logger.warning("%s PG read: %s", source, e)
 
     if payment_status != "paid":
         return "not_paid", "no charge to refund"
@@ -329,12 +318,42 @@ async def refund_on_client_cancel(
                         session.get("session_id"),
                         int(refund.amount or 0),
                         intent_id,
-                        _json.dumps({"source": "client_cancel", "refund_id": refund.id}),
+                        _json.dumps({"source": source, "refund_id": refund.id}),
                     )
                 except Exception:
                     pass
         session["payment_status"] = "refunded"
         return "refunded", refund.id
     except Exception as e:
-        logger.warning("refund_on_client_cancel Stripe: %s", e)
+        logger.warning("%s Stripe: %s", source, e)
         return "error", str(e)
+
+
+async def refund_on_client_cancel(
+    db_pool,
+    session: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Refund if paid and cancel is ≥24h before start.
+
+    Returns (outcome, detail) where outcome is one of:
+    refunded | not_paid | too_late | no_intent | error | skipped
+    """
+    if not booking_billing_enabled():
+        return "skipped", "billing disabled"
+    start = _parse_start(session)
+    if not start:
+        return "error", "missing scheduled_start"
+    now = datetime.now(timezone.utc)
+    if start - now < timedelta(hours=24):
+        return "too_late", "inside 24h cancellation window — no refund"
+    return await _issue_session_refund(db_pool, session, source="client_cancel")
+
+
+async def refund_on_coach_cancel(
+    db_pool,
+    session: Dict[str, Any],
+) -> Tuple[str, str]:
+    """Coach-initiated: refund if paid, including inside the 24h window."""
+    if not booking_billing_enabled():
+        return "skipped", "billing disabled"
+    return await _issue_session_refund(db_pool, session, source="coach_cancel")
