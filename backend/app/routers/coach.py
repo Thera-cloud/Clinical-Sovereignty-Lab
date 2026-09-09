@@ -455,6 +455,21 @@ async def get_presession_brief(client_id: str, request: Request, user=Depends(ge
                         )
         except Exception as _ib_err:
             _logger.debug("presession dual_coo insights: %s", _ib_err)
+    # QUANTUM-CRYSTAL-ARCH — S7 View Brief overlay conversation_history
+    try:
+        from app.services.presession_brief_overlay import overlay_presession_brief
+
+        brief_payload = await overlay_presession_brief(
+            db_pool, client_id, client_profile, brief_payload
+        )
+    except Exception as _s7_err:
+        _logger.warning("get_presession_brief: S7 overlay: %s", _s7_err)
+        try:
+            from app.services.presession_brief_overlay import strip_payment_secrets
+
+            brief_payload = strip_payment_secrets(brief_payload)
+        except Exception:
+            pass
     return brief_payload
 
 

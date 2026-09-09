@@ -10009,6 +10009,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     );
   }
 
+  String _zoomInsightText(dynamic raw) {
+    if (raw is Map) {
+      return (raw['summary_text'] ?? raw['summary'] ?? '').toString().trim();
+    }
+    return raw == null ? '' : raw.toString().trim();
+  }
+
   void _showClientBriefSheet() {
     if (_selectedClientBrief == null) return;
 
@@ -10275,7 +10282,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ],
           if ((brief['fcodes_active'] is List &&
                   (brief['fcodes_active'] as List).isNotEmpty) ||
-              (brief['zoom_ai_insight'] ?? '').toString().trim().isNotEmpty) ...[
+              _zoomInsightText(brief['zoom_ai_insight']).isNotEmpty) ...[
             const Text("CLINICAL SIGNALS",
                 style: TextStyle(
                     color: Colors.grey,
@@ -10296,36 +10303,78 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         ))
                     .toList(),
               ),
-            if ((brief['zoom_ai_insight'] ?? '').toString().trim().isNotEmpty)
+            if (_zoomInsightText(brief['zoom_ai_insight']).isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(brief['zoom_ai_insight'].toString(),
+                child: Text(_zoomInsightText(brief['zoom_ai_insight']),
                     style: const TextStyle(color: Colors.white60, fontSize: 12)),
               ),
             const SizedBox(height: 24),
           ],
 
-          // Recent conversations (shared threaded log)
-          if (recentConversations.isNotEmpty) ...[
+          if ((brief['prior_session_summaries'] is List) &&
+              (brief['prior_session_summaries'] as List).isNotEmpty) ...[
             const Text(
-              "RECENT CONVERSATIONS",
+              "PRIOR SESSION SUMMARIES",
               style: TextStyle(
                   color: Colors.grey,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5,
                   fontSize: 12),
             ),
-            const SizedBox(height: 12),
-            ConversationLogView(
-              entries: ConversationLogView.parseEntries(recentConversations),
-              clientFirstName: ((client['name'] ?? 'Client')
-                  .toString()
-                  .trim()
-                  .split(RegExp(r'\s+'))
-                  .first),
-              emptyText: 'No recent conversation captured.',
-            ),
+            const SizedBox(height: 8),
+            ...(brief['prior_session_summaries'] as List).take(8).map((raw) {
+              final m = raw is Map
+                  ? Map<String, dynamic>.from(raw)
+                  : <String, dynamic>{};
+              final when = (m['occurred_at'] ?? '').toString();
+              final summary = (m['summary'] ?? '').toString();
+              final source = (m['source'] ?? '').toString();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (when.isNotEmpty || source.isNotEmpty)
+                      Text(
+                        [
+                          if (when.isNotEmpty)
+                            ConversationLogView.formatTimestamp(when),
+                          if (source.isNotEmpty) source,
+                        ].join(' · '),
+                        style: const TextStyle(
+                            color: Color(0xFF8B7355), fontSize: 11),
+                      ),
+                    if (summary.isNotEmpty)
+                      Text(summary,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13, height: 1.4)),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 16),
           ],
+
+          // Recent conversations (shared threaded log)
+          const Text(
+            "RECENT CONVERSATIONS",
+            style: TextStyle(
+                color: Colors.grey,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.5,
+                fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          ConversationLogView(
+            entries: ConversationLogView.parseEntries(recentConversations),
+            clientFirstName: ((client['name'] ?? 'Client')
+                .toString()
+                .trim()
+                .split(RegExp(r'\s+'))
+                .first),
+            emptyText: 'No conversation history in vault or PostgreSQL.',
+          ),
 
           const SizedBox(height: 40),
         ],

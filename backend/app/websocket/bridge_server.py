@@ -20730,6 +20730,20 @@ async def handle_client(websocket, path=None):
                             except Exception as _zlb_err:
                                 logger.debug("presession zoom learning: %s", _zlb_err)
 
+                        # QUANTUM-CRYSTAL-ARCH — S7 View Brief overlay conversation_history
+                        try:
+                            from app.services.presession_brief_overlay import overlay_presession_brief
+                            brief = await overlay_presession_brief(
+                                db_pool, client_id, client_profile, brief,
+                            )
+                        except Exception as _s7_err:
+                            logger.warning("get_presession_brief: S7 overlay: %s", _s7_err)
+                            try:
+                                from app.services.presession_brief_overlay import strip_payment_secrets as _s7_strip
+                                brief = _s7_strip(brief)
+                            except Exception:
+                                pass
+
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
 
             # QUANTUM-CRYSTAL-ARCH — Sensitive Profile screen-open audit (bridge WS).
