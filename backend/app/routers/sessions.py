@@ -972,18 +972,14 @@ async def get_upcoming_sessions(request: Request, user_id: str, current_user: st
 
 @router.post("/expire-stale")
 async def expire_stale_sessions(request: Request):
-    """Auto-expire scheduled sessions whose scheduled_end is in the past."""
+    """Mark past paid/waived/zero sessions no_show. Unpaid priced rows stay on the payment agent."""
     db = _get_db(request)
     expired_count = 0
     if db:
         try:
+            from app.services.session_booking_billing import EXPIRE_STALE_NO_SHOW_SQL
             async with db.acquire() as conn:
-                result = await conn.execute(
-                    """UPDATE coaching_sessions
-                       SET status = 'no_show', updated_at = NOW()
-                       WHERE status = 'scheduled'
-                         AND scheduled_end < NOW() - INTERVAL '30 minutes'""",
-                )
+                result = await conn.execute(EXPIRE_STALE_NO_SHOW_SQL)
                 expired_count = int(result.split()[-1]) if result else 0
         except Exception as e:
             _logger.warning("expire_stale_sessions: %s", e)

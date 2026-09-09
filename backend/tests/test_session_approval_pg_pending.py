@@ -273,6 +273,45 @@ async def test_notify_client_of_coach_cancel_email_and_sms():
 
 
 @pytest.mark.asyncio
+async def test_notify_client_of_unpaid_cancel_uses_unpaid_template():
+    sent = {}
+
+    async def fake_lookup(_pool, hw):
+        return {
+            "email": "audit_client@example.com",
+            "phone": "+15555550111",
+            "name": "Audit Client",
+            "timezone": "UTC",
+        }
+
+    async def fake_email(to_email, template_name, context):
+        sent["email"] = (to_email, template_name, context)
+        return True
+
+    ns = AsyncMock()
+    ns.send_sms = AsyncMock(return_value=True)
+    result = await approval.notify_client_of_coach_cancel(
+        object(),
+        {
+            "session_id": "SES_UNPAID",
+            "client_id": "audit_client_hw",
+            "coach_id": "audit_coach_hw",
+            "scheduled_start": "2026-10-01T18:00:00+00:00",
+        },
+        notification_system=ns,
+        _lookup=fake_lookup,
+        _send_email=fake_email,
+        template="session_cancelled_unpaid",
+        sms_body="Sanctuary: unpaid deadline.",
+    )
+    assert result["email"] is True
+    assert result["sms"] is True
+    assert sent["email"][1] == "session_cancelled_unpaid"
+    ns.send_sms.assert_awaited_once()
+    assert "unpaid" in ns.send_sms.await_args.args[1]
+
+
+@pytest.mark.asyncio
 async def test_apply_coach_session_cancel_refunds_and_notifies():
     session = {
         "session_id": "SES_COACH_CXL",

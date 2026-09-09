@@ -28,6 +28,19 @@ SESSION_PAYMENT_POLICY = (
     "If your coach cancels, a paid session is refunded even inside 24 hours."
 )
 
+# Past scheduled rows: no_show only when there is nothing for SessionPaymentAgent
+# to collect. Unpaid priced sessions stay scheduled until the 24h unpaid cancel.
+EXPIRE_STALE_NO_SHOW_SQL = """
+UPDATE coaching_sessions
+   SET status = 'no_show', updated_at = NOW()
+ WHERE LOWER(COALESCE(status, '')) = 'scheduled'
+   AND scheduled_end < NOW() - INTERVAL '30 minutes'
+   AND NOT (
+       COALESCE(payment_status, '') = 'pending'
+       AND COALESCE(price_cents, 0) > 0
+   )
+"""
+
 # Membership discounts off the coach's listed rate (cents). CoachN $175 →
 # Inner Chamber $125 every session; Sovereign Circle $125 first / $90 after.
 INNER_CHAMBER_SESSION_DISCOUNT_CENTS = 5000

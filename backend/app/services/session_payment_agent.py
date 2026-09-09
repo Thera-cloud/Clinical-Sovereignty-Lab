@@ -103,6 +103,7 @@ class SessionPaymentAgent:
         window_start = now
         window_end = now + timedelta(hours=PAYMENT_WINDOW_HOURS)
         cancel_deadline = now + timedelta(hours=CANCELLATION_WINDOW_HOURS)
+        unpaid_cancel_sessions = []
 
         async with self.db_pool.acquire() as conn:
             # Find sessions in the payment window that need charging
@@ -164,7 +165,8 @@ class SessionPaymentAgent:
 
             # Auto-cancel unpaid sessions past the 24-hour deadline
             overdue = await conn.fetch(
-                f"""SELECT id, coach_id, client_id
+                f"""SELECT id, session_id, coach_id, client_id,
+                          {_APPT_TIME_BARE} AS scheduled_at
                    FROM coaching_sessions
                    WHERE {_APPT_TIME_BARE} <= $1
                    AND payment_status = 'pending'
@@ -183,6 +185,18 @@ class SessionPaymentAgent:
                 )
                 await self._log_event(conn, s["id"], "cancellation", 0, note="Auto-cancelled: payment overdue")
                 cancelled += 1
+                unpaid_cancel_sessions.append({
+                    "session_id": s["session_id"],
+                    "client_id": s["client_id"],
+                    "coach_id": s["coach_id"],
+                    "scheduled_start": s["scheduled_at"],
+                })
+
+            try:
+                from app.services.session_booking_billing import EXPIRE_STALE_NO_SHOW_SQL
+                await conn.execute(EXPIRE_STALE_NO_SHOW_SQL)
+            except Exception as e:
+                logger.warning("SessionPaymentAgent: expire-stale no_show skipped: %s", e)
 
             # 48-hour session reminders (Phase 7)
             reminder_48h_start = now + timedelta(hours=47)
@@ -243,6 +257,31 @@ class SessionPaymentAgent:
                 logger.info(
                     "SessionPaymentAgent: cycle complete — %d charged, %d reminded, %d cancelled",
                     charged, reminded, cancelled,
+                )
+
+        for sess in unpaid_cancel_sessions:
+            try:
+                from app.services.session_approval import notify_client_of_coach_cancel
+                notify_sys = (
+                    getattr(self.app_state, "notification_system", None)
+                    if self.app_state
+                    else None
+                )
+                await notify_client_of_coach_cancel(
+                    self.db_pool,
+                    sess,
+                    notification_system=notify_sys,
+                    template="session_cancelled_unpaid",
+                    sms_body=(
+                        "Sanctuary: your session was cancelled because payment "
+                        "was not received before the 24-hour deadline."
+                    ),
+                )
+            except Exception as e:
+                logger.warning(
+                    "SessionPaymentAgent: unpaid cancel notify failed sid=%s: %s",
+                    sess.get("session_id"),
+                    e,
                 )
 
     async def _charge_card(self, conn, session, stripe_customer_id: str, amount_cents: int) -> bool:

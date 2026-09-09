@@ -116,7 +116,12 @@ async def test_payment_agent_does_not_cancel_free_coach_booking():
     agent = SessionPaymentAgent(db_pool=_MockPool(conn), app_state=None)
     await agent._run_one_cycle()
 
-    conn.execute.assert_not_awaited()
+    cancel_sql = [
+        c.args[0]
+        for c in conn.execute.await_args_list
+        if c.args and "payment_status = 'cancelled'" in str(c.args[0])
+    ]
+    assert cancel_sql == []
     assert any("COALESCE(price_cents, 0) > 0" in q for q in captured)
 
 
@@ -272,3 +277,54 @@ def test_resend_session_link_allows_empty_zoom():
     end = text.index("@router.get(\"/upcoming/{user_id}\")")
     chunk = text[start:end]
     assert "has no Zoom link to resend" not in chunk
+
+
+def test_expire_stale_skips_unpaid_priced_sessions():
+    from app.services.session_booking_billing import EXPIRE_STALE_NO_SHOW_SQL
+
+    sql = " ".join(EXPIRE_STALE_NO_SHOW_SQL.split())
+    assert "no_show" in sql
+    assert "payment_status" in sql
+    assert "price_cents" in sql
+    assert "pending" in sql
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py").read_text()
+    start = text.index("async def expire_stale_sessions(")
+    end = text.index("async def get_session(")
+    assert "EXPIRE_STALE_NO_SHOW_SQL" in text[start:end]
+    assert "status = 'no_show'" not in text[start:end].replace("EXPIRE_STALE_NO_SHOW_SQL", "")
+
+
+@pytest.mark.asyncio
+async def test_payment_agent_overdue_notifies_unpaid_client(monkeypatch):
+    called = {}
+
+    async def fake_notify(_pool, session, **kw):
+        called["session"] = session
+        called["kw"] = kw
+        return {"email": False, "sms": False}
+
+    monkeypatch.setattr(
+        "app.services.session_approval.notify_client_of_coach_cancel",
+        fake_notify,
+    )
+    conn = AsyncMock()
+
+    async def _fetch(sql, *args):
+        if "COALESCE(scheduled_start, scheduled_at) <=" in sql and "price_cents" in sql:
+            return [{
+                "id": "11111111-1111-1111-1111-111111111111",
+                "session_id": "SES_S6_UNPAID",
+                "coach_id": "audit_coach_hw",
+                "client_id": "audit_client_hw",
+                "scheduled_at": datetime.now(timezone.utc),
+            }]
+        return []
+
+    conn.fetch = _fetch
+    conn.execute = AsyncMock()
+    agent = SessionPaymentAgent(db_pool=_MockPool(conn), app_state=None)
+    await agent._run_one_cycle()
+    assert called["session"]["session_id"] == "SES_S6_UNPAID"
+    assert called["kw"]["template"] == "session_cancelled_unpaid"
+    assert "24-hour" in called["kw"]["sms_body"]

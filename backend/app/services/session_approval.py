@@ -510,8 +510,13 @@ async def notify_client_of_coach_cancel(
     notification_system=None,
     _lookup=None,
     _send_email=None,
+    template: str = "session_cancelled_client",
+    sms_body: Optional[str] = None,
 ) -> Dict[str, bool]:
-    """Email + SMS the client after a coach REST cancel. Hide must not call this."""
+    """Email + SMS the client after a coach REST cancel or unpaid auto-cancel.
+
+    Hide must not call this. Unpaid path passes template=session_cancelled_unpaid.
+    """
     result = {"email": False, "sms": False}
     if not session:
         return result
@@ -536,7 +541,7 @@ async def notify_client_of_coach_cancel(
         try:
             result["email"] = bool(await sender(
                 dest,
-                "session_cancelled_client",
+                template,
                 {
                     "coach_name": coach_name,
                     "session_time": when,
@@ -544,17 +549,17 @@ async def notify_client_of_coach_cancel(
                 },
             ))
         except Exception as e:
-            logger.warning("session_approval: coach-cancel email failed: %s", e)
+            logger.warning("session_approval: client-cancel email failed: %s", e)
     phone = ((client or {}).get("phone") or "").strip()
     if phone and notification_system is not None:
         try:
-            body = f"Sanctuary: {coach_name} cancelled your session {when}."
+            body = sms_body or f"Sanctuary: {coach_name} cancelled your session {when}."
             result["sms"] = bool(await notification_system.send_sms(phone, body))
         except Exception as e:
-            logger.warning("session_approval: coach-cancel SMS failed: %s", e)
+            logger.warning("session_approval: client-cancel SMS failed: %s", e)
     logger.info(
-        "session_approval: coach cancel notify email=%s sms=%s sid=%s",
-        result["email"], result["sms"], session.get("session_id"),
+        "session_approval: client cancel notify email=%s sms=%s sid=%s template=%s",
+        result["email"], result["sms"], session.get("session_id"), template,
     )
     return result
 
