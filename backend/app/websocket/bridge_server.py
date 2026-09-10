@@ -9372,7 +9372,11 @@ class AzureCortex:
                 return await asyncio.wait_for(_coro, timeout=_cto)
             except asyncio.TimeoutError:
                 print(f">>> [CTX] crystal recall timeout {_cto}s depth={_depth}")
-                return ""
+                try:  # QUANTUM-CRYSTAL-ARCH
+                    from app.services.attunement.hooks import recall_timeout_fallback
+                    return await recall_timeout_fallback(_pool, _hid, _q, _un)
+                except Exception:
+                    return ""
 
         async def _rel_capped():
             _rto = _rel_to(_depth)  # QUANTUM-CRYSTAL-ARCH: Faster relational cap
@@ -9433,13 +9437,26 @@ class AzureCortex:
             pass
         # QUANTUM-CRYSTAL-ARCH — Faster compact / Extra full richness directive
         try:
-            _sq_dir = _depth_rich_dir(_depth, user_text or "")
+            _sq_dir = _depth_rich_dir(_depth, user_text or "", cold_recall=not bool(_crystal_ids_for_turn))
+            try:  # QUANTUM-CRYSTAL-ARCH
+                from app.services.attunement.hooks import apply_agency_blocks
+                from app.services.attunement.agency import fetch_open_commitment
+                plan_context_block, _ax = apply_agency_blocks(uid, depth=_depth, crystal_ids=_crystal_ids_for_turn, plan_block=plan_context_block, user_text=user_text, commitment_text=await fetch_open_commitment(_cpool, _uname or uid))
+                if _ax:
+                    _sq_dir = _ax
+            except Exception:
+                pass
             if _sq_dir:
                 crystal_context = f"{crystal_context}\n\n{_sq_dir}" if crystal_context else _sq_dir
         except Exception:
             pass
         _live_turn_context = _format_live_turn_context(uid)
         _critical_recall_context = _format_critical_recall_facts(uid)
+        try:  # QUANTUM-CRYSTAL-ARCH
+            from app.services.attunement.hooks import apply_context_rank
+            _live_turn_context, _critical_recall_context, crystal_context, pg_history_context, relational_context = apply_context_rank(_live_turn_context, _critical_recall_context, crystal_context, pg_history_context, relational_context)
+        except Exception:
+            pass
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)
         print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars (parallel pre-fetch: {_pre_ms}ms) depth={_depth}")
         
@@ -10523,6 +10540,11 @@ class AzureCortex:
                 profile.get("username"), clinical=(_role == "CLIENT")
             )
             _len_cap = _select_max_tokens(user_text)  # FIX-LEN # SOVEREIGN-VOICE
+            try:  # QUANTUM-CRYSTAL-ARCH
+                from app.services.attunement.hooks import tempo_max_tokens
+                _len_cap = tempo_max_tokens(uid, user_text, _len_cap, _depth, _chat_live_turns.get(uid) or [])
+            except Exception:
+                pass
             print(f">>> [LENGTH-CAP] max_tokens={_len_cap} (mode={'depth' if _len_cap==1500 else 'default'})")  # FIX-LEN
             # FIX-THERAPEUTIC-CONTROLLER — pre-flight: state-dependent prompt + cap
             _ttc_audit_meta = None
@@ -11085,6 +11107,19 @@ class AzureCortex:
                     print(f">>> [IP BOUNDARY] Sanitized AI response for {_role} user {profile.get('name')}")
                     await self._send(uid, _sanitized, client_context=_ctx, turn_id=_turn_id)
                     _final_response = _sanitized
+            _attune_meta = {}
+            try:  # QUANTUM-CRYSTAL-ARCH
+                from app.services.attunement.hooks import apply_postflight
+                _fn = ((profile.get("name") or "").strip().split() or [""])[0]
+                _final_response, _attune_meta = apply_postflight(
+                    uid, user_text, _final_response,
+                    live_turns=_chat_live_turns.get(uid) or [],
+                    first_name=_fn, crystal_ids=_crystal_ids_for_turn,
+                    pg_context=pg_history_context, depth=_depth, turn_id=_turn_id,
+                    already_streamed=bool(_stream_before_audit),
+                )
+            except Exception:
+                pass
 
             # QUANTUM-CRYSTAL-ARCH — Layer 8 factual grounding post-check
             if _validate_factual and _role == "CLIENT" and _final_response.strip():
@@ -11294,6 +11329,11 @@ class AzureCortex:
                     })
                     if len(_chat_live_turns[uid]) > _CHAT_LIVE_TURN_LIMIT:
                         _chat_live_turns[uid] = _chat_live_turns[uid][-_CHAT_LIVE_TURN_LIMIT:]
+                    try:  # QUANTUM-CRYSTAL-ARCH
+                        from app.services.attunement.hooks import on_turn_committed
+                        on_turn_committed(uid, user_text, _final_response, _attune_meta)
+                    except Exception:
+                        pass
 
                     if uid not in _chat_session_turns:
                         _chat_session_turns[uid] = []
@@ -11333,7 +11373,7 @@ class AzureCortex:
                     asyncio.create_task(_persist_chat_to_conversation_history(
                         db_pool, _ch_username, _qg_verbatim_user_text, _final_response, _ch_session,
                         turn_id=_turn_id, crystal_ids=_crystal_ids_for_turn,
-                        symbols=_sym_persist,
+                        symbols=_sym_persist, attunement=_attune_meta,
                     ))
             except Exception:
                 pass
