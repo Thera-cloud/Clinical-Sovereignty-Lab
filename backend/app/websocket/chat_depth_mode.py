@@ -33,7 +33,8 @@ def crystal_max_results(mode: str) -> int:
 
 
 def pg_history_limit(mode: str) -> int:
-    return 8 if is_faster(mode) else 15
+    # QUANTUM-CRYSTAL-ARCH — attunement #6: Faster N=6 full turns, Extra N=15
+    return 6 if is_faster(mode) else 15
 
 
 def allow_enrichment(mode: str) -> bool:
@@ -191,8 +192,17 @@ def build_extra_quotient_directive(user_text: str) -> str:
     )
 
 
-def build_depth_richness_directive(mode: str, user_text: str) -> str:
+def build_depth_richness_directive(mode: str, user_text: str, cold_recall: bool = False) -> str:
     """Pick Faster compact or Extra full richness block."""
+    # QUANTUM-CRYSTAL-ARCH — attunement #19: no quotient lecture on cold Faster
+    if is_faster(mode) and cold_recall:
+        try:
+            from app.services.attunement.agency import hold_first_directive
+            from app.services.attunement.flags import conjecture
+            if conjecture():
+                return hold_first_directive()
+        except Exception:
+            pass
     if is_faster(mode):
         return build_faster_richness_directive(user_text)
     return build_extra_quotient_directive(user_text)

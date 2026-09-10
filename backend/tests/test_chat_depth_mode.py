@@ -32,7 +32,7 @@ def test_normalize_aliases():
 
 def test_faster_budgets():
     assert crystal_max_results("faster") == 6
-    assert pg_history_limit("faster") == 8
+    assert pg_history_limit("faster") == 6
     assert allow_enrichment("faster") is False
     assert allow_plan_heavy("faster") is False
     assert allow_plan_context("faster") is False

@@ -7714,6 +7714,7 @@ async def _persist_chat_to_conversation_history(
     db_pool, username: str, user_text: str, ai_text: str, session_id: str = "",
     turn_id: str = "", crystal_ids: Optional[list] = None,
     symbols: Optional[dict] = None,
+    attunement: Optional[dict] = None,
 ):
     """Write text chat turns to conversation_history (PG) so Memory Search and
     deep recall can find them. Fire-and-forget from process_interaction."""
@@ -7730,6 +7731,8 @@ async def _persist_chat_to_conversation_history(
         # QUANTUM-CRYSTAL-ARCH: Phase 5a — symbolic metadata alongside crystal attribution
         if symbols and os.getenv("ENABLE_SYMBOLIC_EXTRACTION", "false").strip().lower() in ("1", "true", "yes"):
             _meta_dict["symbols"] = symbols
+        if attunement:
+            _meta_dict["attunement"] = attunement  # QUANTUM-CRYSTAL-ARCH
         _meta = json.dumps(_meta_dict) if _meta_dict else "{}"
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -7760,28 +7763,21 @@ async def _fetch_pg_history_for_chat(db_pool, username: str, hardware_id: str, l
 
 def _format_critical_recall_facts(uid: str) -> str:
     """Pin salient in-session facts for recall prompts (Gap 3)."""
-    turns = _chat_live_turns.get(uid) or []
-    facts = []
-    for t in turns:
-        ut = (t.get("user_text") or "").lower()
-        if "over a year" in ut and "intimate" in ut:
-            facts.append("The user said intimacy has been absent for over a year.")
-        if "relationship with a guy in college" in ut:
-            facts.append("The user disclosed a college relationship with a man.")
-        if "church" in ut and "sin" in ut:
-            facts.append("The user linked faith/church pressure to this conflict.")
-    if not facts:
+    try:
+        from app.services.attunement.hooks import format_critical_recall
+        return format_critical_recall(uid, _chat_live_turns.get(uid) or [])
+    except Exception:
         return ""
-    uniq = []
-    for f in facts:
-        if f not in uniq:
-            uniq.append(f)
-    return "CRITICAL RECALL FACTS (quote these when asked):\n- " + "\n- ".join(uniq[:5])
 
 
 def _format_live_turn_context(uid: str, limit: int = _LIVE_TURN_PROMPT_LIMIT) -> str:
     """Format immediate in-session turns for short-horizon continuity."""
     turns = _chat_live_turns.get(uid) or []
+    try:
+        from app.services.attunement.hooks import merge_live_ring
+        turns = merge_live_ring(uid, turns)
+    except Exception:
+        pass
     if not turns:
         return ""
     parts = ["LIVE SESSION CONTEXT (most recent turns):"]
@@ -8594,7 +8590,12 @@ class AzureCortex:
         self.active_sessions[uid] = session["session_id"]
         self.analytics.record_event("session_start", uid)
         # Gap 3: clear short-horizon in-session buffer at new session boundary.
-        _chat_live_turns.pop(uid, None)
+        try:
+            from app.services.attunement.hooks import should_clear_live_on_login
+            if should_clear_live_on_login(uid):
+                _chat_live_turns.pop(uid, None)
+        except Exception:
+            _chat_live_turns.pop(uid, None)
 
     def _ensure_session_id(self, uid: str) -> str:
         """SOVEREIGN-VOICE — never persist a chat turn with a bare/missing
@@ -8645,7 +8646,13 @@ class AzureCortex:
             _adaptive_clear(uid)
         except Exception:
             pass
-        _chat_live_turns.pop(uid, None)
+        if not self.sockets.get(uid):
+            try:
+                from app.services.attunement.hooks import on_last_socket
+                on_last_socket(uid, _chat_live_turns.get(uid) or [])
+            except Exception:
+                pass
+            _chat_live_turns.pop(uid, None)
 
     def _get_family(self, p: dict) -> str:
         fid = p.get("family_id")
@@ -9011,7 +9018,7 @@ class AzureCortex:
             _allow_fsf = lambda m: True  # noqa: E731
             _allow_lib = lambda m: True  # noqa: E731
             _allow_deep_mem = lambda m: True  # noqa: E731
-            _depth_rich_dir = lambda m, t: ""  # noqa: E731
+            _depth_rich_dir = lambda m, t, **k: ""  # noqa: E731
             _crystal_to = lambda m: None  # noqa: E731
             _rel_to = lambda m: None  # noqa: E731
             _stream_before_audit_fn = lambda m: False  # noqa: E731

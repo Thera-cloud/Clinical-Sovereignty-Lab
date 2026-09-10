@@ -3015,6 +3015,27 @@ async def lifespan(app: FastAPI):
     except Exception as _studio_as_err:
         print(f"   ⚠️  StudioScreenerAutoscaleAgent init failed: {_studio_as_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — attunement scorecard + auditor (8 checks, stagger 297s)
+    _attunement_scorecard_agent = None
+    _attunement_auditor = None
+    try:
+        from app.services.attunement_scorecard_agent import AttunementScorecardAgent
+        from app.services.attunement_auditor import AttunementAuditor
+        _attunement_scorecard_agent = AttunementScorecardAgent(db_pool, app_state=app.state)
+        _attunement_auditor = AttunementAuditor(
+            db_pool=db_pool,
+            notification_system=_notify_sys if _token_renewal_agent else None,
+            app_state=app.state,
+        )
+        if not _is_clone:
+            await _attunement_scorecard_agent.start()
+            await _attunement_auditor.start()
+        app.state.attunement_scorecard_agent = _attunement_scorecard_agent
+        app.state.attunement_auditor = _attunement_auditor
+        print("   ✅ AttunementScorecardAgent + AttunementAuditor started")
+    except Exception as _attune_err:
+        print(f"   ⚠️  Attunement init failed: {_attune_err}")
+
     # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
     _nate_checkin_agent = None
     try:
@@ -3842,6 +3863,8 @@ async def lifespan(app: FastAPI):
         ("ln_observer_auditor", _ln_observer_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("studio_auditor", _studio_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("studio_screener_autoscale", _studio_screener_autoscale is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("attunement_scorecard_agent", _attunement_scorecard_agent is not None),  # QUANTUM-CRYSTAL-ARCH
+        ("attunement_auditor", _attunement_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
         ("pgsd_heartbeat_agent", _pgsd_heartbeat_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_discernment_scorer", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_discernment_scorer is not None)),  # QUANTUM-CRYSTAL-ARCH
@@ -3961,6 +3984,20 @@ async def lifespan(app: FastAPI):
             print("   ✅ StudioScreenerAutoscaleAgent stopped")
         except Exception as _studio_as_stop:
             print(f"   ⚠️  StudioScreenerAutoscaleAgent shutdown: {_studio_as_stop}")
+    _attune_sc_h = getattr(app.state, "attunement_scorecard_agent", None)
+    if _attune_sc_h:
+        try:
+            await _attune_sc_h.stop()
+            print("   ✅ AttunementScorecardAgent stopped")
+        except Exception as _attune_sc_stop:
+            print(f"   ⚠️  AttunementScorecardAgent shutdown: {_attune_sc_stop}")
+    _attune_aud_h = getattr(app.state, "attunement_auditor", None)
+    if _attune_aud_h:
+        try:
+            await _attune_aud_h.stop()
+            print("   ✅ AttunementAuditor stopped")
+        except Exception as _attune_aud_stop:
+            print(f"   ⚠️  AttunementAuditor shutdown: {_attune_aud_stop}")
 
     # QUANTUM-CRYSTAL-ARCH — stop crystallizer loop + domain agents
     _cz_h = getattr(app.state, "nate_memory_crystallizer", None)

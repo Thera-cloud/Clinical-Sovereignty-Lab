@@ -242,9 +242,13 @@ async def fetch_pg_history_for_chat(
             if not rows:
                 return ""
             parts = []
+            _full = (os.getenv("BRIDGE_PG_HISTORY_FULL_TURNS", "true") or "").strip().lower() not in (
+                "0", "false", "no", "off",
+            )
+            _cap = 1500 if _full else 200  # QUANTUM-CRYSTAL-ARCH — attunement #6
             for r in reversed(rows):
-                u = (r["user_text"] or "")[:200]
-                a = (r["ai_text"] or "")[:200]
+                u = (r["user_text"] or "")[:_cap]
+                a = (r["ai_text"] or "")[:_cap]
                 ts = r["created_at"].strftime("%b %d") if r["created_at"] else ""
                 if u:
                     parts.append(f"[{ts}] Client: {u}")

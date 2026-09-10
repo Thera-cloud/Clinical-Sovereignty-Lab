@@ -613,6 +613,11 @@ async def recall_crystals_for_context(
         if anticipatory_section:
             lines.append(anticipatory_section)
         result = "\n".join(lines)
+        try:
+            from app.services.attunement.recall_cache import store_recall as _attune_store
+            _attune_store(str(user_uuid or hardware_id), query_text or "", result, crystal_ids)
+        except Exception:
+            pass
         # QUANTUM-CRYSTAL-ARCH: Commit 2 — expose which crystals were injected
         # so the bridge chat persist path can attribute the response to them.
         # Scopes always attach when crystals recalled (verifier needs them even
