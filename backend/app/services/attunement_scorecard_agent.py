@@ -94,10 +94,12 @@ class AttunementScorecardAgent:
         )
         SELECT
             COUNT(*)::int AS turns,
+            COUNT(*) FILTER (WHERE metadata ? 'attunement')::int AS instrumented,
             COUNT(*) FILTER (
                 WHERE LENGTH(user_text) >= 80 AND LENGTH(COALESCE(ai_text, '')) <= 20
             )::int AS collapse_n,
-            AVG(NULLIF((metadata->'attunement'->>'hold_cover')::float, 0)) AS hold_mean,
+            AVG((metadata->'attunement'->>'hold_cover')::float)
+                FILTER (WHERE metadata->'attunement' ? 'hold_cover') AS hold_mean,
             AVG(
                 CASE WHEN LENGTH(user_text) > 0
                      THEN LENGTH(COALESCE(ai_text, ''))::float / LENGTH(user_text)
@@ -125,12 +127,15 @@ class AttunementScorecardAgent:
             logger.warning("AttunementScorecardAgent compute: %s", e)
             return {"turns": 0, "error": str(e)[:120]}
         turns = int(row["turns"] or 0)
+        instrumented = int(row["instrumented"] or 0)
         collapse_n = int(row["collapse_n"] or 0)
         boiler_n = int(row["boiler_n"] or 0)
+        hold_raw = row["hold_mean"]
         return {
             "turns": turns,
+            "instrumented_turns": instrumented,
             "collapse_rate": round(collapse_n / turns, 4) if turns else 0.0,
-            "hold_cover_mean": round(float(row["hold_mean"] or 0.0), 4),
+            "hold_cover_mean": round(float(hold_raw), 4) if hold_raw is not None else None,
             "tempo_ratio": round(float(row["tempo_ratio"] or 0.0), 4),
             "boilerplate_per_100": round((boiler_n / turns) * 100, 2) if turns else 0.0,
             "greeting_on_open": int(row["greeting_n"] or 0),

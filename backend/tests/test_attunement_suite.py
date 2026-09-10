@@ -180,3 +180,14 @@ def test_auditor_expected_count():
 
     total = sum(len(t["endpoints"]) for t in TAB_ENDPOINTS)
     assert total == EXPECTED == 8
+
+
+def test_20_scorecard_baselines_instrumented_turns():
+    import inspect
+
+    from app.services.attunement_scorecard_agent import AttunementScorecardAgent
+
+    src = inspect.getsource(AttunementScorecardAgent._compute)
+    assert "instrumented" in src
+    assert "NULLIF" not in src
+    assert "FILTER (WHERE metadata" in src
