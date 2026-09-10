@@ -482,6 +482,26 @@ class NotificationSystem:
                                      coach_name: str, session_time: str,
                                      zoom_link: str = None) -> bool:
         """Send session reminder email."""
+        from app.services.calendar_invite import html_cta_fragment, safe_join_url
+
+        join = safe_join_url(zoom_link)
+        join_html = (
+            f"<p><a href='{join}' style='color: #22d3ee;'>Join Zoom at session time</a></p>"
+            if join else ""
+        )
+        cal_html = ""
+        try:
+            from app.services.calendar_invite import build_invite
+
+            invite = build_invite(
+                session_id="",
+                coach_name=coach_name or "your coach",
+                scheduled_start=session_time,
+                join_url=join,
+            )
+            cal_html = html_cta_fragment(invite)
+        except Exception:
+            cal_html = ""
         content = f"""
         <h2 style="color: #22d3ee;">Session Reminder</h2>
         
@@ -495,7 +515,8 @@ class NotificationSystem:
             <p style="font-size: 24px; color: #22d3ee; margin: 0;">{session_time}</p>
         </div>
         
-        {"<p><a href='" + zoom_link + "' style='color: #22d3ee;'>Click here to join the session</a></p>" if zoom_link else ""}
+        {join_html}
+        {cal_html}
         
         <p style="color: #94a3b8;">
             Please make sure you're in a quiet, private space for your session.

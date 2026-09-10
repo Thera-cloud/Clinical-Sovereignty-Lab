@@ -3,11 +3,12 @@ Scheduling & Session Management API Routes
 Handles appointment booking, calendar management, and session tracking
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, UploadFile, File, Form, Query
+from fastapi.responses import Response
 
 from app.services.api_server import get_current_user as _require_auth
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -436,7 +437,8 @@ async def _fetch_session_pg(request: Request, session_id: str) -> Optional[dict]
             row = await conn.fetchrow(
                 """
                 SELECT session_id, client_id, coach_id, client_name, status,
-                       scheduled_start, scheduled_end, zoom_meeting_id, session_data
+                       scheduled_start, scheduled_end, zoom_meeting_id,
+                       zoom_link, zoom_host_url, session_data
                 FROM coaching_sessions
                 WHERE session_id = $1
                 LIMIT 1
@@ -564,7 +566,11 @@ async def _send_session_link(request: Request, session: dict) -> dict:
     Returns a dict with per-channel delivery results.
     """
     result = {"email": False, "sms": False, "channels": []}
-    join_url = (session.get("zoom_link") or "").strip()
+    from app.services.calendar_invite import join_from_host_path, safe_join_url
+
+    join_url = safe_join_url(session.get("zoom_link"), session.get("join_url"))
+    if not join_url:
+        join_url = join_from_host_path(session.get("zoom_host_url") or "")
     result["has_zoom"] = bool(join_url)
 
     db = _get_db(request)
@@ -614,6 +620,10 @@ async def _send_session_link(request: Request, session: dict) -> dict:
                 coach_initials=coach_initials,
                 coach_credentials=coach.get("credentials") or "",
                 join_url=join_url,
+                session_id=str(session.get("session_id") or ""),
+                scheduled_start=session.get("scheduled_start") or start_iso,
+                scheduled_end=session.get("scheduled_end"),
+                client_id=client_id,
             )
             result["email"] = bool(ok)
             if ok:
@@ -984,6 +994,100 @@ async def expire_stale_sessions(request: Request):
         except Exception as e:
             _logger.warning("expire_stale_sessions: %s", e)
     return {"expired": expired_count}
+
+
+def _user_can_access_session(user: Dict[str, Any], session: dict) -> bool:
+    role = str(user.get("role") or "").upper()
+    if role == "ADMIN":
+        return True
+    ids = {
+        str(user.get("hardware_id") or ""),
+        str(user.get("username") or ""),
+        str(user.get("id") or ""),
+        str(user.get("user_id") or ""),
+    }
+    ids.discard("")
+    targets = {str(session.get("client_id") or ""), str(session.get("coach_id") or "")}
+    return bool(ids & targets)
+
+
+def _ics_response(invite) -> Response:
+    return Response(
+        content=invite.ics_bytes,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="sanctuary-session.ics"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/{session_id}/calendar.ics")
+async def download_session_calendar_ics(
+    request: Request,
+    session_id: str,
+    user: Dict = Depends(_require_auth),
+):
+    from app.services.calendar_invite import invite_from_session
+
+    session = await _fetch_session_pg(request, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if not _user_can_access_session(user, session):
+        raise HTTPException(403, "Access denied: you are not a participant in this session")
+    coach = await _lookup_coach_display(_get_db(request), session.get("coach_id") or "")
+    invite = invite_from_session(session, coach_name=coach.get("name") or "your coach")
+    if not invite:
+        raise HTTPException(400, "Session has no start time")
+    return _ics_response(invite)
+
+
+@router.get("/{session_id}/calendar-links")
+async def get_session_calendar_links(
+    request: Request,
+    session_id: str,
+    user: Dict = Depends(_require_auth),
+):
+    from app.services.calendar_invite import invite_from_session
+
+    session = await _fetch_session_pg(request, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if not _user_can_access_session(user, session):
+        raise HTTPException(403, "Access denied: you are not a participant in this session")
+    coach = await _lookup_coach_display(_get_db(request), session.get("coach_id") or "")
+    invite = invite_from_session(session, coach_name=coach.get("name") or "your coach")
+    if not invite:
+        raise HTTPException(400, "Session has no start time")
+    return {
+        "status": "ok",
+        "google_url": invite.google_url,
+        "outlook_url": invite.outlook_url,
+        "ics_url": invite.ics_url,
+        "join_url": invite.join_url,
+        "summary": invite.summary,
+    }
+
+
+@public_router.get("/calendar.ics")
+async def public_session_calendar_ics(request: Request, t: str = Query("")):
+    from app.services.calendar_invite import invite_from_session, verify_ics_token
+
+    parsed = verify_ics_token(t or "")
+    if not parsed:
+        raise HTTPException(400, "Calendar link invalid or expired")
+    session = await _fetch_session_pg(request, parsed["session_id"])
+    if not session:
+        raise HTTPException(404, "Session not found")
+    token_cid = parsed.get("client_id") or ""
+    sess_cid = str(session.get("client_id") or "")
+    if token_cid and sess_cid and token_cid != sess_cid:
+        raise HTTPException(403, "Calendar link does not match this session")
+    coach = await _lookup_coach_display(_get_db(request), session.get("coach_id") or "")
+    invite = invite_from_session(session, coach_name=coach.get("name") or "your coach")
+    if not invite:
+        raise HTTPException(400, "Session has no start time")
+    return _ics_response(invite)
 
 
 @router.get("/{session_id}")

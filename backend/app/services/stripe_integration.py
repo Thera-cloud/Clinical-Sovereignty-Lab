@@ -1368,7 +1368,10 @@ class StripeService:
                     coach_name=coach_row["name"] or "Your coach",
                     coach_initials=(coach_row["name"] or "C")[0],
                     coach_credentials="",
-                    join_url=f"https://app.sovereignsanctuary.net/session/{session_id}",
+                    join_url="",
+                    session_id=str(session_id or ""),
+                    scheduled_start=scheduled_at,
+                    client_id=str(user_id or ""),
                 )
         except Exception as email_err:
             print(f">>> [STRIPE] Coaching confirmation email error: {email_err}")

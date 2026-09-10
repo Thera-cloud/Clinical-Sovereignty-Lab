@@ -713,7 +713,7 @@ class NateCheckInAgent:
             async with self.db_pool.acquire() as conn:
                 upcoming = await conn.fetch(f"""
                     SELECT cs.id AS session_uuid, cs.session_id, cs.client_id, cs.coach_id,
-                           cs.scheduled_start, cs.zoom_link,
+                           cs.scheduled_start, cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
                            u_client.username AS client_username,
                            u_client.profile_data AS client_profile,
                            u_coach.username AS coach_username,
@@ -749,7 +749,11 @@ class NateCheckInAgent:
                     coach_name = coach_profile.get("name") or row["coach_username"]
                     client_email = client_profile.get("email")
                     coach_email = coach_profile.get("email")
-                    zoom_link = (row["zoom_link"] or "").strip()
+                    from app.services.calendar_invite import join_from_host_path, safe_join_url
+
+                    zoom_link = safe_join_url(row["zoom_link"]) or join_from_host_path(
+                        row.get("zoom_host_url") or ""
+                    )
 
                     client_start_str, client_tz = format_session_start_for_profile(
                         row["scheduled_start"], client_profile,
@@ -762,20 +766,32 @@ class NateCheckInAgent:
 
                     if (
                         client_email
-                        and self.notification_system
                         and self._session_reminders_enabled(client_profile)
                         and await self._claim_session_notification(
                             conn, session_uuid, notif_type, row["client_id"],
                         )
                     ):
-                        await self.notification_system._send_email(
+                        from app.services.notifications_service import EmailService
+
+                        email_ok = await EmailService().send_coaching_reminder(
                             client_email,
-                            f"Session reminder: {client_start_str}",
-                            f"Hi {client_name}, you have a coaching session with {coach_name} "
-                            f"{label_for_client} ({client_start_str}, {client_tz})."
-                            f"{join_line} See you there!",
-                            notification_type="session_reminder",
+                            client_start_str,
+                            coach_name,
+                            join_url=zoom_link,
+                            session_id=session_id,
+                            scheduled_start=row["scheduled_start"],
+                            scheduled_end=row.get("scheduled_end"),
+                            client_id=str(row["client_id"] or ""),
                         )
+                        if not email_ok and self.notification_system:
+                            await self.notification_system._send_email(
+                                client_email,
+                                f"Session reminder: {client_start_str}",
+                                f"Hi {client_name}, you have a coaching session with {coach_name} "
+                                f"{label_for_client} ({client_start_str}, {client_tz})."
+                                f"{join_line} See you there!",
+                                notification_type="session_reminder",
+                            )
                         sent_any = True
 
                     if (

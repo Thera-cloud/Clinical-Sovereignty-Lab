@@ -202,8 +202,9 @@ class SessionPaymentAgent:
             reminder_48h_start = now + timedelta(hours=47)
             reminder_48h_end = now + timedelta(hours=49)
             upcoming_48h = await conn.fetch(
-                f"""SELECT cs.id, cs.coach_id, cs.client_id,
+                f"""SELECT cs.id, cs.session_id, cs.coach_id, cs.client_id,
                           {_APPT_TIME} AS scheduled_at,
+                          cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
                           cs.payment_status,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
@@ -228,8 +229,9 @@ class SessionPaymentAgent:
 
             # Confirmation notifications for newly paid sessions
             newly_paid = await conn.fetch(
-                f"""SELECT cs.id, cs.client_id, cs.coach_id,
+                f"""SELECT cs.id, cs.session_id, cs.client_id, cs.coach_id,
                           {_APPT_TIME} AS scheduled_at,
+                          cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
                           u.profile_data->>'name' as client_name,
                           u.profile_data->>'email' as client_email,
                           u.profile_data->>'timezone' as client_timezone,
@@ -494,11 +496,15 @@ class SessionPaymentAgent:
                 if payment_status != "paid":
                     payment_note = "<p><strong>Payment reminder:</strong> Please ensure your payment is completed before the session. Sessions with outstanding payment may be cancelled within 24 hours.</p>"
 
+                from app.services.calendar_invite import html_cta_fragment, invite_from_session
+
+                invite = invite_from_session(session, coach_name=session.get("coach_name") or "your coach")
                 subject = "Session Reminder — 48 Hours"
                 body = f"""<p>Hello {client_name},</p>
 <p>This is a reminder that your coaching session is scheduled for <strong>{session_date}</strong>.</p>
 {payment_note}
 <p><strong>Cancellation policy:</strong> Cancel at least 24 hours before the session for a full refund. Cancellations inside 24 hours are not refundable.</p>
+{html_cta_fragment(invite, include_join=True)}
 <p>See you soon!<br>Sovereign Sanctuary</p>"""
 
                 await notify._send_email(client_email, subject, body)
@@ -526,11 +532,15 @@ class SessionPaymentAgent:
 
         if client_email:
             try:
+                from app.services.calendar_invite import html_cta_fragment, invite_from_session
+
+                invite = invite_from_session(session, coach_name=coach_name)
                 await notify._send_email(
                     client_email,
                     "Session Confirmed — Payment Received",
                     f"""<p>Hello {client_name},</p>
 <p>Your payment has been received. Your session on <strong>{session_date}</strong> is confirmed.</p>
+{html_cta_fragment(invite, include_join=True)}
 <p>Thank you,<br>Sovereign Sanctuary</p>""",
                 )
             except Exception as e:

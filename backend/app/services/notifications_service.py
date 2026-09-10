@@ -381,6 +381,7 @@ TEMPLATES = {
         .note { background: rgba(201, 169, 98, 0.1); border-left: 3px solid #C9A962; padding: 16px; margin-top: 24px; }
         .note p { margin: 0; color: #C9A962; font-size: 14px; }
         .cta { display: inline-block; background: #4ECDC4; color: #050505; text-decoration: none; padding: 14px 32px; font-size: 14px; letter-spacing: 1px; margin-top: 20px; }
+        .cta-cal { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 12px 20px; font-size: 13px; letter-spacing: 1px; margin: 8px 8px 0 0; }
         .footer { text-align: center; margin-top: 40px; color: #5A5A5A; font-size: 12px; }
     </style>
 </head>
@@ -420,6 +421,12 @@ TEMPLATES = {
             {% else %}
             <p>Your coach will share the meeting link before the session.</p>
             {% endif %}
+            {% if google_cal_url or outlook_cal_url or ics_url %}
+            <p style="margin-top:24px;color:#9A9A9A;">Add this appointment to your calendar. These links save the event — they do not start Zoom.</p>
+            {% if google_cal_url %}<a href="{{ google_cal_url }}" class="cta-cal">Add to Google Calendar</a>{% endif %}
+            {% if outlook_cal_url %}<a href="{{ outlook_cal_url }}" class="cta-cal">Add to Outlook</a>{% endif %}
+            {% if ics_url %}<a href="{{ ics_url }}" class="cta-cal">Apple Calendar / ICS</a>{% endif %}
+            {% endif %}
         </div>
         <div class="footer">
             <p>Need to reschedule? You can do so up to 24 hours before the session.</p>
@@ -447,6 +454,7 @@ TEMPLATES = {
         p { color: #9A9A9A; line-height: 1.8; margin-bottom: 20px; }
         .time-badge { display: inline-block; background: #4ECDC4; color: #050505; padding: 8px 16px; font-size: 14px; font-weight: 500; margin-bottom: 20px; }
         .cta { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 14px 32px; font-size: 14px; letter-spacing: 1px; }
+        .cta-cal { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 12px 20px; font-size: 13px; letter-spacing: 1px; margin: 8px 8px 0 0; }
     </style>
 </head>
 <body>
@@ -456,6 +464,52 @@ TEMPLATES = {
             <h1>Your session with {{ coach_name }}</h1>
             <p>Take a moment to reflect on what you'd like to explore. There's no need to prepare anything specific — just bring yourself.</p>
             <a href="{{ app_url }}" class="cta">Open Sanctuary</a>
+            {% if join_url %}
+            <p style="margin-top:16px;"><a href="{{ join_url }}" class="cta">Join Zoom</a></p>
+            {% endif %}
+            {% if google_cal_url or outlook_cal_url or ics_url %}
+            <p style="margin-top:24px;color:#9A9A9A;">Add this appointment to your calendar. These links save the event — they do not start Zoom.</p>
+            {% if google_cal_url %}<a href="{{ google_cal_url }}" class="cta-cal">Add to Google Calendar</a>{% endif %}
+            {% if outlook_cal_url %}<a href="{{ outlook_cal_url }}" class="cta-cal">Add to Outlook</a>{% endif %}
+            {% if ics_url %}<a href="{{ ics_url }}" class="cta-cal">Apple Calendar / ICS</a>{% endif %}
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+    },
+
+    "session_calendar_invite": {
+        "subject": "Add your Sanctuary session to your calendar — {{ date }}",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Georgia', serif; background: #050505; color: #F5F5F5; margin: 0; padding: 40px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .content { background: #111111; border: 1px solid #1A1A1A; padding: 40px; border-radius: 4px; }
+        h1 { font-weight: 300; font-size: 24px; color: #F5F5F5; margin-bottom: 20px; }
+        p { color: #9A9A9A; line-height: 1.8; margin-bottom: 16px; }
+        .cta { display: inline-block; background: #4ECDC4; color: #050505; text-decoration: none; padding: 14px 32px; font-size: 14px; letter-spacing: 1px; margin-top: 12px; }
+        .cta-cal { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 12px 20px; font-size: 13px; letter-spacing: 1px; margin: 8px 8px 0 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="content">
+            <h1>Your session is on the calendar.</h1>
+            <p>Hello {{ client_name }},</p>
+            <p>You have a session with <strong>{{ coach_name }}</strong> on <strong>{{ date }}</strong> at <strong>{{ time }}</strong> ({{ timezone }}).</p>
+            <p>Use the links below to save the appointment. They do not start Zoom.</p>
+            {% if google_cal_url %}<a href="{{ google_cal_url }}" class="cta-cal">Add to Google Calendar</a>{% endif %}
+            {% if outlook_cal_url %}<a href="{{ outlook_cal_url }}" class="cta-cal">Add to Outlook</a>{% endif %}
+            {% if ics_url %}<a href="{{ ics_url }}" class="cta-cal">Apple Calendar / ICS</a>{% endif %}
+            {% if join_url %}
+            <p style="margin-top:24px;">When it is time, join here (separate from adding the event):</p>
+            <a href="{{ join_url }}" class="cta">Join Zoom</a>
+            {% endif %}
         </div>
     </div>
 </body>
@@ -698,6 +752,7 @@ class EmailService:
         from_email: str = FROM_EMAIL,
         from_name: str = FROM_NAME,
         transit_guardian=None,
+        ics_bytes: Optional[bytes] = None,
     ) -> bool:
         """Send email using template. Optionally inspects for PII via Transit Guardian."""
         
@@ -733,6 +788,14 @@ class EmailService:
             "subject": subject,
             "content": [{"type": "text/html", "value": html_content}],
         }
+        if ics_bytes:
+            import base64
+            payload["attachments"] = [{
+                "content": base64.b64encode(ics_bytes).decode("ascii"),
+                "filename": "sanctuary-session.ics",
+                "type": "text/calendar",
+                "disposition": "attachment",
+            }]
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -891,29 +954,129 @@ class EmailService:
             "accept_url": accept_url
         })
     
+    def _calendar_fields(
+        self,
+        *,
+        join_url: str = "",
+        session_id: str = "",
+        scheduled_start=None,
+        scheduled_end=None,
+        client_id: str = "",
+        coach_name: str = "",
+        include_calendar: bool = True,
+    ) -> tuple:
+        from app.services.calendar_invite import (
+            build_invite,
+            email_context,
+            safe_join_url,
+        )
+
+        safe_join = safe_join_url(join_url)
+        extra = {
+            "join_url": safe_join,
+            "google_cal_url": "",
+            "outlook_cal_url": "",
+            "ics_url": "",
+        }
+        ics = None
+        if include_calendar and scheduled_start and str(scheduled_start).lower() != "cancelled":
+            invite = build_invite(
+                session_id=session_id or "",
+                coach_name=coach_name or "your coach",
+                scheduled_start=scheduled_start,
+                scheduled_end=scheduled_end,
+                join_url=safe_join,
+                client_id=client_id or "",
+            )
+            extra.update(email_context(invite))
+            extra["join_url"] = safe_join or (invite.join_url if invite else "")
+            ics = invite.ics_bytes if invite else None
+        return extra, ics
+
     async def send_coaching_confirmation(
         self, to_email: str,
         date: str, time: str, timezone: str,
         coach_name: str, coach_initials: str, coach_credentials: str,
-        join_url: str
+        join_url: str,
+        session_id: str = "",
+        scheduled_start=None,
+        scheduled_end=None,
+        client_id: str = "",
     ) -> bool:
-        return await self.send_email(to_email, "coaching_confirmation", {
+        extra, ics = self._calendar_fields(
+            join_url=join_url,
+            session_id=session_id,
+            scheduled_start=scheduled_start,
+            scheduled_end=scheduled_end,
+            client_id=client_id,
+            coach_name=coach_name,
+        )
+        ctx = {
             "date": date,
             "time": time,
             "timezone": timezone,
             "coach_name": coach_name,
             "coach_initials": coach_initials,
             "coach_credentials": coach_credentials,
-            "join_url": join_url
-        })
+            **extra,
+        }
+        return await self.send_email(to_email, "coaching_confirmation", ctx, ics_bytes=ics)
     
     async def send_coaching_reminder(
-        self, to_email: str, time: str, coach_name: str
+        self, to_email: str, time: str, coach_name: str,
+        join_url: str = "",
+        session_id: str = "",
+        scheduled_start=None,
+        scheduled_end=None,
+        client_id: str = "",
     ) -> bool:
+        cancelled = str(time).lower() == "cancelled"
+        extra, ics = self._calendar_fields(
+            join_url=join_url,
+            session_id=session_id,
+            scheduled_start=None if cancelled else scheduled_start,
+            scheduled_end=scheduled_end,
+            client_id=client_id,
+            coach_name=coach_name,
+            include_calendar=not cancelled,
+        )
         return await self.send_email(to_email, "coaching_reminder", {
             "time": time,
-            "coach_name": coach_name
-        })
+            "coach_name": coach_name,
+            **extra,
+        }, ics_bytes=None if cancelled else ics)
+
+    async def send_session_calendar_invite(
+        self,
+        to_email: str,
+        *,
+        client_name: str,
+        date: str,
+        time: str,
+        timezone: str,
+        coach_name: str,
+        join_url: str = "",
+        session_id: str = "",
+        scheduled_start=None,
+        scheduled_end=None,
+        client_id: str = "",
+    ) -> bool:
+        extra, ics = self._calendar_fields(
+            join_url=join_url,
+            session_id=session_id,
+            scheduled_start=scheduled_start,
+            scheduled_end=scheduled_end,
+            client_id=client_id,
+            coach_name=coach_name,
+        )
+        return await self.send_email(to_email, "session_calendar_invite", {
+            "client_name": client_name or "there",
+            "date": date,
+            "time": time,
+            "timezone": timezone,
+            "coach_name": coach_name,
+            **extra,
+        }, ics_bytes=ics)
 
 
 # =============================================================================
@@ -1027,7 +1190,9 @@ class NotificationScheduler:
         sessions = await self.db.fetch(
             """
             SELECT 
-                cs.id, cs.scheduled_at,
+                cs.id, cs.session_id, cs.client_id,
+                COALESCE(cs.scheduled_start, cs.scheduled_at) AS scheduled_at,
+                cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
                 COALESCE(c.profile_data->>'email', '') as client_email,
                 COALESCE(c.profile_data->>'timezone', '') as client_timezone,
                 COALESCE(coach.profile_data->>'name', coach.username) as coach_name
@@ -1056,7 +1221,12 @@ class NotificationScheduler:
             await self.email.send_coaching_reminder(
                 session['client_email'],
                 time_str,
-                session['coach_name']
+                session['coach_name'],
+                join_url=session.get("zoom_link") or "",
+                session_id=str(session.get("session_id") or ""),
+                scheduled_start=scheduled,
+                scheduled_end=session.get("scheduled_end"),
+                client_id=str(session.get("client_id") or ""),
             )
             
             await self.db.execute(

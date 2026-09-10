@@ -35,6 +35,7 @@ import 'widgets/calendar_views.dart';
 import 'services/device_shield.dart';
 import 'services/nevedal_flutter.dart';
 import 'config/app_config.dart';
+import 'utils/session_calendar_links.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/upload_progress_indicator.dart';
@@ -12696,9 +12697,105 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
     } catch (_) { return ''; }
   }
 
+  Future<void> _showAddToCalendar(Map<String, dynamic> session) async {
+    final sid = (session['session_id'] ?? '').toString();
+    final coachName = (session['coach_name'] ?? 'your coach').toString();
+    final startRaw = (session['scheduled_start'] ?? '').toString();
+    final endRaw = (session['scheduled_end'] ?? '').toString();
+    final token = (widget.currentUserProfile?['token'] ?? '').toString();
+    DateTime? start;
+    DateTime? end;
+    try {
+      start = DateTime.parse(startRaw);
+      if (endRaw.isNotEmpty) end = DateTime.parse(endRaw);
+    } catch (_) {}
+    end ??= (start ?? DateTime.now()).add(Duration(
+      minutes: session['duration_minutes'] is int
+          ? session['duration_minutes'] as int
+          : int.tryParse('${session['duration_minutes'] ?? ''}') ?? 50,
+    ));
+    final join = SessionCalendarLinks.safeJoinUrl((session['zoom_link'] ?? '').toString());
+    final summary = 'Sanctuary session with $coachName';
+    final details = join.isEmpty
+        ? 'Coaching session with $coachName.\nAdd this event to your calendar. Do not use this link to start Zoom.'
+        : 'Coaching session with $coachName.\nAdd this event to your calendar. Do not use this link to start Zoom.\n\nJoin Zoom at session time:\n$join';
+    String icsUrl = '';
+    if (sid.isNotEmpty && token.isNotEmpty) {
+      try {
+        final resp = await http.get(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/sessions/$sid/calendar-links'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body);
+          icsUrl = (data['ics_url'] ?? '').toString();
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Add to calendar',
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text('These links save the event. They do not start Zoom.',
+                    style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 12)),
+                const SizedBox(height: 16),
+                if (start != null)
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: const Color(0xFF050505)),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      SessionCalendarLinks.open(SessionCalendarLinks.googleTemplate(
+                        summary: summary, start: start!, end: end!, details: details,
+                      ));
+                    },
+                    child: const Text('Google Calendar'),
+                  ),
+                const SizedBox(height: 8),
+                if (start != null)
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B7355), foregroundColor: Colors.white),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      SessionCalendarLinks.open(SessionCalendarLinks.outlookTemplate(
+                        summary: summary, start: start!, end: end!, details: details,
+                      ));
+                    },
+                    child: const Text('Outlook'),
+                  ),
+                const SizedBox(height: 8),
+                if (icsUrl.isNotEmpty)
+                  OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      SessionCalendarLinks.open(Uri.parse(icsUrl));
+                    },
+                    child: const Text('Apple Calendar / ICS', style: TextStyle(color: Color(0xFFC9A962))),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildSessionCard(Map<String, dynamic> session) {
     final start = (session['scheduled_start'] ?? '').toString();
-    final zoomLink = (session['zoom_link'] ?? '').toString();
+    final zoomLink = SessionCalendarLinks.safeJoinUrl((session['zoom_link'] ?? '').toString());
     final status = (session['status'] ?? 'scheduled').toString();
     final coachName = (session['coach_name'] ?? 'Coach').toString();
     final notes = (session['notes'] ?? '').toString();
@@ -12853,6 +12950,21 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
               ),
             ],
           ),
+          if (status != 'pending_approval' && status != 'cancelled' && status != 'declined') ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.event_available, size: 16, color: Color(0xFFC9A962)),
+                label: const Text('Add to Calendar', style: TextStyle(fontSize: 12, color: Color(0xFFC9A962))),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFC9A962)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                onPressed: () => _showAddToCalendar(session),
+              ),
+            ),
+          ],
         ],
       ),
     );
