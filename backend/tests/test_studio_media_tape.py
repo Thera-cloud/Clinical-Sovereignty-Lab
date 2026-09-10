@@ -103,8 +103,10 @@ def test_webhook_jwt_and_stamp_gate():
     assert _lk.verify_livekit_webhook(f"Bearer {wrong}", raw).get("reason") == "bad_body_hash"
     assert bad.count(".") == 2
     src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
-    assert "plan.get(\"started\") and plan.get(\"egress_id\")" in src
     assert "verify_livekit_webhook" in src
+    assert "start_session_egress" in src
+    tier2 = (ROOT / "backend/app/services/studio_tier2.py").read_text()
+    assert 'plan.get("started") and plan.get("egress_id")' in tier2
 
 
 def test_migration_431_and_routes():
