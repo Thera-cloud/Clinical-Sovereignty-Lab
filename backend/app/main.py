@@ -2987,7 +2987,7 @@ async def lifespan(app: FastAPI):
     except Exception as _ln_oa_err:
         print(f"   ⚠️  LNObserverAuditor init failed: {_ln_oa_err}")
 
-    # QUANTUM-CRYSTAL-ARCH — Sovereign Studio auditor (15 checks, stagger 296s)
+    # QUANTUM-CRYSTAL-ARCH — Sovereign Studio auditor (19 checks, stagger 296s)
     _studio_auditor = None
     try:
         from app.services.studio_auditor import StudioAuditor

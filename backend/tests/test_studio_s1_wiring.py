@@ -37,9 +37,12 @@ def test_api_prefix_is_studio_not_sse():
     assert 'prefix="/api/sse/admin/studio"' in sse
 
 
-def test_auditor_has_15_checks():
+def test_auditor_has_19_checks():
     total = sum(len(t["endpoints"]) for t in TAB_ENDPOINTS)
-    assert total == 15
+    assert total == 19
+    tabs = {t["tab"] for t in TAB_ENDPOINTS}
+    assert "Booth / Live" in tabs
+    assert (ROOT / "backend/migrations/433_studio_check_count_19.sql").is_file()
 
 
 def test_mirror_has_seven_parts():

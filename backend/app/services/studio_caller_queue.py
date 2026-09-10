@@ -26,6 +26,46 @@ def caller_identity(caller_uuid: str) -> str:
     return f"caller-{raw}" if raw else "caller-unknown"
 
 
+def is_phone_identity(ident: str) -> bool:
+    return (ident or "").strip().startswith("caller-")
+
+
+def merge_board_snapshot(
+    waiting: List[str],
+    active: Optional[str],
+    snapshot_waiting: Optional[List[str]],
+    snapshot_active: Optional[str],
+) -> tuple:
+    """Keep SIP caller-* rows when a LiveKit booth snapshot would overwrite them."""
+    waiting = [str(w).strip() for w in waiting if str(w).strip()]
+    active_s = (str(active).strip() if active else "") or None
+    phone_wait = [w for w in waiting if is_phone_identity(w)]
+    phone_active = active_s if active_s and is_phone_identity(active_s) else None
+
+    out_wait = list(waiting)
+    out_active = active_s
+
+    if snapshot_waiting is not None:
+        web = [str(w).strip() for w in snapshot_waiting if str(w).strip()]
+        seen = set(web)
+        out_wait = list(dict.fromkeys(web + [p for p in phone_wait if p not in seen]))
+
+    if snapshot_active is not None:
+        snap_a = (snapshot_active or "").strip() or None
+        if snap_a:
+            if phone_active and snap_a != phone_active and phone_active not in out_wait:
+                out_wait = [phone_active] + [w for w in out_wait if w != phone_active]
+            out_active = snap_a
+            out_wait = [w for w in out_wait if w != snap_a]
+        elif phone_active:
+            out_active = phone_active
+            out_wait = [w for w in out_wait if w != phone_active]
+        else:
+            out_active = None
+
+    return out_wait, out_active
+
+
 def empty_queue() -> Dict[str, Any]:
     return {"active": None, "waiting": [], "labels": {}}
 
@@ -237,10 +277,9 @@ async def apply_queue_op(
             if str(active or "") == hang_id:
                 active = None
     elif op == "sync":
-        if snapshot_waiting is not None:
-            waiting = [str(w).strip() for w in snapshot_waiting if str(w).strip()]
-        if snapshot_active is not None:
-            active = (snapshot_active or "").strip() or None
+        waiting, active = merge_board_snapshot(
+            waiting, active, snapshot_waiting, snapshot_active
+        )
 
     q = {"active": active, "waiting": waiting, "labels": labels}
     await _save_queue(redis, session_id, q)

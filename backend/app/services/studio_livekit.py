@@ -19,7 +19,7 @@ DELAY_S = 45
 EGRESS_HTTP_TIMEOUT_S = 30
 _EGRESS_ACTIVE = {0, 1, 2, "0", "1", "2", "EGRESS_STARTING", "EGRESS_ACTIVE", "EGRESS_ENDING"}
 
-_ROOM_FILE = Path(__file__).with_name("studio_livekit_room.html")
+_ROOM_FILE = Path(__file__).with_name("studio_nate_room.html")
 ROOM_HTML = _ROOM_FILE.read_text(encoding="utf-8") if _ROOM_FILE.is_file() else ""
 
 
@@ -38,7 +38,7 @@ def room_embed_url(lk_url: str, token: str, role: str, session_id: str = "") -> 
             "api": api,
         }
     )
-    return f"{room_origin()}/studio_nate_room.html?v=20260909a#{q}"
+    return f"{room_origin()}/studio_nate_room.html?v=20260909b#{q}"
 
 
 def verify_livekit_jwt(token: str) -> Dict[str, Any]:

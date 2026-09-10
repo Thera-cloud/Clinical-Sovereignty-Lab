@@ -716,10 +716,10 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
             const SnackBar(content: Text('Could not read that file')));
         return;
       }
-      if (bytes.length > 8 * 1024 * 1024) {
+      if (bytes.length > 32 * 1024 * 1024) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('File is over 8 MB')));
+            const SnackBar(content: Text('File is over 32 MB')));
         return;
       }
       setState(() => _busy = true);

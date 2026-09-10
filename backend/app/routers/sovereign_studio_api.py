@@ -415,48 +415,9 @@ async def join_token(session_id: UUID, request: Request, user: Dict = Depends(re
 @router.post("/sessions/{session_id}/egress")
 async def start_egress(session_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
-    from app.services.studio_livekit import start_room_egress
+    from app.services.studio_tier2 import start_session_egress
 
-    rtmp = ""
-    unlocked = False
-    pool = _pool(request)
-    if pool:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT sh.rtmp_url,
-                  (SELECT COUNT(*) FROM studio_episodes e
-                    WHERE e.show_id = sh.id AND e.state = 'published'
-                      AND NOT EXISTS (
-                        SELECT 1 FROM studio_compliance_flags f
-                        WHERE f.episode_id = e.id AND f.status = 'open'
-                      )
-                  ) AS clean_published
-                FROM studio_sessions s
-                JOIN studio_shows sh ON sh.id = s.show_id
-                WHERE s.id = $1::uuid AND sh.coach_id = $2
-                """,
-                str(session_id),
-                _hw(user),
-            )
-        if not row:
-            raise HTTPException(404, "not_found")
-        rtmp = row["rtmp_url"] or ""
-        from app.services.studio_invariants import live_tier_unlocked
-
-        unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
-    plan = await start_room_egress(str(session_id), rtmp_url=rtmp, live_unlocked=unlocked)
-    if plan.get("started") and plan.get("egress_id") and plan.get("media_r2_key"):
-        from app.services.studio_media_tape import stamp_session_tape
-
-        await stamp_session_tape(
-            pool,
-            str(session_id),
-            media_r2_key=str(plan.get("media_r2_key") or ""),
-            egress_id=str(plan.get("egress_id") or ""),
-            ready=False,
-        )
-    return plan
+    return _raise(await start_session_egress(_pool(request), str(session_id), _hw(user)))
 
 
 @router.post("/sessions/{session_id}/share-asset")
@@ -514,6 +475,40 @@ async def add_leg(session_id: UUID, request: Request, user: Dict = Depends(requi
     if not check.get("ok"):
         return _raise(check)
     return {"ok": True, "session_id": str(session_id), "role": body.get("role")}
+
+
+@router.post("/sessions/{session_id}/lookup")
+async def coach_lookup(
+    session_id: UUID,
+    body: CohostShareBody,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    _flag()
+    pool = _pool(request)
+    if not pool:
+        raise HTTPException(503, "no_db")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT s.id FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE s.id = $1::uuid AND sh.coach_id = $2
+            """,
+            str(session_id),
+            _hw(user),
+        )
+    if not row:
+        raise HTTPException(404, "not_found")
+    from app.services.studio_cohost_share import host_search, host_url_card
+
+    kind = (body.kind or "search").strip().lower()
+    if kind == "url":
+        return _raise(host_url_card(body.url or body.query))
+    if kind != "search":
+        raise HTTPException(422, "kind")
+    proxy = getattr(request.app.state, "search_proxy", None)
+    return _raise(await host_search(proxy, body.query or body.url, _hw(user)))
 
 
 @router.post("/sessions/{session_id}/ln-scan")
@@ -869,10 +864,87 @@ async def booth_dump(session_id: UUID, request: Request):
 @public_router.post("/sessions/{session_id}/booth/guest-link")
 async def booth_guest_link(session_id: UUID, request: Request):
     _flag()
-    _require_host_jwt(request, session_id)
+    checked = _require_host_jwt(request, session_id)
     from app.services.studio_livekit import join_token as _join
+    from app.services.studio_tier2 import booth_status as _status
 
-    return _join(str(session_id), "guest")
+    hid = str(checked.get("identity") or "")
+    token = _join(str(session_id), "guest")
+    status = await _status(_pool(request), str(session_id), hid)
+    did = (status.get("did_e164") or "") if status.get("ok") else ""
+    token["did_e164"] = did
+    token["sms_did"] = did
+    token["screener"] = True
+    token["screener_note"] = (
+        f"Call or text {did} — screener then waiting room."
+        if did
+        else "No show DID yet. Web guest link below."
+    )
+    token["rss_url"] = (status.get("rss_url") or "") if status.get("ok") else ""
+    token["show_id"] = (status.get("show_id") or "") if status.get("ok") else ""
+    return token
+
+
+@public_router.post("/sessions/{session_id}/booth/egress")
+async def booth_egress(session_id: UUID, request: Request):
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_tier2 import start_session_egress
+
+    return _raise(
+        await start_session_egress(
+            _pool(request), str(session_id), str(checked.get("identity") or "")
+        )
+    )
+
+
+@public_router.post("/sessions/{session_id}/booth/ln-scan")
+async def booth_ln_scan(session_id: UUID, body: ScanBody, request: Request):
+    _flag()
+    _require_host_jwt(request, session_id)
+    from app.services.studio_compliance import prescan_outgoing
+
+    out = prescan_outgoing(body.text)
+    out["session_id"] = str(session_id)
+    return out
+
+
+@public_router.post("/sessions/{session_id}/booth/legs")
+async def booth_legs(session_id: UUID, request: Request):
+    _flag()
+    _require_host_jwt(request, session_id)
+    from app.services.studio_livekit import reject_guest_video
+
+    body: Dict[str, Any] = {}
+    try:
+        raw = await request.json()
+        if isinstance(raw, dict):
+            body = raw
+    except Exception:
+        body = {}
+    check = reject_guest_video(str(body.get("role") or ""), body.get("video_track_key"))
+    if not check.get("ok"):
+        return _raise(check)
+    return {"ok": True, "session_id": str(session_id), "role": body.get("role")}
+
+
+@public_router.put("/sessions/{session_id}/booth/style")
+async def booth_style(session_id: UUID, body: StyleBody, request: Request):
+    _flag()
+    checked = _require_host_jwt(request, session_id)
+    from app.services.studio_show_service import get_show as _get, update_style
+    from app.services.studio_tier2 import booth_status as _status
+
+    hid = str(checked.get("identity") or "")
+    status = await _status(_pool(request), str(session_id), hid)
+    if not status.get("ok"):
+        return _raise(status)
+    shown = await _get(_pool(request), str(status.get("show_id") or ""), hid)
+    if not shown.get("ok"):
+        return _raise(shown)
+    layer = dict((shown.get("show") or {}).get("persona_style_layer") or {})
+    layer.update(body.style or {})
+    return _raise(await update_style(_pool(request), str(status.get("show_id") or ""), hid, layer))
 
 
 @public_router.post("/sessions/{session_id}/cohost/turn")

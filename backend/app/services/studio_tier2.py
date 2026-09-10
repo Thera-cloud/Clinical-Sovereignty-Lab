@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any, Dict
 
 from app.services.studio_invariants import LIVE_TIER_CLEAN_EPISODES, live_tier_unlocked
@@ -28,7 +30,8 @@ async def booth_status(db_pool, session_id: str, coach_id: str) -> Dict[str, Any
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT s.id, sh.id AS show_id, sh.rtmp_url,
+            SELECT s.id, sh.id AS show_id, sh.rtmp_url, sh.did_e164,
+                   sh.persona_style_layer, s.egress_id,
               (SELECT COUNT(*) FROM studio_episodes e
                 WHERE e.show_id = sh.id AND e.state = 'published'
                   AND NOT EXISTS (
@@ -47,12 +50,70 @@ async def booth_status(db_pool, session_id: str, coach_id: str) -> Dict[str, Any
         return {"ok": False, "reason": "not_found", "code": 404}
     unlocked = dump_allowed(int(row["clean_published"] or 0))
     rtmp = (row.get("rtmp_url") or "").strip()
+    did = (row.get("did_e164") or "").strip()
+    style = row.get("persona_style_layer") or {}
+    if isinstance(style, str):
+        try:
+            style = json.loads(style)
+        except Exception:
+            style = {}
+    if not isinstance(style, dict):
+        style = {}
+    show_id = str(row["show_id"])
+    api = os.getenv("STUDIO_API_ORIGIN", "https://api.sovereignsanctuary.net").rstrip("/")
     out = delay_status(unlocked)
     out["session_id"] = session_id
-    out["show_id"] = str(row["show_id"])
+    out["show_id"] = show_id
     out["rtmp_url_set"] = bool(rtmp)
     out["rtmp"] = "set" if rtmp else "pending"
+    out["did_e164"] = did
+    out["sms_did"] = did
+    out["persona_style"] = style
+    out["rss_url"] = f"{api}/api/studio/feeds/{show_id}/rss" if show_id else ""
+    out["egress_id"] = str(row["egress_id"] or "") if row.get("egress_id") else ""
+    out["egress"] = "active" if out["egress_id"] else "pending"
     return out
+
+
+async def start_session_egress(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]:
+    from app.services.studio_livekit import start_room_egress
+    from app.services.studio_media_tape import stamp_session_tape
+
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT sh.rtmp_url,
+              (SELECT COUNT(*) FROM studio_episodes e
+                WHERE e.show_id = sh.id AND e.state = 'published'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM studio_compliance_flags f
+                    WHERE f.episode_id = e.id AND f.status = 'open'
+                  )
+              ) AS clean_published
+            FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE s.id = $1::uuid AND sh.coach_id = $2
+            """,
+            session_id,
+            coach_id,
+        )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    rtmp = row["rtmp_url"] or ""
+    unlocked = live_tier_unlocked(int(row["clean_published"] or 0))
+    plan = await start_room_egress(session_id, rtmp_url=rtmp, live_unlocked=unlocked)
+    plan["ok"] = True
+    if plan.get("started") and plan.get("egress_id") and plan.get("media_r2_key"):
+        await stamp_session_tape(
+            db_pool,
+            session_id,
+            media_r2_key=str(plan.get("media_r2_key") or ""),
+            egress_id=str(plan.get("egress_id") or ""),
+            ready=False,
+        )
+    return plan
 
 
 async def store_rtmp(db_pool, show_id: str, coach_id: str, rtmp_url: str) -> Dict[str, Any]:

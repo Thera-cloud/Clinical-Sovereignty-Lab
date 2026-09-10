@@ -24,6 +24,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #shareBox .card{background:#111;border:1px solid #333;border-radius:6px;padding:8px;margin:0 0 8px;color:#E8D5A3;font-size:12px}
 #shareBox .card a{color:#4ECDC4}
 #shareBox img.share-img,#shareBox object.share-doc,#shareBox iframe.share-doc{position:absolute;inset:0;width:100%;height:100%;border:0;object-fit:contain;background:#050505;z-index:1}
+#shareBox video[controls]{z-index:2}
 #rail{display:flex;flex-direction:column;gap:8px;min-height:0;background:#111;border:1px solid #222;border-radius:8px;padding:8px}
 #joinCall{text-align:center;font-size:11px;letter-spacing:1px;color:#C9A962;border:1px solid #C9A962;border-radius:6px;padding:8px;cursor:pointer}
 #activeCard{flex:1.1;min-height:110px;background:#0A0A0A;border:1px solid #C9A962;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
@@ -70,6 +71,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #dock button.warn{border-color:#EF4444;color:#EF4444}
 #dock .meta{color:#8B7355;font-size:11px;align-self:center}
 #sfxIn{display:none;width:110px;background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px}
+#styleSel{background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px;max-width:120px}
 @media (max-width:960px){
   #stage{grid-template-columns:1fr;grid-template-rows:auto auto auto}
   #hosts{grid-template-columns:1fr;min-height:280px}
@@ -91,7 +93,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260909a" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260909b" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
     <div class="tile" id="shareTile"><h3>ON SCREEN <button type="button" id="btnShareClose">Close</button></h3><div id="shareTabs"><button type="button" id="tabShareScreen" data-share="screen">Screen</button><button type="button" id="tabShareImage" data-share="image">Image</button><button type="button" id="tabShareDoc" data-share="doc">Document</button><button type="button" id="tabShareVideo" data-share="video">Video</button><button type="button" id="tabShareLookup" data-share="lookup">Lookup</button></div><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or look it up</div></div></div>
   </div>
   <aside id="rail">
@@ -124,7 +126,14 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   <button id="btnFile" type="button">File</button>
   <button id="btnLookup" type="button">Look up</button>
   <button id="btnSfx" type="button">Sound</button>
-  <input id="sfxIn" type="text" maxlength="48" placeholder="any word" autocomplete="off"/>
+  <input id="sfxIn" type="text" maxlength="48" placeholder="any word" autocomplete="off" list="sfxList"/>
+  <datalist id="sfxList"></datalist>
+  <select id="styleSel">
+    <option value="">Persona tone</option>
+    <option value="warm">Warm</option>
+    <option value="neutral">Neutral</option>
+    <option value="punchy">Punchy</option>
+  </select>
   <input id="shareFile" type="file" accept="image/*,video/*,.pdf,.txt,.doc,.docx,.md,.mp4,.webm,.mov" hidden/>
   <input id="shareFileImage" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden/>
   <input id="shareFileDoc" type="file" accept=".pdf,.txt,.doc,.docx,.md,application/pdf,text/plain" hidden/>
@@ -159,6 +168,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var sharePub = null, shareAudioPub = null, shareStream = null, shareObjUrl = '', sfxCtx = null;
   var shareFrameTimer = 0, shareFrameArmed = false;
   var queueSelf = false, lastNateMs = 0, dumpArmed = false, nateTurnAt = 0;
+  var queueLabels = {};
   var lookupQuery = '';
   function holdFloorMs(text){
     var t = (text || '').replace(/\s+/g, ' ').trim();
@@ -343,8 +353,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function callerName(id){
     var s = String(id || 'caller');
+    if (queueLabels[s]) return queueLabels[s];
     var cut = s.replace(/^(guest|caller)[-_]?/i, '').replace(/[_-]+/g, ' ').trim();
     return cut || s;
+  }
+  function hasSpeechRec(){
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   }
   function promptedIds(){ return waiting.slice(0, PROMPT_N); }
   function hiddenWaitCount(){ return Math.max(0, waiting.length - promptedIds().length); }
@@ -402,7 +416,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
       body: JSON.stringify(body)
-    }).catch(function(){}).then(function(){ queueSelf = false; });
+    }).then(function(r){ return r && r.json ? r.json() : null; }).then(function(j){
+      queueSelf = false;
+      if (j && j.ok && j.queue) applyQueue(j.queue);
+    }).catch(function(){ queueSelf = false; });
   }
   function broadcastQueue(){
     if (guest) return;
@@ -413,8 +430,20 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!msg) return;
     activeId = msg.active || '';
     waiting = Array.isArray(msg.waiting) ? msg.waiting.slice() : waiting;
+    if (msg.labels && typeof msg.labels === 'object'){
+      for (var k in msg.labels) if (Object.prototype.hasOwnProperty.call(msg.labels, k))
+        queueLabels[k] = msg.labels[k];
+    }
     syncCallerAudio();
     renderWait();
+  }
+  function boothLegs(role){
+    if (guest || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/legs', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({role: role || 'caller'})
+    }).catch(function(){});
   }
   function enqueue(id){
     if (!id || id === activeId) return;
@@ -439,6 +468,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     syncCallerAudio();
     renderWait();
     broadcastQueue();
+    if (!guest && activeId) boothLegs('caller');
     if (!guest && activeId && !lnPaused){
       setStatus(callerName(activeId) + ' is on air.');
       nateTurn(callerName(activeId) + ' just came on.', false, 'caller_join');
@@ -727,7 +757,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function startCap(id){
     if (guest || lnPaused || !cfg.session || !cfg.token || capRecs[id]) return;
-    if (listenOn && room && room.localParticipant && id === room.localParticipant.identity) return;
+    if (listenOn && hasSpeechRec() && room && room.localParticipant && id === room.localParticipant.identity) return;
     var mst = audioTracks[id];
     if (!mst || !window.MediaRecorder) return;
     var stream = new MediaStream([mst]);
@@ -1033,8 +1063,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function pushShareAsset(file){
     if (guest || !file || !cfg.session || !cfg.token) return Promise.resolve();
-    if (file.size > 8 * 1024 * 1024){
-      setStatus('File is too large for Nate to ingest (8 MB max).');
+    if (file.size > 32 * 1024 * 1024){
+      setStatus('File is too large for Nate to ingest (32 MB max).');
       return Promise.resolve();
     }
     var fd = new FormData();
@@ -1073,7 +1103,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     vid.srcObject = null;
     vid.src = url;
     vid.muted = true;
-    vid.loop = true;
+    vid.loop = false;
+    vid.controls = true;
     vid.onloadeddata = function(){
       shareLayout(true);
       showShareEmpty(true);
@@ -1111,11 +1142,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var low = (file.name || '').toLowerCase();
     if (type === 'application/pdf' || low.slice(-4) === '.pdf'){
       shareObjUrl = URL.createObjectURL(file);
-      var obj = document.createElement('object');
-      obj.className = 'share-doc';
-      obj.type = 'application/pdf';
-      obj.data = shareObjUrl;
-      document.getElementById('shareBox').appendChild(obj);
+      var frame = document.createElement('iframe');
+      frame.className = 'share-doc';
+      frame.src = shareObjUrl;
+      document.getElementById('shareBox').appendChild(frame);
     }
     document.getElementById('btnShare').textContent = 'Stop share';
     document.getElementById('btnShare').classList.add('on');
@@ -1300,7 +1330,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var lag = lastNateMs ? ('Nate last reply ' + (lastNateMs / 1000).toFixed(1) + 's') : 'Nate reply —';
     var rtmp = (extra && extra.rtmp) || 'pending';
     var delay = (extra && extra.delay_s) || 45;
-    el.textContent = 'Dump delay ' + delay + 's · ' + lag + ' · RTMP ' + rtmp;
+    var did = (extra && extra.did_e164) || '';
+    var egress = (extra && extra.egress) || '';
+    el.textContent = 'Dump delay ' + delay + 's · ' + lag + ' · RTMP ' + rtmp
+      + (did ? (' · DID ' + did) : '')
+      + (egress ? (' · tape ' + egress) : '');
     var dumpBtn = document.getElementById('btnDump');
     if (dumpBtn){
       dumpBtn.disabled = !dumpArmed;
@@ -1322,6 +1356,22 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   paintDockMeta();
   pollBoothStatus();
   setInterval(pollBoothStatus, 8000);
+  function loadBoothSounds(){
+    if (guest || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/sounds', {
+      headers: {'Authorization':'Bearer ' + cfg.token}
+    }).then(function(r){ return r.ok ? r.json() : null; }).then(function(j){
+      var list = document.getElementById('sfxList');
+      if (!list || !j || !j.sounds) return;
+      list.innerHTML = '';
+      (j.sounds || []).forEach(function(s){
+        var o = document.createElement('option');
+        o.value = s.id || '';
+        o.label = s.label || s.id || '';
+        list.appendChild(o);
+      });
+    }).catch(function(){});
+  }
   renderWait();
     if (guest) {
     ['btnCam','btnShare','btnFile','btnLookup','btnSfx'].forEach(function(id){
@@ -1330,6 +1380,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
     var sfx = document.getElementById('sfxIn');
     if (sfx) sfx.style.display = 'none';
+    var styleSel = document.getElementById('styleSel');
+    if (styleSel) styleSel.style.display = 'none';
     var tabs = document.getElementById('shareTabs');
     if (tabs) tabs.style.display = 'none';
   }
@@ -1507,6 +1559,19 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
     setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — Bring on moves Caller ID 1 to air.');
     greeted = true;
+    if (!guest){
+      loadBoothSounds();
+      setTimeout(function(){
+        if (!cfg.session || !cfg.token) return;
+        fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/egress', {
+          method: 'POST',
+          headers: {'Authorization':'Bearer ' + cfg.token}
+        }).then(function(r){ return r.json(); }).then(function(j){
+          if (j && (j.started || j.reason === 'already'))
+            setStatus('Room recording / RTMP armed.');
+        }).catch(function(){});
+      }, 8000);
+    }
   }).catch(function(e){
     setStatus('Connect failed: ' + tidyErr(e));
   });
@@ -1523,8 +1588,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
     sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
     var intent = hostShareIntent(text);
-    if (intent && intent.kind === 'search') doLookup(intent.q);
-    else if (intent && intent.kind === 'sound') { doSfx(intent.id); }
+    if (intent && intent.kind === 'sound') { doSfx(intent.id); }
     else nateTurn(text, false, 'line');
   };
   function armListenCommit(){
@@ -1549,11 +1613,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
       sendData({op:'chat', who: guest ? 'Caller' : 'Host', text:text});
       var intent = hostShareIntent(text);
-      if (intent && intent.kind === 'search') doLookup(intent.q);
-      else {
-        if (intent && intent.kind === 'sound') doSfx(intent.id);
-        else deliverHold(text, 'line');
-      }
+      if (intent && intent.kind === 'sound') doSfx(intent.id);
+      else deliverHold(text, 'line');
     }, holdFloorMs(live));
   }
   function startListenRec(btn){
@@ -1590,7 +1651,6 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   document.getElementById('btnTalk').onclick = function(){
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR){ setStatus('Talk needs Chrome speech recognition — type instead.'); return; }
     var btn = this;
     if (listenOn){
       listenOn = false;
@@ -1603,10 +1663,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
     listenOn = true;
     listenBuf = '';
-    if (room && room.localParticipant) stopCap(room.localParticipant.identity);
     btn.classList.add('on');
     btn.textContent = 'Listening';
-    startListenRec(btn);
+    if (SR){
+      if (room && room.localParticipant) stopCap(room.localParticipant.identity);
+      startListenRec(btn);
+    } else {
+      setStatus('Talk on — Safari captions the host mic. Type if you need a typed line.');
+      if (room && room.localParticipant) startCap(room.localParticipant.identity);
+    }
   };
   document.getElementById('btnMute').onclick = function(){
     if (!room) return;
@@ -1632,9 +1697,16 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }).then(function(r){ return r.json(); }).then(function(j){
       var url = (j && (j.room_url || j.roomUrl)) || '';
       if (!url){ setStatus('Guest link unavailable.'); return; }
+      var lines = [url];
+      if (j.did_e164) lines.push('Call/SMS (screener then waiting room): ' + j.did_e164);
+      else if (j.screener_note) lines.push(j.screener_note);
+      if (j.rss_url) lines.push('RSS: ' + j.rss_url);
+      var pack = lines.join('\n');
       if (navigator.clipboard && navigator.clipboard.writeText)
-        navigator.clipboard.writeText(url).then(function(){ setStatus('Guest join link copied.'); });
-      else setStatus(url);
+        navigator.clipboard.writeText(pack).then(function(){
+          setStatus(j.did_e164 ? 'Join pack copied — web URL + screener DID.' : 'Guest join link copied.');
+        });
+      else setStatus(pack);
     }).catch(function(){ setStatus('Guest link failed.'); });
   };
   document.getElementById('btnFile').onclick = function(){
@@ -1688,6 +1760,21 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   })();
   (function(){
+    var el = document.getElementById('styleSel');
+    if (!el || guest) return;
+    el.onchange = function(){
+      var tone = (el.value || '').trim();
+      if (!tone || !cfg.session || !cfg.token) return;
+      fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/style', {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+        body: JSON.stringify({style:{tone: tone}})
+      }).then(function(r){ return r.json(); }).then(function(j){
+        setStatus(j && j.ok ? 'Persona tone: ' + tone : 'Persona style failed.');
+      }).catch(function(){ setStatus('Persona style failed.'); });
+    };
+  })();
+  (function(){
     var box = document.getElementById('shareBox');
     if (!box || guest) return;
     box.addEventListener('dragover', function(ev){ ev.preventDefault(); });
@@ -1701,7 +1788,15 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var tossCtx = (lastHeard || '').trim()
       || (pendingCaps.length ? pendingCaps[pendingCaps.length - 1] : '')
       || 'Host tossed the floor to you. Address the room.';
-    nateTurn(tossCtx, true);
+    if (guest || !cfg.session || !cfg.token){ nateTurn(tossCtx, true); return; }
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/booth/ln-scan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({text: tossCtx})
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (j && j.blocked){ setStatus('Scan blocked that line.'); return; }
+      nateTurn(tossCtx, true);
+    }).catch(function(){ nateTurn(tossCtx, true); });
   };
   document.getElementById('btnPause').onclick = function(){
     lnPaused = !lnPaused;

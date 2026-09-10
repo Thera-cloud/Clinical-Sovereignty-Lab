@@ -1,4 +1,4 @@
-"""Sovereign Studio auditor — 15 checks, stagger 296s. QUANTUM-CRYSTAL-ARCH
+"""Sovereign Studio auditor — 19 checks, stagger 296s. QUANTUM-CRYSTAL-ARCH
 
 Email silenced — Trust Enforcer sends consolidated report
 """
@@ -65,6 +65,16 @@ TAB_ENDPOINTS = [
         "tab_num": 5,
         "endpoints": [
             ("GET", f"/api/studio/feeds/{NIL}/rss"),
+        ],
+    },
+    {
+        "tab": "Booth / Live",
+        "tab_num": 6,
+        "endpoints": [
+            ("GET", f"/api/studio/shows/{NIL}/delay"),
+            ("POST", f"/api/studio/sessions/{NIL}/dump"),
+            ("POST", f"/api/studio/sessions/{NIL}/share-asset"),
+            ("POST", f"/api/studio/sessions/{NIL}/lookup"),
         ],
     },
 ]

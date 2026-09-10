@@ -349,20 +349,17 @@ async def cohost_turn(
     # the moment actually wants it.
     realm_name = (realm or "").strip()
     if realm_name:
-        where = f"You are broadcasting from {realm_name}"
-        if (realm_blurb or "").strip():
-            where += f" — {realm_blurb.strip()}"
         system += (
-            f"\n\nWHERE YOU ARE: {where}. "
-            "The realm behind you shifts on its own during the show. "
-            "Let it color your mood only. Never name the realm, backdrop, or place "
-            "unless the host asks where you are. Never announce it as a status update."
+            "\n\nWHERE YOU ARE: The backdrop behind you is a Thera-world realm that "
+            "rotates on its own during the show. Let it color your mood only. "
+            "Never name the realm, backdrop, or place unless the host asks where you are. "
+            "Never announce it as a status update."
         )
+        if (realm_blurb or "").strip():
+            system += f" Mood of the space: {realm_blurb.strip()[:240]}."
     room = f"Room: {live} live caller(s), {hold} waiting."
-    if realm_name:
-        room += f" Realm: {realm_name}."
-        if realm_shift:
-            room += " The realm just shifted in behind you this second."
+    if realm_name and realm_shift:
+        room += " The realm just shifted in behind you this second."
     if share_k:
         room += f" On screen: {share_k}."
         if can_see:

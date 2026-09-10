@@ -289,7 +289,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "LITTLE NATE (CO-HOST)" in html
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
-    assert "v=20260909a" in html
+    assert "v=20260909b" in html
     assert "}, 2500);" in html
     assert "}, 450);" not in html
     assert "function waitLabel" in html
@@ -366,7 +366,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260909a" in url
+    assert "v=20260909b" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -626,7 +626,14 @@ def test_studio_realm_rotation():
         assert "booth/end" in room, rel
         assert "function hostAimed" in room, rel
         assert "pendingCaps.slice(-24)" not in room, rel
-        assert "studio_portrait.html?v=20260909a" in room, rel
+        assert "studio_portrait.html?v=20260909b" in room, rel
+        assert "function hasSpeechRec" in room, rel
+        assert "booth/egress" in room, rel
+        assert "32 * 1024 * 1024" in room, rel
+        assert "intent.kind === 'search') doLookup" not in room, rel
+        assert "createElement('iframe')" in room, rel
+        assert "vid.controls = true" in room, rel
+        assert 'id="sfxList"' in room, rel
         assert "share_kind" in room, rel
         assert "function grabShareJpeg" in room, rel
         assert "function pushShareFrame" in room, rel

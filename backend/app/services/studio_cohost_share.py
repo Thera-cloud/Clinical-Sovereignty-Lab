@@ -116,7 +116,7 @@ async def describe_share_frame(image_bytes: bytes) -> Dict[str, Any]:
 
 
 _MAX_IMAGE = 2_000_000
-_MAX_DOC = 8_000_000
+_MAX_DOC = 32_000_000
 _IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
