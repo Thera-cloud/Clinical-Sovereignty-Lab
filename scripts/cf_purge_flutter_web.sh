@@ -38,6 +38,7 @@ paths = (
     "version.json",
     "signup.html",
     "try.html",
+    "nate_story_library.html",
     "privacy.html",
     "terms.html",
     "data-deletion.html",

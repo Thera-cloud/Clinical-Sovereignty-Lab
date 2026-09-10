@@ -15,6 +15,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
+from app.newsletter.public_guard import (
+    HTML_SECURITY_HEADERS,
+    confirm_cooldown_active,
+    enforce_rate_limit,
+    honeypot_tripped,
+    public_client_ip,
+    safe_http_url,
+    sanitize_ref,
+    sanitize_share_channel,
+    sanitize_source,
+    sanitize_utm,
+    unsubscribe_confirm_html,
+    valid_slug,
+    valid_token,
+    valid_uuid,
+)
 from app.services.api_server import require_admin
 
 logger = logging.getLogger("nate.newsletter_api")
@@ -46,15 +62,39 @@ def _pool(request: Request):
 
 
 class SubscribeBody(BaseModel):
-    email: EmailStr
-    phone: Optional[str] = None
+    email: EmailStr = Field(..., max_length=254)
+    phone: Optional[str] = Field(None, max_length=20)
     research_consent: bool = False
-    turnstile_token: Optional[str] = None
-    source: Optional[str] = "web"
-    utm_source: Optional[str] = None
-    utm_medium: Optional[str] = None
-    utm_campaign: Optional[str] = None
-    ref: Optional[str] = None
+    turnstile_token: Optional[str] = Field(None, max_length=2048)
+    source: Optional[str] = Field("web", max_length=40)
+    utm_source: Optional[str] = Field(None, max_length=64)
+    utm_medium: Optional[str] = Field(None, max_length=64)
+    utm_campaign: Optional[str] = Field(None, max_length=64)
+    ref: Optional[str] = Field(None, max_length=120)
+    website: Optional[str] = Field(None, max_length=200)  # honeypot — must stay empty
+
+
+def _open_subscribe_allowed() -> bool:
+    if os.getenv("ENVIRONMENT", "").strip().lower() == "production":
+        return False
+    return ALLOW_OPEN_SUBSCRIBE
+
+
+def _html(body: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(body, status_code=status_code, headers=HTML_SECURITY_HEADERS)
+
+
+def _redis(request: Request):
+    return getattr(request.app.state, "redis", None) or getattr(
+        request.app.state, "cache_redis", None
+    )
+
+
+def _public_issue(row) -> Dict[str, Any]:
+    d = _row_json(row)
+    hero = safe_http_url(d.get("hero_image_url"), require_known_host=True)
+    d["hero_image_url"] = hero or None
+    return d
 
 
 class FeedbackBody(BaseModel):
@@ -101,25 +141,20 @@ async def health():
 @router.post("/subscribe")
 async def subscribe(body: SubscribeBody, request: Request):
     pool = _pool(request)
-    # Rate limit by IP
-    ip = request.client.host if request.client else "unknown"
-    redis = getattr(request.app.state, "redis", None) or getattr(
-        request.app.state, "cache_redis", None
+    ip = public_client_ip(request)
+    redis = _redis(request)
+    await enforce_rate_limit(
+        redis,
+        redis_key=f"newsletter:sub_rl:{ip}",
+        memory_key=f"mem:sub_rl:{ip}",
+        limit=8,
+        window_s=3600,
     )
-    if redis is not None:
-        try:
-            key = f"newsletter:sub_rl:{ip}"
-            n = await redis.incr(key)
-            if n == 1:
-                await redis.expire(key, 3600)
-            if n > 10:
-                raise HTTPException(429, "Too many requests")
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    generic = {"status": "ok", "message": "If eligible, a confirmation was sent."}
+    if honeypot_tripped(body.website):
+        return generic
 
-    if not ALLOW_OPEN_SUBSCRIBE:
+    if not _open_subscribe_allowed():
         from app.services.turnstile import verify_turnstile
 
         ok = await verify_turnstile(body.turnstile_token or "", remote_ip=ip)
@@ -127,6 +162,13 @@ async def subscribe(body: SubscribeBody, request: Request):
             raise HTTPException(400, "Turnstile verification failed")
 
     email = body.email.strip().lower()
+    await enforce_rate_limit(
+        redis,
+        redis_key=f"newsletter:sub_em:{hashlib.sha256(email.encode()).hexdigest()[:16]}",
+        memory_key=f"mem:sub_em:{email}",
+        limit=3,
+        window_s=3600,
+    )
     raw_confirm = secrets.token_urlsafe(32)
     confirm_hash = _hash_token(raw_confirm)
     unsub_raw = secrets.token_urlsafe(24)
@@ -138,12 +180,10 @@ async def subscribe(body: SubscribeBody, request: Request):
             "SELECT id, status FROM newsletter_subscribers WHERE LOWER(email) = $1",
             email,
         )
-        if existing and existing["status"] == "active":
-            return {"status": "ok", "message": "If eligible, a confirmation was sent."}
-        if existing and existing["status"] == "suppressed":
-            return {"status": "ok", "message": "If eligible, a confirmation was sent."}
+        if existing and existing["status"] in ("active", "suppressed"):
+            return generic
 
-        ref_slug = (body.ref or "").strip()[:120] or None
+        ref_slug = sanitize_ref(body.ref)
         await conn.execute(
             """
             INSERT INTO newsletter_subscribers (
@@ -163,7 +203,7 @@ async def subscribe(body: SubscribeBody, request: Request):
                 END,
                 confirm_token_hash = EXCLUDED.confirm_token_hash,
                 confirm_token_expires_at = EXCLUDED.confirm_token_expires_at,
-                phone_e164 = COALESCE(EXCLUDED.phone_e164, newsletter_subscribers.phone_e164),
+                phone_e164 = newsletter_subscribers.phone_e164,
                 consent_research_at = CASE
                     WHEN $6 THEN NOW()
                     ELSE newsletter_subscribers.consent_research_at
@@ -175,21 +215,22 @@ async def subscribe(body: SubscribeBody, request: Request):
                 updated_at = NOW()
             """,
             email,
-            body.phone,
+            None,
             confirm_hash,
             expires,
             unsub_hash,
             body.research_consent,
             ip,
-            body.source,
-            body.utm_source,
-            body.utm_medium,
-            body.utm_campaign,
+            sanitize_source(body.source),
+            sanitize_utm(body.utm_source),
+            sanitize_utm(body.utm_medium),
+            sanitize_utm(body.utm_campaign),
             ref_slug,
         )
 
-    await _send_confirm_email(email, raw_confirm)
-    return {"status": "ok", "message": "If eligible, a confirmation was sent."}
+    if not await confirm_cooldown_active(redis, email, window_s=1800):
+        await _send_confirm_email(email, raw_confirm)
+    return generic
 
 
 async def _send_confirm_email(email: str, raw_token: str) -> None:
@@ -223,8 +264,20 @@ async def _send_confirm_email(email: str, raw_token: str) -> None:
 
 
 @router.get("/confirm")
-async def confirm(request: Request, t: str = Query(...)):
+async def confirm(request: Request, t: str = Query(..., min_length=16, max_length=128)):
     pool = _pool(request)
+    await enforce_rate_limit(
+        _redis(request),
+        redis_key=f"newsletter:confirm_rl:{public_client_ip(request)}",
+        memory_key=f"mem:confirm_rl:{public_client_ip(request)}",
+        limit=30,
+        window_s=60,
+    )
+    if not valid_token(t):
+        return _html(
+            "<html><body><p>Link invalid or already used.</p></body></html>",
+            400,
+        )
     th = _hash_token(t)
     viral_topic = None
     async with pool.acquire() as conn:
@@ -237,16 +290,16 @@ async def confirm(request: Request, t: str = Query(...)):
             th,
         )
         if not row:
-            return HTMLResponse(
+            return _html(
                 "<html><body><p>Link invalid or already used.</p></body></html>",
-                status_code=400,
+                400,
             )
         if row["confirm_token_expires_at"] and row["confirm_token_expires_at"] < datetime.now(
             timezone.utc
         ):
-            return HTMLResponse(
+            return _html(
                 "<html><body><p>Link expired. Please subscribe again.</p></body></html>",
-                status_code=400,
+                400,
             )
         email = row["email"]
         await conn.execute(
@@ -301,7 +354,7 @@ async def confirm(request: Request, t: str = Query(...)):
             await record_theme_signal(pool, viral_topic, source="viral")
         except Exception:
             pass
-    return HTMLResponse(
+    return _html(
         "<html><body style='background:#050505;color:#C9A962;font-family:Georgia,serif;padding:40px;'>"
         "<h1>You're in.</h1><p>Little Nate Dispatch is confirmed.</p></body></html>"
     )
@@ -314,23 +367,26 @@ async def unsubscribe_get(
     sid: Optional[str] = Query(None),
 ):
     """GET shows confirm; does not mutate."""
-    sid_attr = f'<input type="hidden" name="sid" value="{sid}">' if sid else ""
-    return HTMLResponse(
-        f"""<html><body style="background:#050505;color:#E8D5A3;font-family:Georgia,serif;padding:40px;">
-        <h1>Unsubscribe</h1>
-        <p>Confirm you want to leave Little Nate Dispatch.</p>
-        <form method="POST" action="/api/newsletter/unsubscribe">
-          <input type="hidden" name="t" value="{t}">
-          {sid_attr}
-          <button type="submit" style="background:#C9A962;border:0;padding:12px 20px;">Unsubscribe</button>
-        </form>
-        </body></html>"""
+    await enforce_rate_limit(
+        _redis(request),
+        redis_key=f"newsletter:unsub_get:{public_client_ip(request)}",
+        memory_key=f"mem:unsub_get:{public_client_ip(request)}",
+        limit=30,
+        window_s=60,
     )
+    return _html(unsubscribe_confirm_html(t, sid))
 
 
 @router.post("/unsubscribe")
 async def unsubscribe_post(request: Request):
     pool = _pool(request)
+    await enforce_rate_limit(
+        _redis(request),
+        redis_key=f"newsletter:unsub_post:{public_client_ip(request)}",
+        memory_key=f"mem:unsub_post:{public_client_ip(request)}",
+        limit=20,
+        window_s=60,
+    )
     form = await request.form()
     t = str(form.get("t") or "")
     sid = form.get("sid")
@@ -341,6 +397,11 @@ async def unsubscribe_post(request: Request):
             sid = body.get("sid") or sid
         except Exception:
             pass
+    if not valid_token(t):
+        return _html(
+            "<html><body style='background:#050505;color:#8B7355;padding:40px;'>"
+            "<p>You have been unsubscribed.</p></body></html>"
+        )
     th = _hash_token(t)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -360,11 +421,11 @@ async def unsubscribe_post(request: Request):
                 """,
                 row["id"],
             )
-        elif sid:
+        elif sid and valid_uuid(str(sid)):
             expected = hashlib.sha256(
                 f"{TOKEN_SALT}:unsub:{sid}".encode()
             ).hexdigest()[:40]
-            if secrets.compare_digest(t, expected):
+            if len(t) == len(expected) and secrets.compare_digest(t, expected):
                 await conn.execute(
                     """
                     UPDATE newsletter_subscribers
@@ -373,7 +434,7 @@ async def unsubscribe_post(request: Request):
                     """,
                     sid,
                 )
-    return HTMLResponse(
+    return _html(
         "<html><body style='background:#050505;color:#8B7355;padding:40px;'>"
         "<p>You have been unsubscribed.</p></body></html>"
     )
@@ -395,6 +456,15 @@ async def rate(
         rate_token_for_subscriber,
     )
 
+    if not valid_slug(issue):
+        raise HTTPException(404, "Issue not found")
+    await enforce_rate_limit(
+        _redis(request),
+        redis_key=f"newsletter:rate_rl:{public_client_ip(request)}",
+        memory_key=f"mem:rate_rl:{public_client_ip(request)}",
+        limit=20,
+        window_s=60,
+    )
     pool = _pool(request)
     async with pool.acquire() as conn:
         issue_row = await conn.fetchrow(
@@ -426,7 +496,7 @@ async def rate(
         if sub_id is not None:
             token_fp = _hash_token(t)
         else:
-            ip = (request.client.host if request.client else "0") or "0"
+            ip = public_client_ip(request) or "0"
             day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             token_fp = hashlib.sha256(
                 f"{issue_id}:{ip}:{day}:{TOKEN_SALT}:lib".encode()
@@ -497,7 +567,7 @@ async def rate(
             await record_theme_signal(pool, topic, source="feedback")
         except Exception:
             pass
-    return HTMLResponse(
+    return _html(
         "<html><body style='background:#050505;color:#C9A962;padding:40px;'>"
         "<p>Thank you — Nate is learning from your rating.</p>"
         "<p>Know someone who'd benefit? Forward your Dispatch email or share the Story Library link.</p>"
@@ -506,8 +576,15 @@ async def rate(
 
 
 @router.get("/library")
-async def library_list(request: Request, limit: int = Query(20, ge=1, le=100)):
+async def library_list(request: Request, limit: int = Query(20, ge=1, le=40)):
     pool = _pool(request)
+    await enforce_rate_limit(
+        _redis(request),
+        redis_key=f"newsletter:lib_rl:{public_client_ip(request)}",
+        memory_key=f"mem:lib_rl:{public_client_ip(request)}",
+        limit=60,
+        window_s=60,
+    )
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -521,12 +598,38 @@ async def library_list(request: Request, limit: int = Query(20, ge=1, le=100)):
         )
     return {
         "status": "ok",
-        "issues": [_row_json(r) for r in rows],
+        "issues": [_public_issue(r) for r in rows],
     }
+
+
+async def _count_library_view(request: Request, conn, slug: str) -> None:
+    ip = public_client_ip(request)
+    try:
+        await enforce_rate_limit(
+            _redis(request),
+            redis_key=f"newsletter:view:{ip}:{slug}",
+            memory_key=f"mem:view:{ip}:{slug}",
+            limit=20,
+            window_s=60,
+        )
+    except HTTPException:
+        return
+    await conn.execute(
+        """
+        INSERT INTO newsletter_library_stats (slug, view_count)
+        VALUES ($1, 1)
+        ON CONFLICT (slug) DO UPDATE
+        SET view_count = newsletter_library_stats.view_count + 1,
+            updated_at = NOW()
+        """,
+        slug,
+    )
 
 
 @router.get("/library/{slug}")
 async def library_issue(slug: str, request: Request):
+    if not valid_slug(slug):
+        raise HTTPException(404, "Not found")
     pool = _pool(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -541,17 +644,8 @@ async def library_issue(slug: str, request: Request):
         )
         if not row:
             raise HTTPException(404, "Not found")
-        await conn.execute(
-            """
-            INSERT INTO newsletter_library_stats (slug, view_count)
-            VALUES ($1, 1)
-            ON CONFLICT (slug) DO UPDATE
-            SET view_count = newsletter_library_stats.view_count + 1,
-                updated_at = NOW()
-            """,
-            slug,
-        )
-    d = dict(row)
+        await _count_library_view(request, conn, slug)
+    d = _public_issue(row)
     if d.get("topic"):
         try:
             from app.services.newsletter_signals import record_theme_signal
@@ -567,6 +661,8 @@ async def library_issue_html(slug: str, request: Request):
     """HTML Story Library page — works without static nginx /library/."""
     from app.services.newsletter_delivery import render_library_html
 
+    if not valid_slug(slug):
+        raise HTTPException(404, "Not found")
     pool = _pool(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -581,17 +677,11 @@ async def library_issue_html(slug: str, request: Request):
         )
         if not row:
             raise HTTPException(404, "Not found")
-        await conn.execute(
-            """
-            INSERT INTO newsletter_library_stats (slug, view_count)
-            VALUES ($1, 1)
-            ON CONFLICT (slug) DO UPDATE
-            SET view_count = newsletter_library_stats.view_count + 1,
-                updated_at = NOW()
-            """,
-            slug,
-        )
-    return HTMLResponse(render_library_html(_row_json(row)))
+        await _count_library_view(request, conn, slug)
+    return HTMLResponse(
+        render_library_html(_row_json(row)),
+        headers=HTML_SECURITY_HEADERS,
+    )
 
 
 @router.get("/library/{slug}/hero")
@@ -599,6 +689,8 @@ async def library_hero_image(slug: str, request: Request):
     """Stable public hero image for email + library (survives R2 presign expiry)."""
     from app.services.newsletter_imagery import load_hero_bytes, sniff_image_meta
 
+    if not valid_slug(slug):
+        raise HTTPException(404, "No hero image")
     data = await load_hero_bytes(_pool(request), slug)
     if not data:
         raise HTTPException(404, "No hero image")
@@ -617,6 +709,16 @@ async def share_track(
     slug: str = Query(...),
     channel: str = Query("link"),
 ):
+    if not valid_slug(slug):
+        raise HTTPException(404)
+    ch = sanitize_share_channel(channel)
+    await enforce_rate_limit(
+        _redis(request),
+        redis_key=f"newsletter:share_rl:{public_client_ip(request)}",
+        memory_key=f"mem:share_rl:{public_client_ip(request)}",
+        limit=30,
+        window_s=60,
+    )
     pool = _pool(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -642,7 +744,7 @@ async def share_track(
         from app.services.newsletter_signals import bump_growth_ledger
 
         await bump_growth_ledger(
-            pool, f"share_{channel[:32]}", invites_sent=1, conversions=0
+            pool, f"share_{ch}", invites_sent=1, conversions=0
         )
     except Exception:
         pass
@@ -652,7 +754,6 @@ async def share_track(
     )
     from fastapi.responses import RedirectResponse
 
-    ch = (channel or "link")[:32]
     utm = utm_library_url(slug, ch)
     dest = share_intent_url(ch, utm, str(row["subject_line"] or "Little Nate Dispatch"))
     return RedirectResponse(dest, status_code=302)

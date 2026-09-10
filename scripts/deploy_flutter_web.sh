@@ -30,6 +30,7 @@ done
 LEGAL_PAGES=(
   try.html signup.html privacy.html terms.html
   data-deletion.html sms-policy.html payment-complete.html payment-cancelled.html
+  nate_story_library.html
 )
 
 overlay_legal_pages() {
@@ -49,6 +50,10 @@ overlay_legal_pages() {
   done
   if ! grep -q "Talk to Little Nate" "${dest}/try.html"; then
     echo "FAIL: ${dest}/try.html is not the trial page (missing Talk to Little Nate)" >&2
+    exit 1
+  fi
+  if ! grep -q "Story Library" "${dest}/nate_story_library.html"; then
+    echo "FAIL: ${dest}/nate_story_library.html is not the subscribe page" >&2
     exit 1
   fi
 }
@@ -79,9 +84,10 @@ rsync -avz \
   "${ROOT}/mobile/build/web/sms-policy.html" \
   "${ROOT}/mobile/build/web/payment-complete.html" \
   "${ROOT}/mobile/build/web/payment-cancelled.html" \
+  "${ROOT}/mobile/build/web/nate_story_library.html" \
   "${SERVER}:${WEB_ROOT}"
 
-ssh "${SERVER}" "grep -q 'Talk to Little Nate' ${WEB_ROOT}try.html && grep -q flutter_bootstrap ${WEB_ROOT}index.html"
+ssh "${SERVER}" "grep -q 'Talk to Little Nate' ${WEB_ROOT}try.html && grep -q 'Little Nate' ${WEB_ROOT}nate_story_library.html && grep -q flutter_bootstrap ${WEB_ROOT}index.html"
 echo "verified try.html + Flutter index.html on ${SERVER}"
 
 ssh "${SERVER}" "systemctl reload nginx"

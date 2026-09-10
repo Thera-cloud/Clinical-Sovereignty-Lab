@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Little Nate's Story Library</title>
 <meta name="description" content="Editorial stories from Little Nate Dispatch — education, not therapy.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https:; connect-src 'self' https://api.sovereignsanctuary.net https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -41,9 +43,10 @@ footer a{color:var(--gold-dim)}
   <p class="sub">Weekly Dispatch issues Nate has already sent — open to read, share, or ask him about in chat. Education and reflection, not medical advice.</p>
   <div class="subbox" id="subscribeBox">
     <label for="subEmail">Get the next Dispatch by email</label>
-    <input id="subEmail" type="email" placeholder="you@example.com" autocomplete="email">
+    <input id="subEmail" type="email" placeholder="you@example.com" autocomplete="email" maxlength="254" inputmode="email">
+    <input type="text" name="website" id="subWebsite" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;opacity:0">
     <div class="turnstile-wrap" id="turnstileWrap"></div>
-    <button type="button" id="subBtn" onclick="doSubscribe()">Subscribe</button>
+    <button type="button" id="subBtn">Subscribe</button>
     <div id="subMsg"></div>
   </div>
 </header>
@@ -59,11 +62,10 @@ footer a{color:var(--gold-dim)}
 var API = (function(){
   var h = location.hostname;
   if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
-  if (h === 'command.sovereignsanctuary.net' ||
-      h === 'app.sovereignsanctuary.net' ||
-      h === 'coach.sovereignsanctuary.net') return '';
-  if (h.indexOf('sovereignsanctuary') >= 0) return 'https://api.sovereignsanctuary.net';
-  return '';
+  if (h === 'app.sovereignsanctuary.net' ||
+      h === 'coach.sovereignsanctuary.net' ||
+      h === 'command.sovereignsanctuary.net') return '';
+  return 'https://api.sovereignsanctuary.net';
 })();
 var TURNSTILE_SITE_KEY = '0x4AAAAAADyMnpRrA8SSCcIS';
 var turnstileToken = '';
@@ -71,6 +73,22 @@ var turnstileWidgetId = null;
 
 function qs(name){
   try{return new URLSearchParams(location.search).get(name)||'';}catch(e){return '';}
+}
+function qsSafe(name){
+  return (qs(name) || '').replace(/[^\w.\-]/g, '').slice(0, 64);
+}
+function esc(s){
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+function safeHero(u){
+  if (!u || typeof u !== 'string') return '';
+  try{
+    var p = new URL(u.trim());
+    if (p.protocol !== 'https:') return '';
+    var host = (p.hostname || '').toLowerCase();
+    if (host !== 'api.sovereignsanctuary.net' && host !== 'app.sovereignsanctuary.net') return '';
+    return p.href;
+  }catch(e){ return ''; }
 }
 function setSubMsg(text, isErr){
   var msg = document.getElementById('subMsg');
@@ -93,7 +111,9 @@ window.onTurnstileLoad = onTurnstileLoad;
 async function doSubscribe(){
   var email = (document.getElementById('subEmail').value || '').trim();
   var btn = document.getElementById('subBtn');
-  if (!email || email.indexOf('@') < 0){ setSubMsg('Enter a valid email.', true); return; }
+  var pot = document.getElementById('subWebsite');
+  if (pot && pot.value){ setSubMsg('If eligible, a confirmation was sent.'); return; }
+  if (!email || email.indexOf('@') < 0 || email.length > 254){ setSubMsg('Enter a valid email.', true); return; }
   if (!turnstileToken){
     setSubMsg('Complete the verification check, then try again.', true);
     if (typeof turnstile !== 'undefined' && turnstileWidgetId !== null){
@@ -111,10 +131,11 @@ async function doSubscribe(){
         email: email,
         turnstile_token: turnstileToken,
         source: 'story_library',
-        utm_source: qs('utm_source') || 'library',
-        utm_medium: qs('utm_medium') || 'web',
-        utm_campaign: qs('utm_campaign') || 'dispatch',
-        ref: qs('ref') || null
+        utm_source: qsSafe('utm_source') || 'library',
+        utm_medium: qsSafe('utm_medium') || 'web',
+        utm_campaign: qsSafe('utm_campaign') || 'dispatch',
+        ref: qsSafe('ref') || null,
+        website: (pot && pot.value) || ''
       })
     });
     var d = await r.json().catch(function(){ return {}; });
@@ -142,6 +163,8 @@ async function doSubscribe(){
 (function(){
   var rss = document.getElementById('rssLink');
   if (rss) rss.href = (API || 'https://api.sovereignsanctuary.net') + '/api/newsletter/rss';
+  var btn = document.getElementById('subBtn');
+  if (btn) btn.addEventListener('click', function(ev){ ev.preventDefault(); doSubscribe(); });
 })();
 
 (async function(){
@@ -162,11 +185,10 @@ async function doSubscribe(){
       var when = i.sent_at || i.created_at || '';
       var href = apiHost + '/api/newsletter/library/' + encodeURIComponent(slug) + '/page';
       var shareBase = apiHost + '/api/newsletter/share?slug=' + encodeURIComponent(slug) + '&channel=';
-      var thumb = i.hero_image_url
-        ? '<img src="' + i.hero_image_url + '" alt="" loading="lazy">'
-        : '';
-      return '<article class="issue">' + thumb + '<div class="copy"><a href="' + href + '">' + title.replace(/</g,'&lt;') + '</a>'
-        + '<div class="meta">' + (when ? String(when).slice(0,10) : '') + (i.topic ? ' · ' + String(i.topic).replace(/</g,'&lt;') : '') + '</div>'
+      var hero = safeHero(i.hero_image_url || '');
+      var thumb = hero ? '<img src="' + esc(hero) + '" alt="" loading="lazy">' : '';
+      return '<article class="issue">' + thumb + '<div class="copy"><a href="' + href + '">' + esc(title) + '</a>'
+        + '<div class="meta">' + (when ? esc(String(when).slice(0,10)) : '') + (i.topic ? ' · ' + esc(i.topic) : '') + '</div>'
         + '<div class="share">'
         + '<a href="' + shareBase + 'x">X</a>'
         + '<a href="' + shareBase + 'facebook">Facebook</a>'

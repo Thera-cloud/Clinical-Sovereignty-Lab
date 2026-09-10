@@ -255,11 +255,17 @@ def _hero_img_tag(
         bust = str(bust).strip() or str(int(datetime.now(timezone.utc).timestamp()))
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}t={bust}"
-    alt = (issue.get("topic") or issue.get("subject_line") or "Little Nate Dispatch").replace(
-        '"', "'"
-    )[:120]
+    low = url.lower()
+    if not (low.startswith("https://") or low.startswith("http://")):
+        return ""
+    if any(c in url for c in ('"', "'", "<", ">", "`", "\n", "\r")):
+        return ""
+    alt = html_mod.escape(
+        str(issue.get("topic") or issue.get("subject_line") or "Little Nate Dispatch")[:120],
+        quote=True,
+    )
     return (
-        f'<img src="{url}" alt="{alt}" width="600" '
+        f'<img src="{html_mod.escape(url, quote=True)}" alt="{alt}" width="600" '
         f'style="max-width:{max_width};height:auto;border-radius:4px;margin:16px 0;display:block;" />'
     )
 
@@ -284,7 +290,11 @@ def render_library_html(issue: Dict[str, Any], *, admin_preview: bool = False) -
     og_image = ""
     if issue.get("hero_image_url") or issue.get("hero_image_r2_key"):
         og_url = issue.get("hero_image_url") or _hero_stable_url(slug)
-        og_image = f'<meta property="og:image" content="{og_url}">'
+        og_low = str(og_url or "").lower()
+        if og_low.startswith("https://") and not any(
+            c in str(og_url) for c in ('"', "'", "<", ">", "`")
+        ):
+            og_image = f'<meta property="og:image" content="{html_mod.escape(str(og_url), quote=True)}">'
     topic_esc = html_mod.escape(str(issue.get("topic") or ""))
     og_desc = html_mod.escape(_og_description(issue))
     title_esc = html_mod.escape(str(issue.get("subject_line") or "Little Nate Dispatch"))
