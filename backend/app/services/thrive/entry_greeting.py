@@ -552,12 +552,32 @@ def compose_direction(s: EntrySignals) -> str:
 # ── LLM polish ─────────────────────────────────────────────────────────────
 
 _LLM_SYSTEM = (
-    "You are Little Nate, an unconditionally warm, plain-spoken companion. Rewrite the three DRAFT parts "
-    "into your own voice, keeping every fact, name, number, and topic exactly as given — invent nothing. "
-    "Never use the words liminal, threshold, aching, tapestry, or 'journey through'. No headings, no bullet "
-    "symbols other than 1) 2) 3) in part three. Second person, present tense, short sentences. "
-    "Return STRICT JSON: {\"welcome\": str (<=600 chars), \"prime\": str (300-500 chars), \"direction\": str (<=900 chars)}."
+    "You are Little Nate, an unconditionally warm, plain-spoken companion greeting a client you know well as they "
+    "open the app. Smooth the three DRAFT parts into your natural speaking voice. Speak as 'I' to 'you'; address the "
+    "client by FIRST NAME only, never in the third person. Keep every fact, quote, number, and topic exactly as given — "
+    "invent nothing, drop nothing important. Keep the draft's opening greeting line. "
+    "Never say or paraphrase internal labels: no phase names (stabilize, process, consolidate, thrive, generative), "
+    "no 'growth phase', no time zones or 'UTC', no percentages as bare numbers — say 'I'm fairly sure' instead. "
+    "Never use the words liminal, threshold, aching, tapestry, or 'journey through'. No headings; the only bullets "
+    "allowed are 1) 2) 3) in part three. Present tense, short sentences, warm and direct. "
+    "Return STRICT JSON only: {\"welcome\": str (<=600 chars), \"prime\": str (300-500 chars), \"direction\": str (<=900 chars)}."
 )
+
+# If the polished text leaks any of these, the template is the safer voice.
+_POLISH_LEAK = re.compile(
+    r"\b(UTC|GMT|growth phase|sub[- ]?state|stabilize|consolidate|generative|thrive phase|process phase|pgsd|"
+    r"crystal|signal|confidence|domain)\b", re.I,
+)
+
+
+def _polish_is_clean(out: Dict[str, str], s: EntrySignals) -> bool:
+    joined = " ".join(out.values())
+    if _POLISH_LEAK.search(joined):
+        return False
+    full = (s.display_name or "").strip()
+    if " " in full and re.search(rf"\b{re.escape(full)}\b", joined):  # "Lisa West said…" — third person
+        return False
+    return True
 
 
 async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -> Optional[Dict[str, str]]:
@@ -568,9 +588,8 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
     try:
         prompt = json.dumps({
             "client_first_name": _first(s.display_name),
-            "local_time": f"{s.weekday} {s.local_hour:02d}:00 ({s.day_part}, {s.tz})",
-            "growth_phase": s.phase,
-            "register": gp.framework_for(s.phase).ln_register,
+            "moment": f"{s.weekday} {_human_day_part(s.day_part)}",
+            "your_register_right_now": gp.framework_for(s.phase).ln_register,
             "drafts": drafts,
         }, ensure_ascii=False)
         t0 = datetime.now(timezone.utc)
@@ -582,6 +601,9 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
             # routinely exceeded 120s here and starved the greeting.
             raw = await router.generate(
                 prompt=prompt, system=_LLM_SYSTEM, tier="utility", temperature=0.5, max_tokens=900, domain=_domain,
+                # Client-facing voice: prefer Grok (fast, ~$0.00025) over the small Workers AI model,
+                # which flattened the drafts and leaked internal labels in production testing.
+                providers_override=["grok", "workers_ai", "azure"],
             )
         else:
             raw = await inf.generate(
@@ -606,6 +628,10 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
         out = json.loads(m.group(0))
         if not all(isinstance(out.get(k), str) and out[k].strip() for k in ("welcome", "prime", "direction")):
             logger.warning("entry_greeting: LLM polish JSON missing parts for %s (%.1fs)", s.username, elapsed)
+            return None
+        if not _polish_is_clean(out, s):
+            logger.warning("entry_greeting: LLM polish leaked internal labels for %s (%.1fs, provider=%s) — template kept",
+                           s.username, elapsed, _prov)
             return None
         logger.info("entry_greeting: LLM polish ok for %s (%.1fs, provider=%s)", s.username, elapsed, _prov)
         return {"welcome": _cap(_scrub(out["welcome"]), WELCOME_MAX),
