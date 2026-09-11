@@ -23,6 +23,7 @@ for ``CACHE_HOURS`` so re-opening the app doesn't re-spend inference.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -46,6 +47,8 @@ PRIME_MIN, PRIME_MAX = 300, 500
 DIRECTION_MAX = 900
 CACHE_HOURS = float(os.getenv("LN_ENTRY_GREETING_CACHE_HOURS", "4"))
 ENABLE_LLM = os.getenv("LN_ENTRY_GREETING_LLM", "true").lower() in ("1", "true", "yes")
+SIGNALS_TIMEOUT_S = float(os.getenv("LN_ENTRY_GREETING_SIGNALS_TIMEOUT_S", "10"))
+LLM_TIMEOUT_S = float(os.getenv("LN_ENTRY_GREETING_LLM_TIMEOUT_S", "15"))
 
 DAY_PARTS = (
     (5, 11, "morning"),
@@ -592,9 +595,18 @@ async def build_entry_greeting(db_pool: Any, user_id: str, *, app_state: Any = N
         except Exception as e:
             logger.info("entry_greeting: cache read skipped: %s", e)
 
-    s = await gather_signals(db_pool, user_id)
+    # Hard budgets: the greeting gates the client's first screen; never hang it.
+    try:
+        s = await asyncio.wait_for(gather_signals(db_pool, user_id), timeout=SIGNALS_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.warning("entry_greeting: gather_signals timed out (%ss) for %s — minimal signals", SIGNALS_TIMEOUT_S, username)
+        s = EntrySignals(username=username, display_name=username)
     drafts = {"welcome": compose_welcome(s), "prime": compose_prime(s), "direction": compose_direction(s)}
-    polished = await _llm_polish(app_state, s, drafts)
+    try:
+        polished = await asyncio.wait_for(_llm_polish(app_state, s, drafts), timeout=LLM_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.warning("entry_greeting: LLM polish timed out (%ss) for %s — template fallback", LLM_TIMEOUT_S, username)
+        polished = None
     parts = polished or drafts
     generated_by = "llm" if polished else "template"
     panel_id = s.thera_panel.get("panel_id") if s.thera_panel else None
