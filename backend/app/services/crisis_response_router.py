@@ -304,10 +304,17 @@ def apply_ln_boundary_post_guard(
     conversation_history: Optional[Sequence[Dict[str, str]]] = None,
     force_crisis: bool = False,
     profile: Optional[Dict[str, Any]] = None,
+    growth_phase: Optional[str] = None,
+    growth_sub_state: Optional[str] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Post-generation deterministic boundary router for LN configs.
     Returns (mutated_text, hits) — hits always non-empty when guard tripped.
+
+    growth_phase / growth_sub_state (QUANTUM-CRYSTAL-ARCH): client's persisted
+    growth phase; gates DEPTH/HYPO so healed/thriving clients are not redirected
+    into trauma-boundary copy. Suppressed matches are returned as hits with
+    ``"suppressed": True`` (text untouched) so they stay observable.
 
     force_crisis: set True when an upstream, higher-recall detector (e.g. the
     Public Trial Funnel's semantic SI check) has already flagged this turn as
@@ -334,7 +341,14 @@ def apply_ln_boundary_post_guard(
         conversation_history,
         lookback_user_turns=1,
     )
-    guard = guard_evaluate(user_text or "")
+    try:
+        guard = guard_evaluate(
+            user_text or "",
+            growth_phase=growth_phase,
+            growth_sub_state=growth_sub_state,
+        )
+    except TypeError:  # older guard signature
+        guard = guard_evaluate(user_text or "")
     if force_crisis and not guard.tripped:
         guard = GuardResult(
             tripped=True,
@@ -343,6 +357,16 @@ def apply_ln_boundary_post_guard(
             matched_labels=["semantic_si_match"],
             priority=1,
         )
+    if getattr(guard, "suppressed_labels", None):
+        hits.append({
+            "guard_id": "coaching_boundary_guard",
+            "trip_class": "SUPPRESSED",
+            "trigger_class": getattr(guard, "suppress_reason", None),
+            "matched_labels": list(guard.suppressed_labels),
+            "suppressed": True,
+            "growth_phase": growth_phase,
+            "growth_sub_state": growth_sub_state,
+        })
     if not guard.tripped:
         out = _strip_done_talking_push(
             text or "",

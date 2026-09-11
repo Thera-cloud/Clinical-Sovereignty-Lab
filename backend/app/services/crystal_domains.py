@@ -29,6 +29,7 @@ ORGANIC_EXTRA = frozenset(
         "crisis",
         "liminal_resolve",
         "ln_self_curiosity",
+        "thrive",  # growth-phase coaching harvests (goals, practices, strengths) — QUANTUM-CRYSTAL-ARCH
     }
 )
 

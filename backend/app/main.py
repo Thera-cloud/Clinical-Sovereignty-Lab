@@ -3059,6 +3059,24 @@ async def lifespan(app: FastAPI):
     except Exception as nca_err:
         print(f"   ⚠️  NateCheckInAgent init failed: {nca_err}")
 
+    # QUANTUM-CRYSTAL-ARCH — ThriveCoachAgent (growth-phase life-coach reminders,
+    # goal checkpoints, weekly recaps, phase evaluations). Email sends are gated
+    # inside the agent by ENABLE_GROWTH_PHASE; the loop itself always runs so
+    # thrive_reminders stays observable.
+    _thrive_agent = None
+    try:
+        from app.services.thrive.thrive_agent import ThriveCoachAgent
+        _thrive_agent = ThriveCoachAgent(
+            db_pool=db_pool,
+            notification_system=getattr(app.state, "notification_system", None),
+            app_state=app.state,
+        )
+        await _thrive_agent.start()
+        app.state.thrive_agent = _thrive_agent
+        print("   ✅ ThriveCoachAgent started (30min cycle, stagger 205s)")
+    except Exception as _thr_err:
+        print(f"   ⚠️  ThriveCoachAgent init failed: {_thr_err}")
+
     # QUANTUM-CRYSTAL-ARCH — PGSDHeartbeatAgent (nightly baseline, primary-only)
     _pgsd_heartbeat_agent = None
     try:
@@ -3866,6 +3884,7 @@ async def lifespan(app: FastAPI):
         ("attunement_scorecard_agent", _attunement_scorecard_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("attunement_auditor", _attunement_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", _nate_checkin_agent is not None),
+        ("thrive_agent", _thrive_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_heartbeat_agent", _pgsd_heartbeat_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_discernment_scorer", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_discernment_scorer is not None)),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_field_engine", (os.environ.get("PGSD_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on")) or (_pgsd_field_engine is not None)),  # QUANTUM-CRYSTAL-ARCH
@@ -3954,6 +3973,13 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("👋 Shutting down...")
+
+    _thr_h = getattr(app.state, "thrive_agent", None)  # QUANTUM-CRYSTAL-ARCH
+    if _thr_h:
+        try:
+            await _thr_h.stop()
+        except Exception as _thr_stop:
+            print(f"   ⚠️  ThriveCoachAgent shutdown: {_thr_stop}")
 
     # QUANTUM-CRYSTAL-ARCH — LN-Observer sweep stop
     _lnobs_h = getattr(app.state, "ln_observer_engine", None)
@@ -4431,6 +4457,7 @@ async def lifespan(app: FastAPI):
         ("newsletter_agent", "NewsletterAgent"),  # QUANTUM-CRYSTAL-ARCH
         ("newsletter_auditor", "NewsletterAuditor"),  # QUANTUM-CRYSTAL-ARCH
         ("nate_checkin_agent", "NateCheckInAgent"),
+        ("thrive_agent", "ThriveCoachAgent"),  # QUANTUM-CRYSTAL-ARCH
         ("pgsd_heartbeat_agent", "PGSDHeartbeatAgent"),  # QUANTUM-CRYSTAL-ARCH
         ("nate_commitment_agent", "NateCommitmentAgent"),
         ("nate_self_monitor_agent", "NateSelfMonitorAgent"),
@@ -4890,6 +4917,12 @@ try:
     app.include_router(sendgrid_inbound_router)
 except Exception as _sg_err:
     print(f"   ⚠️  SendGrid Inbound router failed: {_sg_err}")
+
+try:  # QUANTUM-CRYSTAL-ARCH — growth-phase / thrive REST surface
+    from app.routers.thrive_api import router as thrive_router
+    app.include_router(thrive_router)
+except Exception as _thr_r_err:
+    print(f"   ⚠️  Thrive router failed: {_thr_r_err}")
 
 try:
     from app.routers.bulk_import import router as bulk_import_router

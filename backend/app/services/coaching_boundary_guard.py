@@ -31,6 +31,11 @@ class GuardResult:
     trigger_class: Optional[str] = None
     matched_labels: List[str] = field(default_factory=list)
     priority: int = 3
+    # QUANTUM-CRYSTAL-ARCH growth-phase gating: labels that matched but were
+    # suppressed (retrospective/celebration wound language, negated HYPO,
+    # coaching phase). Persisted for observability; never mutate the response.
+    suppressed_labels: List[str] = field(default_factory=list)
+    suppress_reason: Optional[str] = None
 
     @property
     def show_crisis_resources(self) -> bool:
@@ -44,8 +49,70 @@ def _match_patterns(text: str, patterns: List[tuple[str, re.Pattern[str]]]) -> O
     return None
 
 
-def evaluate(user_text: str) -> GuardResult:
-    """Sync classifier — must run before any LLM on Training Ground turns."""
+# ---------------------------------------------------------------------------
+# Growth-phase gating (2026-09 LetsGoLisa regression: celebration messages such
+# as "healing wounds from childhood trauma ... I've forgiven Bill" tripped
+# `childhood_trauma` DEPTH for weeks and LN kept inserting boundary copy while
+# the client was announcing she was healed.)
+# ---------------------------------------------------------------------------
+
+_COACHING_PHASES = frozenset({"consolidate", "thrive", "generative"})
+
+
+def _lexicon():
+    from app.services.thrive import growth_phase as _gp
+
+    return _gp
+
+
+def _any(patterns, text: str) -> bool:
+    return any(re.search(p, text, re.I) for p in patterns)
+
+
+def _depth_suppressed(sample: str, phase: Optional[str], sub_state: Optional[str]) -> Optional[str]:
+    """Return a reason string when a DEPTH match should NOT trip."""
+    try:
+        gp = _lexicon()
+    except Exception:
+        return None
+    if sub_state == "working_through":
+        # Client asked to go there — the guard must not slam the door.
+        return "working_through"
+    asks_to_process = _any(gp.WORK_THROUGH_REQUEST, sample)
+    retrospective = _any(gp.RETROSPECTIVE_WOUND, sample)
+    forward = _any(gp.FORWARD_DECLARATION, sample)
+    if retrospective and not asks_to_process:
+        return "retrospective_wound_language"
+    if forward and not asks_to_process:
+        return "forward_declaration"
+    if (phase or "") in _COACHING_PHASES and not asks_to_process:
+        return f"phase:{phase}"
+    return None
+
+
+def _hypo_suppressed(sample: str) -> Optional[str]:
+    try:
+        gp = _lexicon()
+    except Exception:
+        return None
+    if _any(gp.NEGATED_HYPO, sample):
+        return "negated_hypo"
+    return None
+
+
+def evaluate(
+    user_text: str,
+    *,
+    growth_phase: Optional[str] = None,
+    growth_sub_state: Optional[str] = None,
+) -> GuardResult:
+    """Sync classifier — must run before any LLM on Training Ground turns.
+
+    growth_phase / growth_sub_state (optional, QUANTUM-CRYSTAL-ARCH): when the
+    caller knows the client's phase, DEPTH is gated so consolidating/thriving
+    clients naming old wounds in the past tense are met as healed, not
+    redirected. CRISIS is never gated.
+    """
     if not user_text or not str(user_text).strip():
         return GuardResult(tripped=False)
 
@@ -60,27 +127,40 @@ def evaluate(user_text: str) -> GuardResult:
             priority=1,
         )
 
+    suppressed: List[str] = []
+    reason: Optional[str] = None
+
     depth_hit = _match_patterns(sample, _DEPTH_PATTERNS)
     if depth_hit:
-        return GuardResult(
-            tripped=True,
-            trip_class="DEPTH",
-            trigger_class=depth_hit,
-            matched_labels=[depth_hit],
-            priority=3,
-        )
+        why = _depth_suppressed(sample, growth_phase, growth_sub_state)
+        if why is None:
+            return GuardResult(
+                tripped=True,
+                trip_class="DEPTH",
+                trigger_class=depth_hit,
+                matched_labels=[depth_hit],
+                priority=3,
+            )
+        suppressed.append(f"DEPTH:{depth_hit}")
+        reason = why
 
     hypo_hit = _match_patterns(sample, _HYPO_PATTERNS)
     if hypo_hit:
-        return GuardResult(
-            tripped=True,
-            trip_class="HYPO",
-            trigger_class=hypo_hit,
-            matched_labels=[hypo_hit],
-            priority=2,
-        )
+        why = _hypo_suppressed(sample)
+        if why is None:
+            return GuardResult(
+                tripped=True,
+                trip_class="HYPO",
+                trigger_class=hypo_hit,
+                matched_labels=[hypo_hit],
+                priority=2,
+                suppressed_labels=suppressed,
+                suppress_reason=reason,
+            )
+        suppressed.append(f"HYPO:{hypo_hit}")
+        reason = reason or why
 
-    return GuardResult(tripped=False)
+    return GuardResult(tripped=False, suppressed_labels=suppressed, suppress_reason=reason)
 
 
 TIER_COPY = {

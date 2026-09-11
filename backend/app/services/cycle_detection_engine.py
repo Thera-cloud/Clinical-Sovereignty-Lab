@@ -192,6 +192,24 @@ CYCLE_DOMAINS: Dict[str, CycleDomainConfig] = {
         sensitivity=0.45,
         description="PGSD emotional GPS rhythm: coherence and 5D coordinate oscillations",
     ),
+    # QUANTUM-CRYSTAL-ARCH — Growth-phase architecture: the *healing* cycle.
+    # Density of consolidation / forward-motion language over time. Peaks are
+    # wins (peak_is_risk=False); troughs after a sustained plateau feed the
+    # phase resolver's demotion check. Consumed by thrive.healing_cycle.
+    "healing": CycleDomainConfig(
+        domain_id="healing",
+        display_name="Healing Cycle (heal → thrive)",
+        data_sources=[{"table": "conversation_history", "mode": "nlp"},
+                      {"table": "cycle_observations", "mode": "manual"}],
+        nlp_keywords=["healed", "healing", "forgave", "forgiven", "free",
+                       "grateful", "proud", "progress", "boundary", "stronger",
+                       "peace", "goal", "build", "next chapter", "moving forward",
+                       "let go", "grew", "growth", "thriving", "purpose"],
+        peak_is_risk=False,
+        min_observations=14,
+        sensitivity=0.4,
+        description="Consolidation and forward-motion language density; drives heal→thrive phase promotion",
+    ),
 }
 
 

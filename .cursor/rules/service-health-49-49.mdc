@@ -38,7 +38,7 @@ The backend reports `STARTUP COMPLETE: N/135 services healthy` on boot. The targ
 | 21 | command_tab_auditor | 3x daily Sovereign Command 25-endpoint trust scorecard |
 | 22 | the_eye_auditor | 3x daily The Eye 21-endpoint trust scorecard |
 | 23 | login_auditor | 3x daily blind WebSocket login test (client + coach) |
-| 24 | client_app_auditor | 3x daily client-facing 23-endpoint trust scorecard |
+| 24 | client_app_auditor | 3x daily client-facing 30-endpoint trust scorecard (incl. thrive) |
 | 25 | coach_dojo_auditor | 3x daily coach portal/DOJO/Night School 46-endpoint trust scorecard |
 | 26 | billing_auditor | 3x daily billing pipeline 32-endpoint trust scorecard (incl. discount management CRUD) |
 | 27 | defense_auditor | 3x daily defense subsystem 8-check trust scorecard |
@@ -74,6 +74,7 @@ The backend reports `STARTUP COMPLETE: N/135 services healthy` on boot. The targ
 | 56 | gkm_auditor | 3x daily GKM Ministry 11-check trust scorecard (10 REST + 1 DB integrity) |
 | 57 | token_usage_agent | Token usage daily/monthly resets, per-source snapshots, GKM annual receipts (30min cycle) |
 | 58 | nate_checkin_agent | 72h inactivity outreach for clients + coaches, 62h coach alert, DOJO-aware AI questions (30min cycle) |
+| 58b | thrive_agent | ThriveCoachAgent — growth-phase life-coach email reminders, goal checkpoints, weekly recaps, 24h phase evaluations (30min cycle, stagger 205s; sends gated by `ENABLE_GROWTH_PHASE`) |
 | 59 | nate_checkin_auditor | 3x daily check-in system trust scorecard (8 checks: table, activity, snooze, dedup, nudges, webhook) |
 | 60 | fcode_engine | ICD-10-CM suggestion service (request-response) |
 | 61 | session_payment_agent | Session payment 72h enforcement + 24h auto-cancel |

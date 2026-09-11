@@ -6040,8 +6040,17 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
                 crystal = None
             if crystal:
                 result["crystal_insight"] = crystal[:200]
-            lp = await conn.fetchval("SELECT r2_url FROM sse_panel_log WHERE user_id = ANY($1) AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1", ids)
-            result["last_panel_url"] = lp
+            lp_row = await conn.fetchrow(
+                "SELECT panel_id::text AS panel_id, r2_url, biome, generated_at FROM sse_panel_log "
+                "WHERE user_id = ANY($1) AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1",
+                ids,
+            )
+            if lp_row:
+                result["last_panel_url"] = lp_row["r2_url"]
+                # Thera-World hot button → "[SSE Panel:<id>]" ask-Nate flow (growth-phase v1)
+                result["last_panel_id"] = lp_row["panel_id"]
+                result["last_panel_biome"] = lp_row["biome"]
+                result["last_panel_generated_at"] = lp_row["generated_at"].isoformat() if lp_row["generated_at"] else None
     except Exception as e:
         logger.warning("sse_client_recap: %s", e)
     cached = _widget_cache.get(uid)

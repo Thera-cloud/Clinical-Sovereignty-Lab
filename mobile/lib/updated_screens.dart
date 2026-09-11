@@ -1628,6 +1628,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   Map<String, dynamic>? _recapData;
   bool _recapDismissed = false;
   Timer? _recapTimer;
+  // ── LN entry greeting (growth-phase v1): welcome / prime / direction ──
+  bool _entryGreetingRequested = false;
+  bool _entryGreetingShown = false;
   final Set<int> _dismissedSuggestions = {};
 
   // Nevedal biometric integration
@@ -1865,6 +1868,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _scheduleBackoffDecay();
     if (mounted) setState(() => _connectionStatus = "ONLINE (SECURE)");
     _addSystemMsg("Neural Link Established.");
+    _fetchEntryGreeting();
     _updateMetricsFromProfile(widget.currentUserProfile ?? {});
     _requestMetrics();
     _wsSend(jsonEncode({"type": "get_pending_nudges"}));
@@ -1992,6 +1996,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         _scheduleBackoffDecay();
         setState(() => _connectionStatus = "ONLINE (SECURE)");
         _addSystemMsg("Neural Link Established.");
+        _fetchEntryGreeting();
 
         final profile = data['profile'] ?? {};
         final tombstoneTok = (data['token'] ??
@@ -2978,7 +2983,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       if (resp.statusCode == 200 && mounted) {
         final data = jsonDecode(resp.body);
         if (data['journey'] != null ||
-            (data['active_quests'] as List?)?.isNotEmpty == true) {
+            (data['active_quests'] as List?)?.isNotEmpty == true ||
+            data['last_panel_id'] != null) {
           setState(() => _recapData = data);
           _recapTimer = Timer(const Duration(seconds: 30), () {
             if (mounted) setState(() => _recapDismissed = true);
@@ -2986,6 +2992,73 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         }
       }
     } catch (_) {}
+  }
+
+  /// Message used by the Thera-World hot button — identical to the Sovereign
+  /// Vault "Ask Nate About This" flow so the bridge resolves the panel via
+  /// `sse_panel_chat_context` ([SSE Panel:<uuid>]).
+  String _theraWorldAskMessage(String panelId) =>
+      "[SSE Panel:$panelId] I'd like to understand the characters and symbols in this journey image — "
+      "what my memory brought forward, why this core character appeared, and how it connects to my recent conversations. "
+      "If you're willing, walk me through your reasoning and three focus topics for today; "
+      "I may also want a deeper SIFT pass on the imagery.";
+
+  /// LN's app-open greeting (growth-phase v1). Three "Little Nate:" lines:
+  /// welcome chit-chat (≤600) → goals / last topic primer (300–500) →
+  /// direction with reasoning (≤900). Fetched once per screen lifetime after
+  /// the Neural Link is established; server caches per user for ~4h.
+  Future<void> _fetchEntryGreeting() async {
+    if (_entryGreetingRequested) return;
+    _entryGreetingRequested = true;
+    try {
+      final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+      final uname = (widget.currentUserProfile?['username'] ??
+              widget.username ??
+              widget.currentUserProfile?['hardware_id'] ??
+              '')
+          .toString();
+      if (tok.isEmpty || uname.isEmpty) return;
+      final resp = await http
+          .get(
+            Uri.parse(
+                '$defaultApiBaseUrl/api/thrive/${Uri.encodeComponent(uname)}/entry-greeting'),
+            headers: {'Authorization': 'Bearer $tok'},
+          )
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode != 200 || !mounted || _entryGreetingShown) return;
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final parts = <String>[
+        (data['welcome'] ?? '').toString().trim(),
+        (data['prime'] ?? '').toString().trim(),
+        (data['direction'] ?? '').toString().trim(),
+      ].where((p) => p.isNotEmpty).toList();
+      if (parts.isEmpty) return;
+      _entryGreetingShown = true;
+      setState(() {
+        for (final p in parts) {
+          _chatHistory.add("Little Nate: $p");
+        }
+        // Surface the latest Thera-World panel on the welcome card even when
+        // the recap endpoint had no journey row yet.
+        final panel = data['thera_panel'];
+        if (panel is Map && panel['panel_id'] != null) {
+          _recapData ??= {'user_name': widget.currentUserProfile?['name']};
+          _recapData!['last_panel_id'] ??= panel['panel_id'];
+          _recapData!['last_panel_biome'] ??= panel['biome'];
+        }
+        _scrollToBottom();
+      });
+      // fire-and-forget: mark greeting as opened
+      http
+          .post(
+            Uri.parse(
+                '$defaultApiBaseUrl/api/thrive/${Uri.encodeComponent(uname)}/entry-greeting/opened'),
+            headers: {'Authorization': 'Bearer $tok'},
+          )
+          .catchError((_) => http.Response('', 0));
+    } catch (e) {
+      debugPrint('[ENTRY_GREETING] skipped: $e');
+    }
   }
 
   void _dismissRecap() {
@@ -5533,6 +5606,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                           '\u{1F5FA} Journey: ${(_recapData!["journey"]["biome"] ?? "unknown").toString().replaceAll("_", " ")} — Panel ${_recapData!["journey"]["panel_count"] ?? 0}',
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 12)),
+                    if (_recapData!["journey"] == null &&
+                        _recapData!["last_panel_biome"] != null)
+                      Text(
+                          '\u{1F30D} Thera-World: latest panel — ${_recapData!["last_panel_biome"].toString().replaceAll("_", " ")}',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12)),
                     if ((_recapData!["active_quests"] as List?)?.isNotEmpty ==
                         true)
                       Text(
@@ -5560,6 +5639,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                         _dismissRecap();
                         _sendPresetMessage("Let's talk about my journey today");
                       }),
+                      // Thera-World hot button → latest panel + "ask Nate about
+                      // this panel" without opening the Sovereign Vault.
+                      if (_recapData!["last_panel_id"] != null)
+                        _recapBtn('\u{1F30D} Thera-World', () {
+                          _dismissRecap();
+                          _sendPresetMessage(_theraWorldAskMessage(
+                              _recapData!["last_panel_id"].toString()));
+                        }),
                       if ((_recapData!["active_quests"] as List?)?.isNotEmpty ==
                           true)
                         _recapBtn('Work on Quest', () {
@@ -6079,6 +6166,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<dynamic> _schedule = [];
   Map<String, dynamic>? _selectedClientBrief;
   List<Map<String, dynamic>> _clientSkillPlans = [];
+  // ── Growth-phase (thrive) coaching layer ─────────────────────────────────
+  // /api/thrive/{client}/brief — phase, coach focus, goals, session guidance
+  Map<String, dynamic>? _clientThriveBrief;
+  // /api/thrive/coach/{coach}/roster — phase badge per client (keyed by
+  // canonical username AND by hardware_id when the roster row carries one)
+  final Map<String, Map<String, dynamic>> _thriveRoster = {};
+  bool _thriveBusy = false;
   int _clinicalDirectoryPlanCount = 0;
   final Map<String, bool> _assistEnabledBySession = {};
   final Map<String, String> _sessionServiceMode =
@@ -6537,6 +6631,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   void _fetchDashboard() {
     _socket?.sink.add(jsonEncode({"type": "coach_get_clients"}));
+    _loadThriveRoster();
     _emitFetchCoachCalendar();
     _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
     _socket?.sink.add(jsonEncode({"type": "coach_get_my_availability"}));
@@ -7851,6 +7946,416 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _socket?.sink.add(
         jsonEncode({"type": "get_presession_brief", "client_id": clientId}));
     _loadClientSkillPlans(clientId);
+    _loadClientThriveBrief(clientId);
+  }
+
+  Map<String, String> get _thriveHeaders => {
+        'Authorization':
+            'Bearer ${(widget.currentUserProfile['token'] ?? '').toString()}',
+        'Content-Type': 'application/json',
+      };
+
+  /// Growth-phase roster: phase badge per client on Coach Command list views.
+  Future<void> _loadThriveRoster() async {
+    final coach = (widget.currentUserProfile['username'] ?? '').toString();
+    if (coach.isEmpty ||
+        (widget.currentUserProfile['token'] ?? '').toString().isEmpty) return;
+    try {
+      final resp = await http
+          .get(
+            Uri.parse(
+                '${AppConfig.apiBaseUrl}/api/thrive/coach/${Uri.encodeComponent(coach)}/roster'),
+            headers: _thriveHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted || resp.statusCode != 200) return;
+      final decoded = jsonDecode(resp.body);
+      final rows = decoded is List
+          ? decoded
+          : (decoded is Map && decoded['roster'] is List
+              ? decoded['roster'] as List
+              : const []);
+      setState(() {
+        _thriveRoster.clear();
+        for (final r in rows.whereType<Map>()) {
+          final m = Map<String, dynamic>.from(r);
+          final u = (m['username'] ?? '').toString();
+          if (u.isNotEmpty) _thriveRoster[u] = m;
+          final hw = (m['hardware_id'] ?? '').toString();
+          if (hw.isNotEmpty) _thriveRoster[hw] = m;
+        }
+      });
+    } catch (e) {
+      debugPrint('[THRIVE] roster skipped: $e');
+    }
+  }
+
+  Map<String, dynamic>? _thriveRowFor(Map<String, dynamic> c) {
+    final byId = _thriveRoster[_clientIdFromMap(c)];
+    if (byId != null) return byId;
+    final u = (c['username'] ?? '').toString();
+    return u.isEmpty ? null : _thriveRoster[u];
+  }
+
+  /// Coach-facing growth brief (phase, framework focus, goals, practices,
+  /// live-session guidance). `clientId` may be hardware_id or username —
+  /// the API resolves either to the canonical users.username.
+  Future<void> _loadClientThriveBrief(String clientId) async {
+    if (clientId.isEmpty ||
+        (widget.currentUserProfile['token'] ?? '').toString().isEmpty) return;
+    if (mounted) setState(() => _clientThriveBrief = null);
+    try {
+      final resp = await http
+          .get(
+            Uri.parse(
+                '${AppConfig.apiBaseUrl}/api/thrive/${Uri.encodeComponent(clientId)}/brief'),
+            headers: _thriveHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted || resp.statusCode != 200) return;
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map) {
+        setState(
+            () => _clientThriveBrief = Map<String, dynamic>.from(decoded));
+      }
+    } catch (e) {
+      debugPrint('[THRIVE] brief skipped: $e');
+    }
+  }
+
+  /// Coach override of LN's auto-promoted phase. `phase == null` releases the
+  /// pin and hands control back to the healing-cycle resolver.
+  Future<void> _thriveSetPhase(String clientId,
+      {String? phase, String? subState, String reason = 'coach_override'}) async {
+    if (clientId.isEmpty || _thriveBusy) return;
+    setState(() => _thriveBusy = true);
+    try {
+      final base =
+          '${AppConfig.apiBaseUrl}/api/thrive/${Uri.encodeComponent(clientId)}/phase';
+      final resp = phase == null
+          ? await http
+              .post(Uri.parse('$base/release'), headers: _thriveHeaders)
+              .timeout(const Duration(seconds: 15))
+          : await http
+              .post(Uri.parse('$base/override'),
+                  headers: _thriveHeaders,
+                  body: jsonEncode({
+                    'phase': phase,
+                    'reason': reason,
+                    'pin': true,
+                    if (subState != null) 'sub_state': subState,
+                  }))
+              .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(phase == null
+                ? 'Phase released to LN auto-resolver'
+                : 'Phase pinned: $phase${subState != null ? ' · $subState' : ''}')));
+        await _loadClientThriveBrief(clientId);
+        await _loadThriveRoster();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Phase update failed (${resp.statusCode})')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Phase update failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _thriveBusy = false);
+    }
+  }
+
+  static const Map<String, Color> _phaseColors = {
+    'stabilize': Color(0xFFEF4444),
+    'process': Color(0xFF9D4EDD),
+    'consolidate': Color(0xFFC9A962),
+    'thrive': Color(0xFF4ECDC4),
+    'generative': Color(0xFF22C55E),
+  };
+
+  Widget _phaseBadge(String phase, {String? subState, bool large = false}) {
+    final color = _phaseColors[phase] ?? Colors.grey;
+    final label = subState == null || subState.isEmpty
+        ? phase.toUpperCase()
+        : '${phase.toUpperCase()} · ${subState.replaceAll('_', ' ')}';
+    return Container(
+      padding: EdgeInsets.symmetric(
+          horizontal: large ? 10 : 7, vertical: large ? 5 : 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.6)),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              color: color,
+              fontSize: large ? 12 : 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8)),
+    );
+  }
+
+  /// GROWTH PHASE section for the client brief sheet: badge, healing signal,
+  /// coach focus, core questions, goal trajectories, practices, and the
+  /// live-session guidance list (same list the Studio co-host reads).
+  Widget _buildThriveBriefSection(Map<String, dynamic> brief) {
+    final tb = _clientThriveBrief;
+    if (tb == null) return const SizedBox.shrink();
+    final clientId =
+        _clientIdFromMap(Map<String, dynamic>.from(brief['client'] ?? {}));
+    final targetId = clientId.isNotEmpty
+        ? clientId
+        : (tb['username'] ?? '').toString();
+    final st = Map<String, dynamic>.from(tb['phase'] ?? {});
+    final phase = (st['phase'] ?? 'process').toString();
+    final subState = st['sub_state']?.toString();
+    final score = st['healing_score'];
+    final pinned = st['coach_override'] == true;
+    final goals = List<dynamic>.from(tb['goals_active'] ?? const []);
+    final done = List<dynamic>.from(tb['goals_completed'] ?? const []);
+    final practices = List<dynamic>.from(tb['practices'] ?? const []);
+    final guidance = List<dynamic>.from(tb['session_guidance'] ?? const []);
+    final questions = List<dynamic>.from(tb['core_questions'] ?? const []);
+    final lastTr = tb['last_transition'] is Map
+        ? Map<String, dynamic>.from(tb['last_transition'])
+        : null;
+    final color = _phaseColors[phase] ?? Colors.grey;
+
+    Widget h(String t) => Text(t,
+        style: const TextStyle(
+            color: Colors.grey,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.5,
+            fontSize: 12));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        h("GROWTH PHASE"),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.4)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                _phaseBadge(phase, subState: subState, large: true),
+                const SizedBox(width: 8),
+                if (pinned)
+                  const Text('pinned by coach',
+                      style: TextStyle(color: Colors.white54, fontSize: 11)),
+                const Spacer(),
+                if (score != null)
+                  Text(
+                      'healing ${((score is num ? score : double.tryParse(score.toString()) ?? 0) * 100).round()}%',
+                      style: TextStyle(color: color, fontSize: 12)),
+              ]),
+              if (st['phase_since'] != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                    'since ${st['phase_since'].toString().substring(0, 10)}'
+                    '${lastTr != null ? ' · ${lastTr['reason'] ?? ''}' : ''}',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+              ],
+              const SizedBox(height: 8),
+              Text((tb['coach_focus'] ?? '').toString(),
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 13, height: 1.35)),
+              if ((tb['time_focus'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('Time focus: ${tb['time_focus']}',
+                    style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+              ],
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final p in const ['process', 'consolidate', 'thrive'])
+                  if (p != phase)
+                    OutlinedButton(
+                      onPressed: _thriveBusy
+                          ? null
+                          : () => _thriveSetPhase(targetId, phase: p),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: _phaseColors[p]!),
+                        foregroundColor: _phaseColors[p],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        minimumSize: const Size(0, 30),
+                      ),
+                      child: Text(
+                          p == 'thrive'
+                              ? 'Promote → Thrive'
+                              : p == 'consolidate'
+                                  ? 'Bridge → Consolidate'
+                                  : 'Return → Process',
+                          style: const TextStyle(fontSize: 11)),
+                    ),
+                if (subState != 'working_through')
+                  OutlinedButton(
+                    onPressed: _thriveBusy
+                        ? null
+                        : () => _thriveSetPhase(targetId,
+                            phase: phase,
+                            subState: 'working_through',
+                            reason: 'coach: client wants to work something through'),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white38),
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      minimumSize: const Size(0, 30),
+                    ),
+                    child: const Text('Working-through (72h)',
+                        style: TextStyle(fontSize: 11)),
+                  ),
+                if (pinned)
+                  TextButton(
+                    onPressed:
+                        _thriveBusy ? null : () => _thriveSetPhase(targetId),
+                    child: const Text('Release to LN',
+                        style: TextStyle(fontSize: 11, color: Colors.white54)),
+                  ),
+              ]),
+            ],
+          ),
+        ),
+        if (questions.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          h("CORE QUESTIONS"),
+          const SizedBox(height: 6),
+          ...questions.map((q) => Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text('• $q',
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13)),
+              )),
+        ],
+        if (goals.isNotEmpty || done.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          h("GOAL TRAJECTORIES"),
+          const SizedBox(height: 6),
+          ...goals.whereType<Map>().map((g) {
+            final pct = (g['progress_pct'] is num)
+                ? (g['progress_pct'] as num).toDouble()
+                : 0.0;
+            final onTrack = g['on_track'];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Expanded(
+                        child: Text((g['text'] ?? '').toString(),
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 13))),
+                    Text(
+                        '${pct.round()}%${onTrack == false ? ' · behind' : ''}',
+                        style: TextStyle(
+                            color: onTrack == false
+                                ? const Color(0xFFEF4444)
+                                : const Color(0xFF4ECDC4),
+                            fontSize: 12)),
+                  ]),
+                  const SizedBox(height: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: (pct / 100).clamp(0.0, 1.0),
+                      minHeight: 4,
+                      backgroundColor: Colors.white10,
+                      color: onTrack == false
+                          ? const Color(0xFFEF4444)
+                          : const Color(0xFF4ECDC4),
+                    ),
+                  ),
+                  if (g['started_at'] != null || g['target_date'] != null)
+                    Text(
+                        [
+                          if (g['started_at'] != null)
+                            'started ${g['started_at'].toString().substring(0, 10)}',
+                          if (g['target_date'] != null)
+                            'target ${g['target_date'].toString().substring(0, 10)}',
+                          if (g['focus_area'] != null) '${g['focus_area']}',
+                        ].join(' · '),
+                        style:
+                            TextStyle(color: Colors.grey[500], fontSize: 11)),
+                ],
+              ),
+            );
+          }),
+          if (done.isNotEmpty)
+            Text(
+                'Completed recently: ${done.whereType<Map>().map((g) => g['text']).take(3).join('; ')}',
+                style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+        ],
+        if (practices.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          h("FOCUS AREAS · PRACTICES"),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: practices.whereType<Map>().map((p) {
+              final label = (p['label'] ?? p['practice_key'] ?? '').toString();
+              final streak = p['streak'] ?? 0;
+              final nextDue = p['next_due_at'] != null
+                  ? DateTime.tryParse(p['next_due_at'].toString())
+                  : null;
+              final due = p['due_now'] == true ||
+                  (nextDue != null && !nextDue.isAfter(DateTime.now()));
+              return Chip(
+                backgroundColor: const Color(0xFF1A1A2E),
+                side: BorderSide(
+                    color: due
+                        ? const Color(0xFFC9A962)
+                        : Colors.white24),
+                label: Text(
+                    '$label${streak is num && streak > 0 ? ' · ${streak}d' : ''}${due ? ' · due' : ''}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              );
+            }).toList(),
+          ),
+        ],
+        if (guidance.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          h("LIVE SESSION GUIDANCE"),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF4ECDC4).withOpacity(0.06),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: guidance
+                  .map((g) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text('▸ $g',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                height: 1.35)),
+                      ))
+                  .toList(),
+            ),
+          ),
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
   }
 
   Future<void> _loadClientSkillPlans(String clientId) async {
@@ -10159,6 +10664,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
           // Nevedal metrics
           NevedalMetricsGrid(metrics: metrics),
+
+          // Growth-phase coaching layer (phase badge, override, goals,
+          // practices, live-session guidance). Empty until /api/thrive loads.
+          if (_clientThriveBrief != null) ...[
+            const SizedBox(height: 24),
+            _buildThriveBriefSection(brief),
+          ],
 
           if (_clinicalDirectoryPlanCount > 0) ...[
             const SizedBox(height: 16),
@@ -16421,6 +16933,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                               color: Colors.white,
                               fontWeight: FontWeight.bold)),
                     ),
+                    if (_thriveRowFor(member) != null) ...[
+                      _phaseBadge(
+                          (_thriveRowFor(member)!['phase'] ?? 'process')
+                              .toString(),
+                          subState:
+                              _thriveRowFor(member)!['sub_state']?.toString()),
+                      const SizedBox(width: 6),
+                    ],
                     RiskBadge(riskLevel: risk),
                   ],
                 ),

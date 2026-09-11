@@ -336,8 +336,21 @@ async def handle_sendgrid_inbound(request: Request):
     except Exception as e:
         logger.warning("SendGrid inbound: negotiation route error: %s", e)
 
-    # ─── FIX 1: dispatch on recipient + keyword ──────────────────────────
+    # ─── QUANTUM-CRYSTAL-ARCH: thrive@ (growth-phase life-coach replies) ──
+    # Routed BEFORE the approval keyword scan: a "YES, did my three good
+    # things" reply must never be treated as a strategy APPROVE.
     recipient_local = _extract_local_part(recipient_raw)
+    if recipient_local.split("+", 1)[0].lower() == "thrive" or "[#tgt:" in (subject or "").lower():
+        try:
+            from app.services.thrive.thrive_reply_processor import handle_thrive_reply
+
+            _tr = await handle_thrive_reply(db_pool, sender_email, subject, cleaned_text)
+            logger.info("SendGrid inbound: thrive reply %s from %s", _tr.get("action") or _tr.get("reason"), sender_email)
+        except Exception as e:
+            logger.warning("SendGrid inbound: thrive route error: %s", e)
+        return Response(status_code=200)
+
+    # ─── FIX 1: dispatch on recipient + keyword ──────────────────────────
     first_line = _first_meaningful_line(cleaned_text)
     keyword_hit = _matches_approval_keyword(first_line)
     routed_to_approval = False

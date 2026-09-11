@@ -10501,6 +10501,27 @@ class AzureCortex:
         except Exception as _fl_err:
             print(f">>> [CLINICAL-FAST-LOOP] non-fatal: {type(_fl_err).__name__}: {_fl_err}")
 
+        # QUANTUM-CRYSTAL-ARCH — growth-phase coaching addendum (ENABLE_GROWTH_PHASE, default OFF).
+        # heal→thrive phase model; stashes phase on profile so the post-LLM boundary guard is phase-gated.
+        try:
+            from app.services.thrive.phase_resolver import ENABLE_GROWTH_PHASE as _gp_on, note_turn as _gp_note
+            if _gp_on and _role == "CLIENT" and not dojo_type and db_pool is not None:
+                from app.services.thrive import practice_tracker as _gp_pt
+                from app.services.thrive.persona import build_phase_addendum as _gp_addendum
+                _gp_crisis = any(w in (user_text or "").lower() for w in ("suicid", "kill myself", "end my life", "not want to be alive"))
+                _gp_state = await _gp_note(db_pool, uid, user_text, crisis=_gp_crisis)
+                profile["growth_phase"] = {"phase": _gp_state.phase, "sub_state": _gp_state.sub_state}
+                _gp_focus = await _gp_pt.focus_state(db_pool, uid)
+                _gp_done = _gp_pt.detect_completion(user_text, [a.get("practice_key") for a in (_gp_focus.get("areas") or []) if a.get("practice_key")])
+                if _gp_done:
+                    asyncio.create_task(_gp_pt.log_completion(db_pool, uid, _gp_done, source="chat", harvest=user_text))
+                _gp_text = _gp_addendum(_gp_state.phase, _gp_state.sub_state, _gp_focus, display_name=(profile.get("name") or "").split(" ")[0] or None)
+                if _gp_text:
+                    system_prompt = (system_prompt or "") + "\n\n---\n" + _gp_text
+                    print(f">>> [GROWTH PHASE] {_gp_state.phase}/{_gp_state.sub_state or '-'} addendum {len(_gp_text)} chars uid={uid}")
+        except Exception as _gp_err:
+            print(f">>> [GROWTH PHASE] non-fatal: {type(_gp_err).__name__}: {_gp_err}")
+
         # QUANTUM-CRYSTAL-ARCH: high-risk occupational prompt modifiers (reserved headroom)
         _pop_sfx = ""
         try:

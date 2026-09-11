@@ -648,6 +648,58 @@ def _hash_uid(uid: str) -> str:
     return hashlib.sha256((uid or "").encode()).hexdigest()[:12]
 
 
+# QUANTUM-CRYSTAL-ARCH — boundary-guard trip observability (thrive/growth phase).
+# Every DEPTH/HYPO/CRISIS trip *and* every suppressed match is appended here so
+# regressions like LetsGoLisa (weeks of silent DEPTH trips) are visible without
+# reproducing the turn. Text is truncated (160 chars), uid is hashed.
+_GUARD_TRIP_PATH = os.getenv(
+    "LN_GUARD_TRIP_PATH",
+    os.path.join(os.getenv("DATA_DIR", "data"), "guard_trips.jsonl"),
+)
+
+
+def _persist_guard_trips(
+    uid: Optional[str],
+    user_text: str,
+    hits: List[Dict[str, Any]],
+    growth_phase: Optional[str],
+    growth_sub_state: Optional[str],
+) -> None:
+    rows = []
+    ts = datetime.now(timezone.utc).isoformat()
+    for h in hits or []:
+        if not isinstance(h, dict) or h.get("guard_id") != "coaching_boundary_guard":
+            continue
+        rows.append({
+            "ts": ts,
+            "uid": _hash_uid(uid or ""),
+            "trip_class": h.get("trip_class"),
+            "trigger_class": h.get("trigger_class"),
+            "matched_labels": h.get("matched_labels") or [],
+            "suppressed": bool(h.get("suppressed")),
+            "growth_phase": growth_phase,
+            "growth_sub_state": growth_sub_state,
+            "user_text_head": (user_text or "")[:160],
+        })
+    if not rows:
+        return
+
+    async def _write():
+        try:
+            async with _audit_lock:
+                os.makedirs(os.path.dirname(_GUARD_TRIP_PATH) or ".", exist_ok=True)
+                with open(_GUARD_TRIP_PATH, "a") as f:
+                    for r in rows:
+                        f.write(json.dumps(r) + "\n")
+        except Exception as e:
+            logger.debug("bridge_enrichment: guard trip write failed: %s", e)
+
+    try:
+        asyncio.get_event_loop().create_task(_write())
+    except RuntimeError:
+        pass
+
+
 def log_turn_audit(
     uid: str = "",
     provider: str = "",
@@ -698,6 +750,8 @@ def apply_ln_post_llm_pipeline(
     display_name: Optional[str] = None,
     force_crisis: bool = False,
     profile: Optional[Dict[str, Any]] = None,
+    growth_phase: Optional[str] = None,
+    growth_sub_state: Optional[str] = None,
 ) -> Tuple[str, List[Dict[str, Any]], List[str]]:
     """Boundary router (crisis/depth/hypo) then Tier-3 language guard — QUANTUM-CRYSTAL-ARCH.
 
@@ -706,6 +760,9 @@ def apply_ln_post_llm_pipeline(
     user_text. Forces `apply_ln_boundary_post_guard` to treat the turn as CRISIS
     even if its own lexicon-only check disagrees. See that function's docstring
     for the 2026-07 T12 incident this closes.
+
+    growth_phase / growth_sub_state: client's growth phase (thrive package).
+    When omitted, read from ``profile['growth_phase']`` if the caller stashed it.
     """
     from app.services.crisis_response_router import apply_ln_boundary_post_guard
     from app.services.little_nate_clinical_output_policy import (
@@ -713,13 +770,25 @@ def apply_ln_post_llm_pipeline(
         fix_confidentiality_overpromise,
     )
 
+    if growth_phase is None and isinstance(profile, dict):
+        _gp = profile.get("growth_phase")
+        if isinstance(_gp, dict):
+            growth_phase = _gp.get("phase")
+            growth_sub_state = growth_sub_state or _gp.get("sub_state")
+        elif isinstance(_gp, str):
+            growth_phase = _gp
+
     cleaned, boundary_hits = apply_ln_boundary_post_guard(
         text or "",
         user_text or "",
         registry_parts=registry_parts,
         force_crisis=force_crisis,
         profile=profile,
+        growth_phase=growth_phase,
+        growth_sub_state=growth_sub_state,
     )
+    if boundary_hits:
+        _persist_guard_trips(uid, user_text or "", boundary_hits, growth_phase, growth_sub_state)
     cleaned, lang_hits = apply_language_guard(cleaned, uid=uid)
     if display_name:
         deduped = dedupe_name_stamps(cleaned, display_name)

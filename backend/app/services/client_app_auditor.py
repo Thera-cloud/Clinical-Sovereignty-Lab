@@ -123,6 +123,18 @@ TAB_ENDPOINTS = [
             ("GET", "/api/clinical-directory/plans"),
         ],
     },
+    {
+        # QUANTUM-CRYSTAL-ARCH — growth-phase / thrive coaching surface (migration 434)
+        "tab": "Growth Phase & Thrive",
+        "tab_num": 13,
+        "endpoints": [
+            ("GET", "/api/thrive/health"),
+            ("GET", "/api/thrive/catalog"),
+            ("GET", "/api/thrive/frameworks"),
+            ("GET", "/api/thrive/audit_client/phase"),
+            ("GET", "/api/thrive/audit_client/brief"),
+        ],
+    },
 ]
 
 

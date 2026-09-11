@@ -98,6 +98,11 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   int _secs = 0;
   int _personaEpoch = 0;
   List<Map<String, dynamic>> _lastDiff = const [];
+  // Growth-phase session guidance — coach eyes only (INV-6: never spoken on air).
+  List<Map<String, dynamic>> _thriveRoster = const [];
+  String _guidanceClient = '';
+  Map<String, dynamic>? _guidanceBrief;
+  bool _guidanceBusy = false;
 
   Map<String, String> get _h => {
         'Content-Type': 'application/json',
@@ -109,6 +114,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     super.initState();
     _studioTabs = TabController(length: 5, vsync: this);
     _refresh();
+    _loadThriveRoster();
   }
 
   @override
@@ -286,6 +292,170 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         _queueBoard = json.decode(r.body) as Map<String, dynamic>;
       });
     } catch (_) {}
+  }
+
+  Future<void> _loadThriveRoster() async {
+    try {
+      final r = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/thrive/coach/me/roster'),
+        headers: _h,
+      ).timeout(const Duration(seconds: 15));
+      if (!mounted || r.statusCode != 200) return;
+      final j = json.decode(r.body) as Map<String, dynamic>;
+      final rows = (j['clients'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      setState(() => _thriveRoster = rows);
+    } catch (_) {}
+  }
+
+  Future<void> _loadGuidance(String client) async {
+    if (client.isEmpty) {
+      setState(() {
+        _guidanceClient = '';
+        _guidanceBrief = null;
+      });
+      return;
+    }
+    setState(() {
+      _guidanceClient = client;
+      _guidanceBusy = true;
+    });
+    try {
+      final r = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/thrive/$client/brief'),
+        headers: _h,
+      ).timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() {
+        _guidanceBrief =
+            r.statusCode == 200 ? json.decode(r.body) as Map<String, dynamic> : null;
+        _guidanceBusy = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _guidanceBusy = false);
+    }
+  }
+
+  static const Map<String, Color> _phaseColors = {
+    'stabilize': Color(0xFFEF4444),
+    'process': Color(0xFF9D4EDD),
+    'consolidate': Color(0xFFC9A962),
+    'thrive': Color(0xFF4ECDC4),
+    'generative': Color(0xFF22C55E),
+  };
+
+  Widget _guidanceRail() {
+    final brief = _guidanceBrief;
+    final phase = (brief?['phase']?['phase'] ?? '').toString();
+    final subState = (brief?['phase']?['sub_state'] ?? '').toString();
+    final guidance = (brief?['session_guidance'] as List? ?? const [])
+        .map((e) => e.toString())
+        .where((s) => s.trim().isNotEmpty)
+        .toList();
+    final color = _phaseColors[phase] ?? _muted;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0A),
+        border: Border.all(color: _gold.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('SESSION GUIDANCE · COACH EYES ONLY',
+              style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 4),
+          const Text(
+            'Growth-phase prompts for a client you are working with live. Shown to you only — '
+            'never fed to Little Nate on air (INV-6).',
+            style: TextStyle(color: _muted, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                dropdownColor: const Color(0xFF111111),
+                value: _guidanceClient.isEmpty ? null : _guidanceClient,
+                hint: const Text('Select client…',
+                    style: TextStyle(color: _muted, fontSize: 12)),
+                items: _thriveRoster.map((c) {
+                  final u = (c['username'] ?? '').toString();
+                  final n = (c['name'] ?? u).toString();
+                  final p = (c['phase'] ?? '').toString();
+                  return DropdownMenuItem<String>(
+                    value: u,
+                    child: Text('$n · $p',
+                        style: const TextStyle(color: _text, fontSize: 12)),
+                  );
+                }).toList(),
+                onChanged: _guidanceBusy ? null : (v) => _loadGuidance(v ?? ''),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: const Icon(Icons.refresh, color: _gold, size: 18),
+              onPressed: _guidanceBusy
+                  ? null
+                  : () {
+                      _loadThriveRoster();
+                      if (_guidanceClient.isNotEmpty) _loadGuidance(_guidanceClient);
+                    },
+            ),
+            if (_guidanceClient.isNotEmpty)
+              IconButton(
+                tooltip: 'Clear',
+                icon: const Icon(Icons.close, color: _muted, size: 18),
+                onPressed: () => _loadGuidance(''),
+              ),
+          ]),
+          if (_guidanceBusy)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: LinearProgressIndicator(minHeight: 2, color: _gold),
+            ),
+          if (brief != null) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  border: Border.all(color: color),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  subState.isNotEmpty
+                      ? '${phase.toUpperCase()} · ${subState.replaceAll('_', ' ')}'
+                      : phase.toUpperCase(),
+                  style: TextStyle(color: color, fontSize: 10, letterSpacing: 1),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  (brief['time_focus'] ?? '').toString(),
+                  style: const TextStyle(color: _muted, fontSize: 11),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            if (guidance.isEmpty)
+              const Text('No guidance yet — LN needs a few more turns with this client.',
+                  style: TextStyle(color: _muted, fontSize: 12))
+            else
+              ...guidance.map((g) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text('▸ $g',
+                        style: const TextStyle(color: _text, fontSize: 12, height: 1.35)),
+                  )),
+          ],
+        ],
+      ),
+    );
   }
 
   void _startCallerPoll() {
@@ -1517,6 +1687,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
           const SizedBox(height: 16),
           _callerBoard(),
         ],
+        const SizedBox(height: 16),
+        _guidanceRail(),
       ],
     );
   }
