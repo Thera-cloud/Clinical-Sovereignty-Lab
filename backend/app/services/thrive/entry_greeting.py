@@ -49,6 +49,7 @@ CACHE_HOURS = float(os.getenv("LN_ENTRY_GREETING_CACHE_HOURS", "4"))
 ENABLE_LLM = os.getenv("LN_ENTRY_GREETING_LLM", "true").lower() in ("1", "true", "yes")
 SIGNALS_TIMEOUT_S = float(os.getenv("LN_ENTRY_GREETING_SIGNALS_TIMEOUT_S", "10"))
 LLM_TIMEOUT_S = float(os.getenv("LN_ENTRY_GREETING_LLM_TIMEOUT_S", "15"))
+BACKGROUND_POLISH_TIMEOUT_S = float(os.getenv("LN_ENTRY_GREETING_BG_TIMEOUT_S", "120"))
 
 DAY_PARTS = (
     (5, 11, "morning"),
@@ -185,6 +186,37 @@ def _first(name: str) -> str:
     return (name or "").strip().split(" ")[0] or "friend"
 
 
+_DAY_PART_HUMAN = {"morning": "morning", "midday": "midday", "afternoon": "afternoon", "evening": "evening", "late_night": "late-night"}
+
+# Internal cycle-domain keys → what LN says out loud. Never leak snake_case signal names to a client.
+_DOMAIN_HUMAN = {
+    "pgsd_field": "emotional field", "emotional_state": "mood", "healing": "healing", "coping": "coping",
+    "addiction": "urge", "porn_addiction": "urge", "sexual_desire": "desire", "harm_risk": "safety",
+    "criminal_intent": "safety", "financial": "money", "economic": "money", "legacy": "family-pattern",
+    "group_dynamics": "relationship", "cultural": "belonging", "results": "progress", "code_learning": "learning",
+}
+
+# Crystal text that is synthesis/meta output, not something LN should quote back to the client.
+_META_CRYSTAL = re.compile(
+    r"\b(after analyzing|knowledge fragments?|second-order|first-order|non-obvious principle|the (user|client) (is|has|seems)|"
+    r"synthesi[sz]|crystal|pattern reveals|principle at work|cluster|fragments?)\b", re.I,
+)
+
+
+def _human_domain(domain: str) -> str:
+    d = (domain or "").strip()
+    return _DOMAIN_HUMAN.get(d, d.replace("_", " ") or "inner")
+
+
+def _human_day_part(day_part: str) -> str:
+    return _DAY_PART_HUMAN.get(day_part or "", (day_part or "").replace("_", " "))
+
+
+def _quotable_crystal(text: str) -> bool:
+    t = (text or "").strip()
+    return 30 <= len(t) <= 400 and not _META_CRYSTAL.search(t)
+
+
 def _greeting_word(day_part: str) -> str:
     return {
         "morning": "Good morning",
@@ -302,10 +334,10 @@ async def gather_signals(db_pool: Any, user_id: str) -> EntrySignals:
         if u and u["id"]:
             try:
                 cr = await conn.fetch(
-                    "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id = $1 AND confidence >= 0.4 AND superseded_by IS NULL ORDER BY created_at DESC LIMIT 4",
+                    "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id = $1 AND confidence >= 0.4 AND superseded_by IS NULL ORDER BY created_at DESC LIMIT 12",
                     u["id"],
                 )
-                sig.crystals = [c["crystal_text"][:220] for c in cr]
+                sig.crystals = [c["crystal_text"][:220] for c in cr if _quotable_crystal(c["crystal_text"])][:4]
             except Exception:
                 pass
 
@@ -420,7 +452,8 @@ def compose_welcome(s: EntrySignals) -> str:
         elif s.days_since_last >= 2:
             bits.append(f"Last time we talked was {s.last_seen_local or 'a few days ago'}.")
     if s.usual_day_part and s.usual_day_part != s.day_part:
-        bits.append(f"You're here earlier than your usual {s.usual_day_part} — I'm curious what brought you in now." if s.day_part in ("morning", "midday") else f"A change from your usual {s.usual_day_part} check-ins.")
+        _udp = _human_day_part(s.usual_day_part)
+        bits.append(f"You're here earlier than your usual {_udp} — I'm curious what brought you in now." if s.day_part in ("morning", "midday") else f"A change from your usual {_udp} check-ins.")
     if s.mood:
         bits.append(f"Last I sensed, you were feeling {s.mood.lower()}." + (" Does that still fit?" if s.opens_with_chitchat else ""))
     elif s.mood_trend == "rising":
@@ -486,7 +519,7 @@ def compose_direction(s: EntrySignals) -> str:
         topics.append("1) Finish what you opened last time. You asked to work it through, and unfinished material tends to leak into everything else until it's met.")
     for p in s.cycle_predictions[:1]:
         when = "today" if p["in_days"] <= 0.5 else f"in about {max(1, int(round(p['in_days'])))} day{'s' if p['in_days'] >= 1.5 else ''}"
-        topics.append(f"{len(topics)+1}) Your {p['domain']} pattern predicts {p['event'].replace('_', ' ')} {when} (confidence {int(p['confidence']*100)}%). Naming it before it arrives is how we make it smaller.")
+        topics.append(f"{len(topics)+1}) Your {_human_domain(p['domain'])} pattern points to {p['event'].replace('_', ' ')} {when} (I'm about {int(p['confidence']*100)}% sure). Naming it before it arrives is how we make it smaller.")
     if s.thera_panel and s.thera_panel.get("age_days") is not None and s.thera_panel["age_days"] <= 2:
         biome = s.thera_panel.get("biome") or "your world"
         topics.append(f"{len(topics)+1}) Yesterday's Thera-World panel put you in {biome}. Your memory chose those symbols for a reason — tap Thera-World below and I'll walk you through what surfaced.")
@@ -506,7 +539,7 @@ def compose_direction(s: EntrySignals) -> str:
             topics.append(f"{len(topics)+1}) Return to what you were carrying last time and notice what's shifted since — we track change by revisiting, not by pushing.")
         if s.active_cycles and len(topics) < 3:
             c = s.active_cycles[0]
-            topics.append(f"{len(topics)+1}) There's a roughly {int(round(c['period_days']))}-day rhythm in your {c['domain']} signal. Let's map where you are in it so it stops feeling random.")
+            topics.append(f"{len(topics)+1}) There's a roughly {int(round(c['period_days']))}-day rhythm in your {_human_domain(c['domain'])}. Let's map where you are in it so it stops feeling random.")
         if len(topics) < 3:
             topics.append(f"{len(topics)+1}) Slow attention to the body first — where it tightens when the topic comes up, and what it needs before we go further.")
         why = _PHASE_WHY.get(s.phase, _PHASE_WHY[gp.DEFAULT_PHASE])
@@ -602,35 +635,63 @@ async def build_entry_greeting(db_pool: Any, user_id: str, *, app_state: Any = N
         logger.warning("entry_greeting: gather_signals timed out (%ss) for %s — minimal signals", SIGNALS_TIMEOUT_S, username)
         s = EntrySignals(username=username, display_name=username)
     drafts = {"welcome": compose_welcome(s), "prime": compose_prime(s), "direction": compose_direction(s)}
+    polish_task = asyncio.ensure_future(_llm_polish(app_state, s, drafts))
+    polished: Optional[Dict[str, str]] = None
     try:
-        polished = await asyncio.wait_for(_llm_polish(app_state, s, drafts), timeout=LLM_TIMEOUT_S)
+        polished = await asyncio.wait_for(asyncio.shield(polish_task), timeout=LLM_TIMEOUT_S)
     except asyncio.TimeoutError:
-        logger.warning("entry_greeting: LLM polish timed out (%ss) for %s — template fallback", LLM_TIMEOUT_S, username)
-        polished = None
+        # Serve the template now; let the LLM finish in the background and upgrade the
+        # cached row so the next open (within the cache window) is LN's polished voice.
+        logger.warning("entry_greeting: LLM polish exceeded %ss for %s — template now, polishing in background", LLM_TIMEOUT_S, username)
+        asyncio.ensure_future(_finish_polish_in_background(db_pool, s, polish_task))
+    except Exception as e:
+        logger.info("entry_greeting: LLM polish failed: %s", e)
     parts = polished or drafts
     generated_by = "llm" if polished else "template"
+    g = _make_greeting(s, parts, generated_by, delivered=True)
+    await _store(db_pool, s, g, delivered=True)
+    return g
+
+
+def _make_greeting(s: EntrySignals, parts: Dict[str, str], generated_by: str, *, delivered: bool) -> EntryGreeting:
     panel_id = s.thera_panel.get("panel_id") if s.thera_panel else None
-    g = EntryGreeting(
-        username=username, welcome=parts["welcome"], prime=parts["prime"], direction=parts["direction"],
+    return EntryGreeting(
+        username=s.username, welcome=parts["welcome"], prime=parts["prime"], direction=parts["direction"],
         day_part=s.day_part, local_hour=s.local_hour, growth_phase=s.phase,
         thera_panel_id=panel_id, thera_panel=s.thera_panel, cached=False, generated_by=generated_by,
         greeted_at=datetime.now(timezone.utc).isoformat(),
     )
+
+
+async def _store(db_pool: Any, s: EntrySignals, g: EntryGreeting, *, delivered: bool) -> None:
     try:
         sigd = s.to_dict()
-        sigd["generated_by"] = generated_by
+        sigd["generated_by"] = g.generated_by
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO ln_entry_greetings
                     (username, local_hour, day_part, growth_phase, part_welcome, part_prime, part_direction, thera_panel_id, signals, delivered)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, TRUE)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
                 """,
-                username, s.local_hour, s.day_part, s.phase, g.welcome, g.prime, g.direction, panel_id, json.dumps(sigd, default=str),
+                s.username, s.local_hour, s.day_part, s.phase, g.welcome, g.prime, g.direction, g.thera_panel_id,
+                json.dumps(sigd, default=str), delivered,
             )
     except Exception as e:
         logger.warning("entry_greeting: log insert failed: %s", e)
-    return g
+
+
+async def _finish_polish_in_background(db_pool: Any, s: EntrySignals, task: "asyncio.Future") -> None:
+    try:
+        polished = await asyncio.wait_for(task, timeout=BACKGROUND_POLISH_TIMEOUT_S)
+    except Exception as e:
+        logger.info("entry_greeting: background polish gave up for %s: %s", s.username, type(e).__name__)
+        return
+    if not polished:
+        return
+    g = _make_greeting(s, polished, "llm_background", delivered=False)
+    await _store(db_pool, s, g, delivered=False)
+    logger.info("entry_greeting: background LLM polish cached for %s", s.username)
 
 
 async def mark_opened(db_pool: Any, user_id: str) -> None:
