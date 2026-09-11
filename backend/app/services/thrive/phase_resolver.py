@@ -404,6 +404,37 @@ async def evaluate(
     now = datetime.now(timezone.utc)
     transition: Optional[Transition] = None
 
+    # Cold start: a client who has been in PROCESS for months should not be held
+    # another min_days_in_phase just because the phase row was created today.
+    if state.phase == gp.DEFAULT_PHASE and state.set_by == "auto" and not state.coach_override and db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                moved = await conn.fetchval(
+                    "SELECT COUNT(*) FROM client_growth_phase_history WHERE username = $1", state.username
+                )
+                first = None
+                if not moved:
+                    first = await conn.fetchval(
+                        "SELECT MIN(created_at) FROM conversation_history WHERE user_id = $1 OR user_id = $2",
+                        state.username, hardware_id or state.username,
+                    )
+            if first:
+                state.phase_since = first if first.tzinfo else first.replace(tzinfo=timezone.utc)
+        except Exception as e:
+            logger.debug("phase_resolver: tenure lookup failed for %s: %s", state.username, e)
+
+    # Language-only evidence is enough to promote when the window is dense and
+    # wound-free (coherence/pmb/cycles/behaviour only accrue after the client
+    # has practice and metric history). Otherwise require two components.
+    _lang = (signal.evidence or {}).get("language") or {}
+    _lang_strong = (
+        signal.components.get("language") is not None
+        and int(_lang.get("n") or 0) >= 30
+        and int(_lang.get("wound") or 0) + int(_lang.get("asks") or 0) == 0
+        and float(signal.score or 0) >= pol.promote_score + 0.10
+    )
+    _enough_evidence = len(signal.available) >= 2 or _lang_strong
+
     if signal.score is not None:
         state.healing_score = signal.score
         if signal.score >= pol.promote_score:
@@ -420,7 +451,7 @@ async def evaluate(
             and state.days_in_phase(now) >= pol.min_days_in_phase
             and state.sub_state is None
             and gp.next_phase(state.phase)
-            and len(signal.available) >= 2
+            and _enough_evidence
         ):
             to = gp.next_phase(state.phase)
             transition = Transition(

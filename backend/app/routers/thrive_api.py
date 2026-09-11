@@ -153,7 +153,7 @@ async def catalog(_: Dict = Depends(get_current_user)):
     return {
         "focus_areas": {k: asdict(v) for k, v in pc.FOCUS_AREAS.items()},
         "practices": {k: asdict(v) for k, v in pc.PRACTICES.items()},
-        "anchor_practices": dict(pc.ANCHOR_PRACTICES),
+        "anchor_practices": {k: v.anchor_practice for k, v in pc.FOCUS_AREAS.items()},
         "strengths_interview": list(pc.STRENGTHS_INTERVIEW),
     }
 
