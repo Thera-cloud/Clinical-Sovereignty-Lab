@@ -10672,14 +10672,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             _buildThriveBriefSection(brief),
           ],
 
-          if (_clinicalDirectoryPlanCount > 0) ...[
+          if (!isNativeIOS && _clinicalDirectoryPlanCount > 0) ...[
             const SizedBox(height: 16),
             Text(
               "CLINICAL DIRECTORY: $_clinicalDirectoryPlanCount care-plan templates available — Nate can suggest when the client asks for a care/treatment plan.",
               style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
             ),
           ],
-          if (_clientSkillPlans.isNotEmpty) ...[
+          if (isNativeIOS) ...[
+            const SizedBox(height: 16),
+            const Text(
+              "Care-plan and clinical-directory tools stay on the coach web portal (coach.sovereignsanctuary.net).",
+              style: TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
+            ),
+          ],
+          if (!isNativeIOS && _clientSkillPlans.isNotEmpty) ...[
             const SizedBox(height: 24),
             const Text(
               "SKILL / TREATMENT PLANS",
@@ -10813,14 +10820,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           if ((brief['fcodes_active'] is List &&
                   (brief['fcodes_active'] as List).isNotEmpty) ||
               _zoomInsightText(brief['zoom_ai_insight']).isNotEmpty) ...[
-            const Text("CLINICAL SIGNALS",
+            Text(isNativeIOS ? "SESSION NOTES" : "CLINICAL SIGNALS",
                 style: TextStyle(
                     color: Colors.grey,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.5,
                     fontSize: 12)),
             const SizedBox(height: 8),
-            if (brief['fcodes_active'] is List)
+            if (!isNativeIOS && brief['fcodes_active'] is List)
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -10966,6 +10973,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   // Legacy 'disabled' from older bridges is treated as shrink (fail-closed UI).
   // ---------------------------------------------------------------------------
   Widget _buildSensitiveProfilePill(Map<String, dynamic> brief) {
+    if (isNativeIOS) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text(
+          'Sensitive profile tools are on the coach web portal (coach.sovereignsanctuary.net).',
+          style: TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
+        ),
+      );
+    }
     final vis = brief['sensitive_bridge_visibility'];
     if (vis is! Map) return const SizedBox.shrink();
 

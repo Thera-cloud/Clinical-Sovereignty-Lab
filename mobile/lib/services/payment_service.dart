@@ -85,15 +85,16 @@ class PaymentService {
     await _purchaseViaStripe(productId, uid: uid, token: token, promoCode: promoCode);
   }
 
-  Future<void> restorePurchases({String? authToken}) async {
+  Future<PurchaseStatusResult> restorePurchases({String? authToken}) async {
     if (IapService.instance.isNativeIOS) {
-      await IapService.instance.restorePurchases(
+      final result = await IapService.instance.restorePurchases(
         userId: _userId,
         authToken: authToken ?? _authToken,
       );
-      return;
+      _purchaseUpdates.add(result);
+      return result;
     }
-    await _restoreFromBackend(token: authToken ?? _authToken);
+    return _restoreFromBackend(token: authToken ?? _authToken);
   }
 
   void dispose() {
@@ -224,10 +225,16 @@ class PaymentService {
     return map[productId];
   }
 
-  Future<void> _restoreFromBackend({String? token}) async {
+  Future<PurchaseStatusResult> _restoreFromBackend({String? token}) async {
     if (token == null || token.isEmpty) {
       _logger.w('PaymentService: Restore requires auth token');
-      return;
+      final result = const PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.error,
+        error: 'Not authenticated',
+      );
+      _purchaseUpdates.add(result);
+      return result;
     }
 
     final baseUrl = AppConfig.apiBaseUrl
@@ -242,14 +249,30 @@ class PaymentService {
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         _logger.i('PaymentService: Restored — plan=${data['subscription_plan']}');
-        _purchaseUpdates.add(PurchaseStatusResult(
+        final result = PurchaseStatusResult(
           productId: 'restore',
           status: PaymentStatus.restored,
           restoreData: data,
-        ));
+        );
+        _purchaseUpdates.add(result);
+        return result;
       }
+      final failed = PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.error,
+        error: 'Restore failed: ${resp.statusCode}',
+      );
+      _purchaseUpdates.add(failed);
+      return failed;
     } catch (e, st) {
       _logger.e('PaymentService: Restore from backend failed', error: e, stackTrace: st);
+      final failed = PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.error,
+        error: e.toString(),
+      );
+      _purchaseUpdates.add(failed);
+      return failed;
     }
   }
 }

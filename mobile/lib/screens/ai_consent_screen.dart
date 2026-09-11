@@ -136,6 +136,13 @@ class _AiConsentScreenState extends State<AiConsentScreen> {
                       'responses, your conversations are processed by secure AI services.',
                       style: TextStyle(color: _D.textPrimary, fontSize: 15, height: 1.6),
                     ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'This app does not provide medical diagnoses, health measurements for clinical use, '
+                      'or treatment advice. Content is for self-reflection and coaching support only. '
+                      'If you are in crisis, call 988 or go to the nearest emergency room.',
+                      style: TextStyle(color: _D.textSecondary, fontSize: 13, height: 1.5),
+                    ),
                     const SizedBox(height: 28),
 
                     _sectionCard(

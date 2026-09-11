@@ -100,7 +100,8 @@ class IapService {
       return PurchaseStatusResult(
         productId: productId,
         status: PaymentStatus.error,
-        error: 'Product not found in App Store',
+        error: 'This product is not available in the App Store yet. '
+            'Use Restore Purchases if you already bought it.',
       );
     }
     if (_pending != null && !_pending!.isCompleted) {
@@ -147,11 +148,46 @@ class IapService {
     );
   }
 
-  Future<void> restorePurchases({String? userId, String? authToken}) async {
+  Future<PurchaseStatusResult> restorePurchases({
+    String? userId,
+    String? authToken,
+  }) async {
     _userId = userId ?? _userId;
     _authToken = authToken ?? _authToken;
     await initialize();
-    await _iap.restorePurchases();
+    if (!_ready) {
+      return PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.error,
+        error: 'In-App Purchase is unavailable on this device',
+      );
+    }
+    if (_pending != null && !_pending!.isCompleted) {
+      return PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.error,
+        error: 'A purchase is already in progress',
+      );
+    }
+    _pendingProductId = 'restore';
+    _pending = Completer<PurchaseStatusResult>();
+    try {
+      await _iap.restorePurchases();
+    } catch (e) {
+      return _completePending(PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.error,
+        error: e.toString(),
+      ));
+    }
+    return _pending!.future.timeout(
+      const Duration(seconds: 25),
+      onTimeout: () => _completePending(PurchaseStatusResult(
+        productId: 'restore',
+        status: PaymentStatus.restored,
+        restoreData: const {'empty': true},
+      )),
+    );
   }
 
   Future<void> _onPurchases(List<PurchaseDetails> purchases) async {

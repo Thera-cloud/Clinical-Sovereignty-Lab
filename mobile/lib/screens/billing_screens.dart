@@ -22,6 +22,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show defaultApiBaseUrl;
 import '../services/payment_service.dart';
 import '../services/checkout_launcher.dart';
+import '../widgets/restore_purchases_button.dart';
 import 'payment_confirmation_screen.dart';
 import '../config/app_config.dart';
 
@@ -568,10 +569,10 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                     color: _D.cyan,
                     features: [
                       '50,000 AI tokens/month',
-                      'Voice biometrics & emotional tracking',
+                      'Voice tone insights & check-in trends',
                       'Family Sanctuary access',
                       '1 GB Legacy Vault storage',
-                      'Session history & metrics',
+                      'Session history & wellness trends',
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -603,19 +604,36 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: _D.gold.withOpacity(0.2)),
                   ),
-                  child: const Row(children: [
-                    Icon(Icons.savings, color: _D.gold, size: 18),
-                    SizedBox(width: 10),
+                  child: Row(children: [
+                    const Icon(Icons.savings, color: _D.gold, size: 18),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Save ~17% with annual billing — '
-                        'Inner Chamber \$490/yr · Sovereign Circle \$1,490/yr',
-                        style: TextStyle(
+                        isNativeIOS
+                            ? 'Inner Chamber \$49/month · Sovereign Circle \$149/month · '
+                                'Sovereign Circle 6-month \$749'
+                            : 'Save ~17% with annual billing — '
+                                'Inner Chamber \$490/yr · Sovereign Circle \$1,490/yr',
+                        style: const TextStyle(
                             color: _D.goldBright, fontSize: 11, height: 1.4),
                       ),
                     ),
                   ]),
                 ),
+                if (isNativeIOS) ...[
+                  const SizedBox(height: 16),
+                  RestorePurchasesButton(
+                    userId: (widget.currentUserProfile['username'] ?? '').toString(),
+                    authToken: (widget.currentUserProfile['token'] ?? '').toString(),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Sovereign Sanctuary is a wellness and coaching companion. '
+                    'It does not diagnose, treat, or replace professional care.',
+                    style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
     );
@@ -783,7 +801,7 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
       'AI Tokens/mo',
       'AI Minutes',
       'Voice + Text',
-      'Voice Biometrics',
+      'Voice tone insights',
       'Family Sanctuary',
       'Me-2-Me',
       'Legacy Vault',
@@ -800,7 +818,7 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
       'AI Tokens/mo': ['10K', '50K', '200K'],
       'AI Minutes': ['30', '300', '∞'],
       'Voice + Text': ['Text only', '✓', '✓'],
-      'Voice Biometrics': ['✗', '✓', '✓'],
+      'Voice tone insights': ['✗', '✓', '✓'],
       'Family Sanctuary': ['✗', '✓', '✓'],
       'Me-2-Me': ['✗', '✗', '✓'],
       'Legacy Vault': ['✗', '1 GB', '50 GB'],

@@ -23,6 +23,7 @@ import '../config/app_config.dart';
 import '../services/payment_service.dart';
 import '../services/iap_service.dart';
 import '../services/checkout_launcher.dart';
+import '../widgets/restore_purchases_button.dart';
 import '../services/vault_entitlement.dart';
 import 'payment_confirmation_screen.dart';
 import 'vault_browser_screen.dart';
@@ -1214,6 +1215,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         currentPlanKey: _currentPlanKey,
         currentPlanRank: _currentPlanRank,
         canDowngradeToTrial: _canDowngradeToTrial,
+        userId: (_profile['username'] ?? '').toString(),
+        authToken: (_profile['token'] ?? '').toString(),
         onSelect: (planKey, isUpgrade) {
           Navigator.pop(ctx);
           _confirmPlanChange(planKey, isUpgrade);
@@ -2944,6 +2947,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 onPressed: _openBillingPortal,
               ),
             ),
+            if (isNativeIOS) ...[
+              const SizedBox(height: 8),
+              RestorePurchasesButton(
+                userId: (_profile['username'] ?? '').toString(),
+                authToken: (_profile['token'] ?? '').toString(),
+              ),
+            ],
             const SizedBox(height: 10),
             // Quick links to billing screens
             Row(children: [
@@ -3281,7 +3291,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => NevedalReportsScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.auto_awesome, 'Weekly Brief', 'Your personalized coherence check-in', () {
+            _actionRow(Icons.auto_awesome, 'Weekly Brief', 'Your personalized wellness check-in', () {
               _showWeeklyBrief();
             }),
             _actionRow(Icons.history, 'Memory Search', 'Search past conversations with Nate', () {
@@ -3289,7 +3299,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => SecureSearchScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Saved to your record. Nate uses section 1 + clinical history; address/emergency stay coach-only.', () {
+            _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Saved to your record. Nate uses section 1 plus your self-reported history; address and emergency contacts stay coach-only.', () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => IntakeFormScreen(profile: _profile)),
@@ -3491,6 +3501,14 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           // --- Legal & Privacy ---
           _sectionHeader('LEGAL & PRIVACY', Icons.gavel),
           _settingsCard([
+            if (isNativeIOS)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Text(
+                  'This app is a wellness and coaching companion. It does not diagnose, treat, cure, or prevent any condition, and it is not a medical device.',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
+                ),
+              ),
             _actionRow(Icons.description, 'Terms, Privacy & Waivers', 'Full legal agreement', _showLegalAgreement),
             _actionRow(Icons.download, 'Download My Data', 'Export your personal data', _requestDataExport),
             _actionRow(Icons.shield_outlined, 'Safety & population',
@@ -3903,12 +3921,16 @@ class _ChangePlanSheet extends StatelessWidget {
   final String currentPlanKey;
   final int currentPlanRank;
   final bool canDowngradeToTrial;
+  final String userId;
+  final String authToken;
   final void Function(String planKey, bool isUpgrade) onSelect;
 
   const _ChangePlanSheet({
     required this.currentPlanKey,
     required this.currentPlanRank,
     this.canDowngradeToTrial = true,
+    this.userId = '',
+    this.authToken = '',
     required this.onSelect,
   });
 
@@ -3992,8 +4014,8 @@ class _ChangePlanSheet extends StatelessWidget {
                 'Full AI companion — voice & text',
                 '50,000 tokens/month',
                 '\$50 off every coaching session',
-                'Voice biometrics & emotional tracking',
-                'Session history & metrics',
+                'Voice tone insights & check-in trends',
+                'Session history & wellness trends',
                 'Push notifications & reminders',
               ],
               color: _Design.cyan,
@@ -4050,8 +4072,14 @@ class _ChangePlanSheet extends StatelessWidget {
                     'Your conversation history, metrics, and all data are never deleted when changing plans.',
                     style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.5),
                   ),
-                  if (isNativeIOS) ...[
+                    if (isNativeIOS) ...[
                     const SizedBox(height: 12),
+                    RestorePurchasesButton(
+                      userId: userId,
+                      authToken: authToken,
+                      outlined: false,
+                    ),
+                    const SizedBox(height: 8),
                     GestureDetector(
                       onTap: () => launchUrl(
                         Uri.parse('https://app.sovereignsanctuary.net/terms.html'),
@@ -5670,6 +5698,13 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
                 ));
               })),
             ]),
+            if (isNativeIOS) ...[
+              const SizedBox(height: 12),
+              RestorePurchasesButton(
+                userId: (_profile['username'] ?? '').toString(),
+                authToken: (_profile['token'] ?? '').toString(),
+              ),
+            ],
           ]),
           const SizedBox(height: 20),
 
@@ -5853,6 +5888,14 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           // --- Legal & Privacy ---
           _sectionHeader('LEGAL & PRIVACY', Icons.gavel),
           _settingsCard([
+            if (isNativeIOS)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Text(
+                  'This app is a wellness and coaching companion. It does not diagnose, treat, cure, or prevent any condition, and it is not a medical device.',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
+                ),
+              ),
             _actionRow(Icons.description, 'Terms, Privacy & Waivers', 'Full legal agreement', _showLegalAgreement),
             _actionRow(Icons.download, 'Download My Data', 'Export your personal data', _requestDataExport),
             _infoRow('Consent Version', consentVersion),
@@ -6685,7 +6728,7 @@ class _LegalAgreementScreen extends StatelessWidget {
             const SizedBox(height: 4),
             const Center(
               child: Text(
-                'Terms of Use, Privacy Policy, and Therapeutic Waiver',
+                'Terms of Use, Privacy Policy, and Wellness Waiver',
                 style: TextStyle(color: _Design.textSecondary, fontSize: 12),
                 textAlign: TextAlign.center,
               ),
@@ -6740,7 +6783,7 @@ class _LegalAgreementScreen extends StatelessWidget {
               'We do not knowingly collect information from children under 13. Children 13-17 may only access via parent/guardian family account.'),
 
             const SizedBox(height: 16),
-            _partHeader('PART III — THERAPEUTIC SETTING WAIVER'),
+            _partHeader('PART III — WELLNESS SETTING WAIVER'),
             _section('18. NATURE OF THE SERVICE',
               'The platform is NOT a licensed mental health provider. Little Nate is NOT a therapist. Coaches are independent practitioners. No doctor-patient or therapist-client privilege applies to AI interactions.'),
             _section('19. INFORMED CONSENT FOR EXPERIMENTAL METHODOLOGY',

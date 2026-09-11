@@ -1,11 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'dart:async';
-import 'dart:math';
+
 import '../config/app_config.dart';
 import 'secure_search_screen.dart';
+
+bool get _isNativeIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
 class _Design {
   static const bgVoid = Color(0xFF050505);
@@ -211,20 +216,27 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Current snapshot
-        _sectionLabel('CURRENT STATE'),
+        _sectionLabel(_isNativeIOS ? 'CURRENT CHECK-IN' : 'CURRENT STATE'),
+        if (_isNativeIOS) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'These scores are wellness trends from conversation tone. They are not medical measurements, diagnoses, or treatment advice.',
+            style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
+          ),
+        ],
         const SizedBox(height: 8),
         Row(children: [
-          Expanded(child: _metricCard('C_emo', cEmo, _Design.cyan)),
+          Expanded(child: _metricCard(_isNativeIOS ? 'Check-in' : 'C_emo', cEmo, _Design.cyan)),
           const SizedBox(width: 8),
-          Expanded(child: _metricCard('GAP', gap, _Design.gold)),
+          Expanded(child: _metricCard(_isNativeIOS ? 'Growth' : 'GAP', gap, _Design.gold)),
           const SizedBox(width: 8),
-          Expanded(child: _metricCard('Quantum', quantum, _Design.purple)),
+          Expanded(child: _metricCard(_isNativeIOS ? 'Balance' : 'Quantum', quantum, _Design.purple)),
         ]),
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: _infoCard('Sessions', '$sessionCount', _Design.goldDim)),
           const SizedBox(width: 8),
-          Expanded(child: _infoCard('CEE Moments', '$ceeTotal', _Design.green)),
+          Expanded(child: _infoCard(_isNativeIOS ? 'Bright moments' : 'CEE Moments', '$ceeTotal', _Design.green)),
           const SizedBox(width: 8),
           Expanded(child: _infoCard('Mood', _moodEmoji(current['mood']?.toString() ?? 'neutral'), _Design.goldDim)),
         ]),
@@ -314,11 +326,11 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
               const SizedBox(height: 12),
               // Legend
               Row(children: [
-                _legendDot(_Design.cyan, 'C_emo'),
+                _legendDot(_Design.cyan, _isNativeIOS ? 'Check-in' : 'C_emo'),
                 const SizedBox(width: 16),
-                _legendDot(_Design.gold, 'GAP'),
+                _legendDot(_Design.gold, _isNativeIOS ? 'Growth' : 'GAP'),
                 const SizedBox(width: 16),
-                _legendDot(_Design.purple, 'Quantum'),
+                _legendDot(_Design.purple, _isNativeIOS ? 'Balance' : 'Quantum'),
                 if (driftPeriods.isNotEmpty) ...[
                   const SizedBox(width: 16),
                   _legendDot(_Design.driftGray, 'Away'),
@@ -337,7 +349,7 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.flash_on, color: _showCEE ? _Design.green : _Design.textMuted, size: 16),
                     const SizedBox(width: 6),
-                    Text('CEE Moments', style: TextStyle(
+                    Text(_isNativeIOS ? 'Bright moments' : 'CEE Moments', style: TextStyle(
                       color: _showCEE ? _Design.green : _Design.textMuted,
                       fontSize: 13, fontWeight: FontWeight.w600)),
                     Text(' (${ceeExperiences.length})', style: TextStyle(
@@ -476,13 +488,13 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
               decoration: BoxDecoration(color: _Design.green.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
               child: const Icon(Icons.flash_on, color: _Design.green, size: 20)),
             const SizedBox(width: 12),
-            const Expanded(child: Text('Corrective Emotional Experience',
-              style: TextStyle(color: _Design.gold, fontSize: 16, fontWeight: FontWeight.bold))),
+            Expanded(child: Text(_isNativeIOS ? 'Meaningful check-in' : 'Corrective Emotional Experience',
+              style: const TextStyle(color: _Design.gold, fontSize: 16, fontWeight: FontWeight.bold))),
           ]),
           const SizedBox(height: 16),
           Text(_formatTs(ts), style: const TextStyle(color: _Design.textMuted, fontSize: 12)),
           const SizedBox(height: 8),
-          Text('C_emo: ${before.toStringAsFixed(3)} \u2192 ${after.toStringAsFixed(3)}',
+          Text('${_isNativeIOS ? 'Check-in' : 'C_emo'}: ${before.toStringAsFixed(3)} \u2192 ${after.toStringAsFixed(3)}',
             style: const TextStyle(color: _Design.green, fontSize: 15, fontWeight: FontWeight.w600)),
           Text('\u0394 +${delta.toStringAsFixed(3)}',
             style: const TextStyle(color: _Design.green, fontSize: 13)),
@@ -566,7 +578,7 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(_formatTs(ts), style: const TextStyle(color: _Design.textMuted, fontSize: 11)),
-            Text('C_emo ${before.toStringAsFixed(3)} \u2192 ${after.toStringAsFixed(3)} (+${delta.toStringAsFixed(3)})',
+            Text('${_isNativeIOS ? 'Check-in' : 'C_emo'} ${before.toStringAsFixed(3)} \u2192 ${after.toStringAsFixed(3)} (+${delta.toStringAsFixed(3)})',
               style: const TextStyle(color: _Design.green, fontSize: 13, fontWeight: FontWeight.w600)),
           ])),
         ]),

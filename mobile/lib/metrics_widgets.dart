@@ -6,8 +6,11 @@
 // Import into main.dart and use across Client, Coach, and Admin screens.
 // =============================================================================
 
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
+
+bool get _isNativeIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
 // =============================================================================
 // COLOR PALETTE (Sovereign Theme)
@@ -167,9 +170,9 @@ class NevedalMetricsGrid extends StatelessWidget {
             children: [
               const Icon(Icons.analytics, color: SovereignColors.cyan, size: 20),
               const SizedBox(width: 8),
-              const Text(
-                "NEVEDAL METRICS",
-                style: TextStyle(
+              Text(
+                _isNativeIOS ? "WELLNESS CHECK-IN" : "NEVEDAL METRICS",
+                style: const TextStyle(
                   color: SovereignColors.cyan,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5,
@@ -177,7 +180,8 @@ class NevedalMetricsGrid extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              _buildRiskBadge(metrics['risk_level'] ?? 'LOW'),
+              if (!_isNativeIOS)
+                _buildRiskBadge(metrics['risk_level'] ?? 'LOW'),
             ],
           ),
           const SizedBox(height: 16),
@@ -210,9 +214,11 @@ class NevedalMetricsGrid extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Text Sent. (v1) = lexicon word-list score from chat — not Nevedal Formula C_emo',
+            _isNativeIOS
+                ? 'Check-in scores are wellness trends from conversation tone — not medical measurements or diagnoses.'
+                : 'Text Sent. (v1) = lexicon word-list score from chat — not Nevedal Formula C_emo',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white38, fontSize: 10, fontStyle: FontStyle.italic),
+            style: const TextStyle(color: Colors.white38, fontSize: 10, fontStyle: FontStyle.italic),
           ),
           
           if (!compact) ...[
@@ -224,8 +230,8 @@ class NevedalMetricsGrid extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildMiniMetric("Anxiety", metrics['anxiety_level'] ?? metrics['anxiety'] ?? 0, SovereignColors.orange),
-                _buildMiniMetric("Stress", metrics['stress_level'] ?? metrics['stress'] ?? 0, SovereignColors.red),
+                _buildMiniMetric(_isNativeIOS ? "Ease" : "Anxiety", metrics['anxiety_level'] ?? metrics['anxiety'] ?? 0, SovereignColors.orange),
+                _buildMiniMetric(_isNativeIOS ? "Load" : "Stress", metrics['stress_level'] ?? metrics['stress'] ?? 0, SovereignColors.red),
                 _buildMiniMetric("Engage", metrics['engagement'] ?? metrics['engage'] ?? 0.5, SovereignColors.green),
               ],
             ),
