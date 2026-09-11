@@ -561,8 +561,9 @@ _LLM_SYSTEM = (
 
 
 async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -> Optional[Dict[str, str]]:
+    router = getattr(app_state, "inference_router", None) if app_state is not None else None
     inf = getattr(app_state, "littlenate_inference", None) if app_state is not None else None
-    if inf is None or not ENABLE_LLM:
+    if (router is None and inf is None) or not ENABLE_LLM:
         return None
     try:
         prompt = json.dumps({
@@ -573,11 +574,21 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
             "drafts": drafts,
         }, ensure_ascii=False)
         t0 = datetime.now(timezone.utc)
-        raw = await inf.generate(
-            prompt, system=_LLM_SYSTEM, user_id=s.username, domain="coaching" if gp.is_coaching_phase(s.phase, s.sub_state) else "clinical",
-            temperature=0.5, max_tokens=900, include_crystals=False, include_helix=False, include_quantum=False,
-            is_realtime=False,
-        )
+        _domain = "coaching" if gp.is_coaching_phase(s.phase, s.sub_state) else "clinical"
+        if router is not None:
+            # Polish is a rewrite of already-composed drafts — a utility job. The router's
+            # utility tier (Workers AI → Grok → Azure) answers in seconds; the full
+            # littlenate_inference pipeline (SDH/story/EC + clinical chain incl. home_gpu)
+            # routinely exceeded 120s here and starved the greeting.
+            raw = await router.generate(
+                prompt=prompt, system=_LLM_SYSTEM, tier="utility", temperature=0.5, max_tokens=900, domain=_domain,
+            )
+        else:
+            raw = await inf.generate(
+                prompt, system=_LLM_SYSTEM, user_id=s.username, domain=_domain,
+                temperature=0.5, max_tokens=900, include_crystals=False, include_helix=False, include_quantum=False,
+                is_realtime=False,
+            )
         # littlenate_inference.generate returns an InferenceResult dataclass; tolerate str/dict too.
         if isinstance(raw, str):
             text = raw
@@ -586,16 +597,17 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
         else:
             text = getattr(raw, "text", "") or ""
         elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+        _prov = raw.get("provider", "?") if isinstance(raw, dict) else getattr(raw, "provider", "?")
         m = re.search(r"\{.*\}", text, re.S)
         if not m:
             logger.warning("entry_greeting: LLM polish returned no JSON for %s (%.1fs, provider=%s)",
-                           s.username, elapsed, getattr(raw, "provider", "?"))
+                           s.username, elapsed, _prov)
             return None
         out = json.loads(m.group(0))
         if not all(isinstance(out.get(k), str) and out[k].strip() for k in ("welcome", "prime", "direction")):
             logger.warning("entry_greeting: LLM polish JSON missing parts for %s (%.1fs)", s.username, elapsed)
             return None
-        logger.info("entry_greeting: LLM polish ok for %s (%.1fs, provider=%s)", s.username, elapsed, getattr(raw, "provider", "?"))
+        logger.info("entry_greeting: LLM polish ok for %s (%.1fs, provider=%s)", s.username, elapsed, _prov)
         return {"welcome": _cap(_scrub(out["welcome"]), WELCOME_MAX),
                 "prime": _cap(_scrub(out["prime"]), PRIME_MAX),
                 "direction": _cap(_scrub(out["direction"]), DIRECTION_MAX)}
