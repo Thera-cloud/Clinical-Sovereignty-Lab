@@ -125,9 +125,8 @@ async def entry_greeting(
     """
     from app.services.thrive import entry_greeting as eg
 
-    pool = _pool(request)
-    canon = await _canonical(pool, username)
-    _authorize(pool, user, canon)
+    pool = await _pool(request)
+    canon = await _authorize(pool, user, username)
     try:
         g = await eg.build_entry_greeting(pool, canon, app_state=request.app.state, force=force)
     except Exception as e:
@@ -140,9 +139,8 @@ async def entry_greeting(
 async def entry_greeting_opened(username: str, request: Request, user: Dict = Depends(get_current_user)):
     from app.services.thrive import entry_greeting as eg
 
-    pool = _pool(request)
-    canon = await _canonical(pool, username)
-    _authorize(pool, user, canon)
+    pool = await _pool(request)
+    canon = await _authorize(pool, user, username)
     await eg.mark_opened(pool, canon)
     return {"ok": True}
 
