@@ -158,17 +158,21 @@ async def _minimal_graceful_shutdown_flush(chat_session_turns: dict, active_sess
 
 
 def test_select_max_tokens_default_short_message():
-    assert _select_max_tokens("How are you?") == 600
+    assert _select_max_tokens("How are you?") == 1200
 
 
 def test_select_max_tokens_long_first_message_gets_1500():
     text = " ".join(["word"] * 85)
     assert len(text) > 400
-    assert _select_max_tokens(text) == 1500
+    assert _select_max_tokens(text) == 2000
 
 
 def test_select_max_tokens_explicit_depth_phrase():
-    assert _select_max_tokens("Please go deeper on what I shared.") == 1500
+    assert _select_max_tokens("Please go deeper on what I shared.") == 2000
+
+
+def test_select_max_tokens_continue_phrase():
+    assert _select_max_tokens("Is there more?") == 2000
 
 
 # --- truncation trimmer ---

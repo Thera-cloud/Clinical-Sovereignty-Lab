@@ -77,17 +77,23 @@ def tempo_max_tokens(uid: str, user_text: str, current_cap: int, depth: str, liv
     if not flags.tempo():
         return current_cap
     lower = (user_text or "").lower()
-    asked = any(p in lower for p in ("tell me more", "go deeper", "say more", "keep going"))
+    asked = any(
+        p in lower
+        for p in (
+            "tell me more", "go deeper", "say more", "keep going",
+            "is there more", "continue", "go on", "finish that",
+        )
+    )
     if asked or len(user_text or "") >= 300:
-        return max(int(current_cap or 600), 450)
+        return max(int(current_cap or 1200), 900)
     samples = [len((t.get("user_text") or "")) for t in (live_turns or [])[-3:]]
     samples.append(len(user_text or ""))
     mean = sum(samples) / max(1, len(samples))
-    target_chars = max(120, min(900, int(3 * mean)))
-    target_tok = max(90, min(400, target_chars // 3))
+    target_chars = max(1800, min(3600, int(3 * mean)))
+    target_tok = max(600, min(1200, target_chars // 3))
     d = (depth or "").lower()
     if d in ("fast", "faster", "quick", "light"):
-        return min(int(current_cap or 450), target_tok)
+        return min(int(current_cap or 900), target_tok)
     return current_cap
 
 

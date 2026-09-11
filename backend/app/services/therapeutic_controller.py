@@ -115,10 +115,11 @@ _META_QUESTION_PATTERNS = [
 
 TOKEN_CAPS = {
     # v1.2 base — autonomic-state-derived caps
+    # in_window 600 cut Faster/Extra mid-sentence (client1 John D. 2026-09-11).
     "shutdown": 200,
     "activated": 350,
-    "in_window": 600,
-    "regulated": 1500,
+    "in_window": 1200,
+    "regulated": 2000,
     # v1.3 register-variant caps — orchestrator-driven (Phase 4 wiring)
     # Dormant in Phase 3 (no orchestrator => register_directive=None => unused).
     "purity_wound": 350,
@@ -552,8 +553,9 @@ def _state_guidance(state: str) -> str:
     return (
         "## STATE GUIDANCE — IN WINDOW (regulation present, integration possible)\n"
         "WARM register unless directness is invited or a recurring pattern needs "
-        "naming. If shifting to CLINICAL, bridge sentence is mandatory. Keep "
-        "responses 2-4 sentences unless depth is explicitly requested."
+        "naming. If shifting to CLINICAL, bridge sentence is mandatory. Finish "
+        "the thought — Extra depth is a full turn (one to three short paragraphs), "
+        "not a 2-4 sentence stub. Do not stop mid-sentence or mid-image."
     )
 
 
@@ -1067,6 +1069,16 @@ async def prepare_therapeutic_context(
             )
         elif effective_register_directive in TOKEN_CAPS:
             max_tokens = TOKEN_CAPS[effective_register_directive]
+
+    # Extra must not land shorter than Faster. Register/state shrinks stay
+    # only for crisis/dissociation. Extra in_window was 2-4 sentences +
+    # predictability floor 80 — clients saw Extra give less than Faster.
+    _extra_floor = max(int(default_max_tokens or 0), 1200)
+    _allow_shrink = autonomic_state in ("activated", "shutdown") or (
+        effective_register_directive == "dissociation_grounding"
+    )
+    if not _allow_shrink:
+        max_tokens = max(int(max_tokens or 0), _extra_floor)
 
     mismatch_block = ""
     if mismatch_available:
@@ -1637,8 +1649,14 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
     cap = audit_metadata.get("max_tokens", 600)
 
     approx_tokens = int(len(response_text.split()) / 0.75)
+    # Do not fail Extra for being too complete — length_over_cap was
+    # replacing full Extra drafts with TRANSPARENT_AUDIT_FALLBACK (stub).
     if approx_tokens > cap * 1.15:
-        violations.append(f"length_over_cap_{approx_tokens}_vs_{cap}")
+        logger.info(
+            "therapeutic_controller: length_over_cap noted %s vs %s (not a fail)",
+            approx_tokens,
+            cap,
+        )
 
     # Locale-aware banned phrases (v1.3). For v1.2 audit_metadata that lacks
     # 'locale', fall back to en-US — which is a strict superset of v1.2's

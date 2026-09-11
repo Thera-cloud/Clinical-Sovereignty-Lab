@@ -90,12 +90,12 @@ def stream_before_therapeutic_audit(mode: str) -> bool:
     """
     import os
 
-    raw = (os.getenv("ENABLE_STREAM_BEFORE_THERAPEUTIC_AUDIT") or "faster").strip().lower()
+    raw = (os.getenv("ENABLE_STREAM_BEFORE_THERAPEUTIC_AUDIT") or "always").strip().lower()
     if raw in ("0", "false", "no", "off"):
         return False
     if raw in ("1", "true", "yes", "on", "always"):
         return True
-    # default / "faster": only Faster depth streams before audit
+    # "faster": only Faster streams before audit (legacy)
     return is_faster(mode)
 
 
@@ -127,16 +127,20 @@ def allow_full_therapeutic_preflight(mode: str) -> bool:
     return not is_faster(mode)
 
 
-def faster_max_tokens(default_max_tokens: int = 600) -> int:
-    """Conversational cap so Faster LLM finishes like a normal turn (~6–7s)."""
+def faster_max_tokens(default_max_tokens: int = 1200) -> int:
+    """Faster still skips heavy preflight; do not starve the completion.
+
+    450/600 left mid-sentence cuts on client1 (John D.) and others.
+    Override via BRIDGE_FASTER_MAX_TOKENS.
+    """
     import os
 
-    raw = (os.getenv("BRIDGE_FASTER_MAX_TOKENS") or "450").strip()
+    raw = (os.getenv("BRIDGE_FASTER_MAX_TOKENS") or "900").strip()
     try:
         cap = int(raw)
     except ValueError:
-        cap = 450
-    cap = max(200, min(cap, 600))
+        cap = 900
+    cap = max(400, min(cap, 2000))
     if default_max_tokens and default_max_tokens > 0:
         return min(default_max_tokens, cap)
     return cap

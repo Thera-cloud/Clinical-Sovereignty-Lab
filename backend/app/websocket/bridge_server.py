@@ -986,23 +986,25 @@ def sanitize_ai_response(response: str, role: str) -> str:
 
 # FIX-LEN # SOVEREIGN-VOICE — Phase 1 response-length cap for client text chat
 def _select_max_tokens(user_text: str) -> int:
-    """Phase 1: 2-tier cap. Default 600, lift to 1500 on explicit depth request
-    OR when the user's own message is long/detailed — a lengthy first message
-    (the most detailed message a user sends) deserves a full-length reply
-    instead of a 600-token mid-sentence cutoff. SOVEREIGN-VOICE."""
+    """Default 1200; lift to 2000 on depth/continue or a long user turn.
+
+    600/1500 left mid-sentence cuts (client1 John D. 2026-09-11 poem, others).
+    SOVEREIGN-VOICE."""
     if not user_text:
-        return 600
+        return 1200
     depth_request_phrases = [
         "tell me more", "go deeper", "explain in detail", "explain more",
         "elaborate", "expand on", "more about", "more detail",
         "dive into", "walk me through", "break it down",
+        "is there more", "there's more", "keep going", "go on",
+        "say more", "continue", "finish that", "don't stop",
     ]
     lower = user_text.lower()
     if any(phrase in lower for phrase in depth_request_phrases):
-        return 1500
+        return 2000
     if len(user_text) > 400 or len(user_text.split()) > 80:  # SOVEREIGN-VOICE
-        return 1500
-    return 600
+        return 2000
+    return 1200
 
 
 # SOVEREIGN-VOICE — graceful close for responses truncated mid-sentence by the

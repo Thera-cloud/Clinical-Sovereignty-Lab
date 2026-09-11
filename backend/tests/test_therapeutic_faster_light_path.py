@@ -22,7 +22,8 @@ def test_faster_light_path_skips_deep_blocks():
             depth_mode="faster",
         )
         assert pack["audit_metadata"].get("faster_light_path") is True
-        assert pack["max_tokens"] <= 450
+        assert pack["max_tokens"] <= 900
+        assert pack["max_tokens"] >= 600
         assert "FASTER" in pack["enriched_system_prompt"]
         assert "DNA — NEUROSCIENCE BEDROCK" not in pack["enriched_system_prompt"]
         assert pack["recent_narratives"] == []

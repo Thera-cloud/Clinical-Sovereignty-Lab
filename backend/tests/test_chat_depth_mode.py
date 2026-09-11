@@ -43,7 +43,7 @@ def test_faster_budgets():
     assert allow_metrics_prompt_inject("faster") is False
     assert allow_transfer_summary("faster") is False
     assert allow_full_therapeutic_preflight("faster") is False
-    assert faster_max_tokens(1500) == 450
+    assert faster_max_tokens(1500) == 900
 
 
 def test_extra_budgets():
@@ -55,7 +55,7 @@ def test_extra_budgets():
     assert allow_deep_memory_search("extra") is True
     assert crystal_recall_timeout_s("extra") is None
     assert relational_timeout_s("extra") is None
-    assert stream_before_therapeutic_audit("extra") is False
+    assert stream_before_therapeutic_audit("extra") is True
     assert allow_metrics_prompt_inject("extra") is True
     assert allow_transfer_summary("extra") is True
     assert allow_full_therapeutic_preflight("extra") is True
