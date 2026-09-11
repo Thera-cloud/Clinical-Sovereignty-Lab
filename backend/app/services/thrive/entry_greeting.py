@@ -572,22 +572,35 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
             "register": gp.framework_for(s.phase).ln_register,
             "drafts": drafts,
         }, ensure_ascii=False)
+        t0 = datetime.now(timezone.utc)
         raw = await inf.generate(
             prompt, system=_LLM_SYSTEM, user_id=s.username, domain="coaching" if gp.is_coaching_phase(s.phase, s.sub_state) else "clinical",
             temperature=0.5, max_tokens=900, include_crystals=False, include_helix=False, include_quantum=False,
+            is_realtime=False,
         )
-        text = raw if isinstance(raw, str) else (raw.get("text") or raw.get("response") or "")
+        # littlenate_inference.generate returns an InferenceResult dataclass; tolerate str/dict too.
+        if isinstance(raw, str):
+            text = raw
+        elif isinstance(raw, dict):
+            text = raw.get("text") or raw.get("response") or ""
+        else:
+            text = getattr(raw, "text", "") or ""
+        elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
         m = re.search(r"\{.*\}", text, re.S)
         if not m:
+            logger.warning("entry_greeting: LLM polish returned no JSON for %s (%.1fs, provider=%s)",
+                           s.username, elapsed, getattr(raw, "provider", "?"))
             return None
         out = json.loads(m.group(0))
         if not all(isinstance(out.get(k), str) and out[k].strip() for k in ("welcome", "prime", "direction")):
+            logger.warning("entry_greeting: LLM polish JSON missing parts for %s (%.1fs)", s.username, elapsed)
             return None
+        logger.info("entry_greeting: LLM polish ok for %s (%.1fs, provider=%s)", s.username, elapsed, getattr(raw, "provider", "?"))
         return {"welcome": _cap(_scrub(out["welcome"]), WELCOME_MAX),
                 "prime": _cap(_scrub(out["prime"]), PRIME_MAX),
                 "direction": _cap(_scrub(out["direction"]), DIRECTION_MAX)}
     except Exception as e:
-        logger.info("entry_greeting: LLM polish skipped: %s", e)
+        logger.warning("entry_greeting: LLM polish skipped for %s: %s: %s", s.username, type(e).__name__, e)
         return None
 
 
@@ -685,9 +698,10 @@ async def _finish_polish_in_background(db_pool: Any, s: EntrySignals, task: "asy
     try:
         polished = await asyncio.wait_for(task, timeout=BACKGROUND_POLISH_TIMEOUT_S)
     except Exception as e:
-        logger.info("entry_greeting: background polish gave up for %s: %s", s.username, type(e).__name__)
+        logger.warning("entry_greeting: background polish gave up for %s: %s", s.username, type(e).__name__)
         return
     if not polished:
+        logger.warning("entry_greeting: background polish produced nothing for %s", s.username)
         return
     g = _make_greeting(s, polished, "llm_background", delivered=False)
     await _store(db_pool, s, g, delivered=False)
