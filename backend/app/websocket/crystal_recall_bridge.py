@@ -612,6 +612,14 @@ async def recall_crystals_for_context(
                 lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
         if anticipatory_section:
             lines.append(anticipatory_section)
+        # QUANTUM-CRYSTAL-ARCH — thrive/coaching slot when phase is coaching
+        try:
+            from app.services.thrive.recall_slot import thrive_recall_section as _thrive_slot
+            _tr = await _thrive_slot(db_pool, hardware_id, source)
+            if _tr:
+                lines.append(_tr)
+        except Exception:
+            pass
         result = "\n".join(lines)
         try:
             from app.services.attunement.recall_cache import store_recall as _attune_store

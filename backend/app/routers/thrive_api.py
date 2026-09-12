@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.services.api_server import get_current_user, require_coach
 from app.services.thrive import growth_phase as gp
@@ -87,10 +87,19 @@ class CompletePractice(BaseModel):
 
 
 class NewGoal(BaseModel):
-    text: str = Field(..., min_length=3, max_length=500)
+    text: str = Field("", max_length=500)
+    title: Optional[str] = Field(None, max_length=500)
     focus_area: Optional[str] = Field(None, pattern="^(daily_happiness|future_direction|self_compassion_confidence|handling_stress)$")
     target_date: Optional[datetime] = None
     commitment_type: str = Field("practice_goal", pattern="^(practice_goal|milestone|custom)$")
+
+    @model_validator(mode="after")
+    def _alias_title(self):
+        t = (self.text or "").strip() or (self.title or "").strip()
+        if len(t) < 3:
+            raise ValueError("text or title required (min 3 chars)")
+        self.text = t[:500]
+        return self
 
 
 class GoalProgress(BaseModel):
@@ -106,8 +115,16 @@ class StrengthsAnswers(BaseModel):
 # ── catalog (public to any authenticated user) ─────────────────────────────
 
 @router.get("/health")
-async def health():
-    return {"status": "ok", "enabled": pr.ENABLE_GROWTH_PHASE, "phases": list(gp.PHASES)}
+async def health(request: Request):
+    agent = getattr(request.app.state, "thrive_agent", None)
+    tick_at = getattr(agent, "last_tick_at", None) if agent else None
+    return {
+        "status": "ok",
+        "enabled": pr.ENABLE_GROWTH_PHASE,
+        "phases": list(gp.PHASES),
+        "last_tick_at": tick_at.isoformat() if tick_at else None,
+        "last_tick_stats": getattr(agent, "last_tick_stats", None) if agent else None,
+    }
 
 
 @router.get("/{username}/entry-greeting")
@@ -207,6 +224,20 @@ async def goals(username: str, request: Request, include_completed: bool = True,
     canon = await _authorize(pool, user, username)
     rows = await pt.goal_trajectories(pool, canon, include_completed=include_completed, limit=50)
     return {"username": canon, "goals": [g.to_dict() for g in rows]}
+
+
+@router.get("/{username}/practices")
+async def list_practices(username: str, request: Request, user: Dict = Depends(get_current_user)):
+    """Focus-area practices + due keys (Flutter welcome card / brief)."""
+    pool = await _pool(request)
+    canon = await _authorize(pool, user, username)
+    fs = await pt.focus_state(pool, canon)
+    return {
+        "ok": True,
+        "practices": fs.get("practices") or [],
+        "due_now": fs.get("due_now") or [],
+        "best_streak": fs.get("best_streak") or 0,
+    }
 
 
 @router.get("/{username}/practice-log")
@@ -393,7 +424,9 @@ async def release_phase(username: str, request: Request, user: Dict = Depends(re
 async def evaluate_now(username: str, request: Request, user: Dict = Depends(require_coach)):
     pool = await _pool(request)
     canon = await _authorize(pool, user, username)
-    state, transition, sig = await pr.evaluate(pool, canon)
+    from app.services.thrive.coach_notify import make_email_notifier
+    notifier = make_email_notifier(getattr(request.app.state, "notification_system", None))
+    state, transition, sig = await pr.evaluate(pool, canon, notifier=notifier)
     return {
         "ok": True,
         "state": state.to_dict(),
@@ -439,4 +472,6 @@ async def coach_roster(coach_username: str, request: Request, user: Dict = Depen
         d["sub_state_until"] = _iso(d["sub_state_until"])
         d["healing_score"] = float(d["healing_score"]) if d["healing_score"] is not None else None
         out.append(d)
-    return {"coach": coach_username, "clients": out}
+    from app.services.thrive.coach_notify import pending_promotions
+    promos = await pending_promotions(pool, coach_username)
+    return {"coach": coach_username, "clients": out, "roster": out, "promotions": promos}

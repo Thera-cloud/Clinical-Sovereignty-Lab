@@ -10501,24 +10501,13 @@ class AzureCortex:
         except Exception as _fl_err:
             print(f">>> [CLINICAL-FAST-LOOP] non-fatal: {type(_fl_err).__name__}: {_fl_err}")
 
-        # QUANTUM-CRYSTAL-ARCH — growth-phase coaching addendum (ENABLE_GROWTH_PHASE, default OFF).
-        # heal→thrive phase model; stashes phase on profile so the post-LLM boundary guard is phase-gated.
+        # QUANTUM-CRYSTAL-ARCH — growth-phase coaching addendum (ENABLE_GROWTH_PHASE).
         try:
-            from app.services.thrive.phase_resolver import ENABLE_GROWTH_PHASE as _gp_on, note_turn as _gp_note
-            if _gp_on and _role == "CLIENT" and not dojo_type and db_pool is not None:
-                from app.services.thrive import practice_tracker as _gp_pt
-                from app.services.thrive.persona import build_phase_addendum as _gp_addendum
-                _gp_crisis = any(w in (user_text or "").lower() for w in ("suicid", "kill myself", "end my life", "not want to be alive"))
-                _gp_state = await _gp_note(db_pool, uid, user_text, crisis=_gp_crisis)
-                profile["growth_phase"] = {"phase": _gp_state.phase, "sub_state": _gp_state.sub_state}
-                _gp_focus = await _gp_pt.focus_state(db_pool, uid)
-                _gp_done = _gp_pt.detect_completion(user_text, [a.get("practice_key") for a in (_gp_focus.get("areas") or []) if a.get("practice_key")])
-                if _gp_done:
-                    asyncio.create_task(_gp_pt.log_completion(db_pool, uid, _gp_done, source="chat", harvest=user_text))
-                _gp_text = _gp_addendum(_gp_state.phase, _gp_state.sub_state, _gp_focus, display_name=(profile.get("name") or "").split(" ")[0] or None)
-                if _gp_text:
-                    system_prompt = (system_prompt or "") + "\n\n---\n" + _gp_text
-                    print(f">>> [GROWTH PHASE] {_gp_state.phase}/{_gp_state.sub_state or '-'} addendum {len(_gp_text)} chars uid={uid}")
+            from app.services.thrive.turn_inject import apply_growth_phase_turn as _gp_apply
+            system_prompt, _ = await _gp_apply(
+                db_pool, uid, user_text, profile, system_prompt,
+                role=_role, dojo_type=dojo_type, source="chat",
+            )
         except Exception as _gp_err:
             print(f">>> [GROWTH PHASE] non-fatal: {type(_gp_err).__name__}: {_gp_err}")
 
@@ -11843,6 +11832,12 @@ class AzureCortex:
             # gap-fix (bee-hiv-only): cohort-gate — if ANY family member is in
             # a strict cohort, pseudonymize the shared prompt (their PHI must
             # not leak). Non-cohort families get zero pseudonymization.
+            # QUANTUM-CRYSTAL-ARCH — per-member growth-phase addenda
+            try:
+                from app.services.thrive.turn_inject import apply_growth_phase_family as _gp_fam
+                system_prompt = await _gp_fam(db_pool, family_profiles, conversation, system_prompt, source="family_sanctuary")
+            except Exception as _gp_err:
+                print(f">>> [GROWTH PHASE] sanctuary non-fatal: {type(_gp_err).__name__}: {_gp_err}")
             from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
             from app.services.cohort import is_strict_cohort as _is_strict
             _sn = [(p.get("name") or "").strip() for p in (family_profiles or [])]
@@ -12170,6 +12165,16 @@ class AzureCortex:
             # gap-fix-c: pseudonymize target + other member names before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
             # gap-fix (bee-hiv-only): cohort-gate — if target OR any other member
             # is in a strict cohort, pseudonymize; otherwise pass through.
+            # QUANTUM-CRYSTAL-ARCH — speaker growth-phase addendum
+            try:
+                from app.services.thrive.turn_inject import apply_growth_phase_turn as _gp_g
+                _gp_uid = (target_member.get("hardware_id") or target_member.get("username") or "") if isinstance(target_member, dict) else ""
+                system_prompt, _ = await _gp_g(
+                    db_pool, _gp_uid, conversation or "", target_member if isinstance(target_member, dict) else None,
+                    system_prompt, role="CLIENT", source="group_coaching",
+                )
+            except Exception as _gp_err:
+                print(f">>> [GROWTH PHASE] group non-fatal: {type(_gp_err).__name__}: {_gp_err}")
             from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
             from app.services.cohort import is_strict_cohort as _is_strict
             _gn = [target_name] + [(o.get("name") or "").strip() for o in (other_members or [])]
@@ -12537,6 +12542,16 @@ class AzureCortex:
 
                 # gap-fix-c: pseudonymize member name before Azure Realtime call. # QUANTUM-CRYSTAL-ARCH
                 # gap-fix (bee-hiv-only): cohort-gate on member_profile.program_id.
+                # QUANTUM-CRYSTAL-ARCH — private-coaching growth-phase addendum
+                try:
+                    from app.services.thrive.turn_inject import apply_growth_phase_turn as _gp_p
+                    _gp_uid = (member_profile.get("hardware_id") or member_profile.get("username") or "")
+                    system_prompt, _ = await _gp_p(
+                        db_pool, _gp_uid, user_prompt, member_profile, system_prompt,
+                        role="CLIENT", source="private_coaching",
+                    )
+                except Exception as _gp_err:
+                    print(f">>> [GROWTH PHASE] private non-fatal: {type(_gp_err).__name__}: {_gp_err}")
                 from app.services.pii_pseudonymizer import maybe_pseudonymize_prompt, restore_text
                 _pn = [member_name] if member_name and len(member_name) >= 2 else []
                 _pf = member_name.split()[0] if member_name else ""

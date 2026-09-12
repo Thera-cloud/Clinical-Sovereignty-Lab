@@ -125,8 +125,7 @@ class ThriveCoachAgent:
                 logger.warning("ThriveCoachAgent: %s failed: %s", job.__name__, e)
         self.last_tick_at = datetime.now(timezone.utc)
         self.last_tick_stats = stats
-        if any(stats.values()):
-            logger.info("ThriveCoachAgent tick: %s", stats)
+        logger.info("ThriveCoachAgent tick: %s enabled=%s", stats, _enabled())
         return stats
 
     # ── recipient resolution + gates ───────────────────────────────────
@@ -403,7 +402,8 @@ class ThriveCoachAgent:
                 """,
                 MAX_EVALS_PER_TICK,
             )
-        notifier = self._coach_email_notifier()
+        from app.services.thrive.coach_notify import make_email_notifier
+        notifier = make_email_notifier(self.notification_system)
         for r in rows:
             try:
                 state, transition, _sig = await pr.evaluate(
@@ -417,17 +417,8 @@ class ThriveCoachAgent:
                 logger.warning("ThriveCoachAgent: evaluate failed for %s: %s", r["username"], e)
 
     def _coach_email_notifier(self):
-        ns = self.notification_system
-
-        async def _notify(coach_username: str, subject: str, body: str, meta: Dict[str, Any]) -> None:
-            email = (meta or {}).get("coach_email")
-            if not (ns and email):
-                return
-            html = f"<div style=\"font-family:'DM Sans',sans-serif;color:#e2e8f0;line-height:1.6\"><p>{body}</p>" \
-                   f"<p>Open Coach Command to review the phase badge, override if needed, and see the client's goal trajectories.</p></div>"
-            await ns._send_email(email, subject, html, notification_type="thrive_phase_promoted")
-
-        return _notify
+        from app.services.thrive.coach_notify import make_email_notifier
+        return make_email_notifier(self.notification_system)
 
     async def _phase_email(self, username: str, t: pr.Transition, budget: Dict[str, int]) -> None:
         rcpt = await self._recipient(username)

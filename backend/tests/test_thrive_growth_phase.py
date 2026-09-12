@@ -165,3 +165,46 @@ def test_interview_lines_one_question_at_a_time():
 def test_thrive_is_valid_crystal_domain():
     assert normalize_domain("thrive") == "thrive"
     assert si.THRIVE_DOMAIN == "thrive"
+
+
+def test_focus_lines_include_quest_and_mission():
+    lines = persona._focus_lines({
+        "areas": [],
+        "goals": [],
+        "strengths": ["honesty"],
+        "has_signature": True,
+        "active_quests": ["Find the lighthouse"],
+        "active_missions": ["Coach Hope"],
+    })
+    joined = "\n".join(lines)
+    assert "lighthouse" in joined
+    assert "Coach Hope" in joined
+
+
+def test_new_goal_accepts_title_alias():
+    from pydantic import ValidationError
+    from app.routers.thrive_api import NewGoal
+
+    g = NewGoal(title="Walk every morning")
+    assert g.text == "Walk every morning"
+    try:
+        NewGoal(title="ab")
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("short title must fail")
+
+
+def test_apply_growth_phase_turn_noop_when_flag_off_or_no_pool(monkeypatch):
+    import asyncio
+    from app.services.thrive import phase_resolver as pr
+    from app.services.thrive.turn_inject import apply_growth_phase_turn
+
+    async def _run():
+        prompt, state = await apply_growth_phase_turn(None, "u", "hi", {}, "SYS")
+        assert prompt == "SYS" and state is None
+        monkeypatch.setattr(pr, "ENABLE_GROWTH_PHASE", False)
+        prompt2, state2 = await apply_growth_phase_turn(object(), "u", "hi", {}, "SYS")
+        assert prompt2 == "SYS" and state2 is None
+
+    asyncio.run(_run())

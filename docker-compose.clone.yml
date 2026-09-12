@@ -38,6 +38,8 @@ services:
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
       - DEBUG=false
+      # QUANTUM-CRYSTAL-ARCH — heal→thrive (clone REST must match GREEN flag)
+      - ENABLE_GROWTH_PHASE=${ENABLE_GROWTH_PHASE:-true}
       # Clone is REST-only: skips auditors, TrustEnforcer, AgentStatusDigest
       - IS_CLONE=true
       # Cloudflare R2

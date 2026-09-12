@@ -147,6 +147,7 @@ class EntryGreeting:
     cached: bool = False
     generated_by: str = "template"
     greeted_at: Optional[str] = None
+    due_practices: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -161,6 +162,15 @@ def day_part_for(hour: int) -> str:
         if lo <= hour < hi:
             return name
     return "late_night"
+
+
+def _due_practice_cards(keys) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for k in keys or []:
+        key = k if isinstance(k, str) else (k.get("key") if isinstance(k, dict) else "")
+        if key and key in pc.PRACTICES:
+            out.append({"key": key, "label": pc.PRACTICES[key].label})
+    return out
 
 
 def _cap(text: str, limit: int) -> str:
@@ -691,6 +701,7 @@ async def _cached(db_pool: Any, username: str) -> Optional[EntryGreeting]:
         day_part=r["day_part"] or "midday", local_hour=int(r["local_hour"] or 12), growth_phase=r["growth_phase"] or gp.DEFAULT_PHASE,
         thera_panel_id=r["thera_panel_id"], thera_panel=sigs.get("thera_panel"), cached=True,
         generated_by=sigs.get("generated_by", "template"), greeted_at=r["greeted_at"].isoformat() if r["greeted_at"] else None,
+        due_practices=_due_practice_cards(sigs.get("practices_due") or []),
     )
 
 
@@ -736,6 +747,7 @@ def _make_greeting(s: EntrySignals, parts: Dict[str, str], generated_by: str, *,
         day_part=s.day_part, local_hour=s.local_hour, growth_phase=s.phase,
         thera_panel_id=panel_id, thera_panel=s.thera_panel, cached=False, generated_by=generated_by,
         greeted_at=datetime.now(timezone.utc).isoformat(),
+        due_practices=_due_practice_cards(s.practices_due),
     )
 
 

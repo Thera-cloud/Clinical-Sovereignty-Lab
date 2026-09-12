@@ -3046,6 +3046,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           _recapData!['last_panel_id'] ??= panel['panel_id'];
           _recapData!['last_panel_biome'] ??= panel['biome'];
         }
+        final due = data['due_practices'];
+        if (due is List && due.isNotEmpty) {
+          _recapData ??= {'user_name': widget.currentUserProfile?['name']};
+          _recapData!['due_practices'] = due;
+        }
         _scrollToBottom();
       });
       // fire-and-forget: mark greeting as opened
@@ -3058,6 +3063,56 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           .catchError((_) => http.Response('', 0));
     } catch (e) {
       debugPrint('[ENTRY_GREETING] skipped: $e');
+    }
+  }
+
+  List<Widget> _duePracticeRecapButtons() {
+    final raw = _recapData?['due_practices'];
+    if (raw is! List || raw.isEmpty) return const [];
+    final out = <Widget>[];
+    for (final item in raw.take(2)) {
+      if (item is! Map) continue;
+      final key = (item['key'] ?? '').toString();
+      final label = (item['label'] ?? key).toString();
+      if (key.isEmpty) continue;
+      out.add(_recapBtn('I did $label', () => _markPracticeDone(key, label)));
+    }
+    return out;
+  }
+
+  Future<void> _markPracticeDone(String key, String label) async {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    final uname = (widget.currentUserProfile?['username'] ??
+            widget.username ??
+            '')
+        .toString();
+    if (tok.isEmpty || uname.isEmpty) return;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse(
+                '$defaultApiBaseUrl/api/thrive/${Uri.encodeComponent(uname)}/practices/complete'),
+            headers: {
+              'Authorization': 'Bearer $tok',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'practice_key': key,
+              'harvest': 'Marked done from welcome card: $label',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        setState(() {
+          final due = List.from(_recapData?['due_practices'] ?? const []);
+          due.removeWhere((e) => e is Map && e['key'] == key);
+          _recapData?['due_practices'] = due;
+        });
+        _sendPresetMessage("I just finished $label.");
+      }
+    } catch (e) {
+      debugPrint('[THRIVE] practice complete skipped: $e');
     }
   }
 
@@ -5647,6 +5702,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                           _sendPresetMessage(_theraWorldAskMessage(
                               _recapData!["last_panel_id"].toString()));
                         }),
+                      ..._duePracticeRecapButtons(),
                       if ((_recapData!["active_quests"] as List?)?.isNotEmpty ==
                           true)
                         _recapBtn('Work on Quest', () {
@@ -6172,6 +6228,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   // /api/thrive/coach/{coach}/roster — phase badge per client (keyed by
   // canonical username AND by hardware_id when the roster row carries one)
   final Map<String, Map<String, dynamic>> _thriveRoster = {};
+  List<Map<String, dynamic>> _thrivePromotions = [];
   bool _thriveBusy = false;
   int _clinicalDirectoryPlanCount = 0;
   final Map<String, bool> _assistEnabledBySession = {};
@@ -7972,11 +8029,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       final decoded = jsonDecode(resp.body);
       final rows = decoded is List
           ? decoded
-          : (decoded is Map && decoded['roster'] is List
-              ? decoded['roster'] as List
+          : (decoded is Map
+              ? (decoded['clients'] is List
+                  ? decoded['clients'] as List
+                  : (decoded['roster'] is List
+                      ? decoded['roster'] as List
+                      : const []))
               : const []);
+      final promos = decoded is Map && decoded['promotions'] is List
+          ? (decoded['promotions'] as List)
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
+          : <Map<String, dynamic>>[];
       setState(() {
         _thriveRoster.clear();
+        _thrivePromotions = promos;
         for (final r in rows.whereType<Map>()) {
           final m = Map<String, dynamic>.from(r);
           final u = (m['username'] ?? '').toString();
@@ -8131,10 +8199,25 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             letterSpacing: 1.5,
             fontSize: 12));
 
+    final clientU = (tb['username'] ?? '').toString();
+    Map<String, dynamic>? promo;
+    for (final p in _thrivePromotions) {
+      final c = (p['client'] ?? '').toString();
+      if (c == clientU || c == targetId) {
+        promo = p;
+        break;
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         h("GROWTH PHASE"),
+        if (promo != null) ...[
+          const SizedBox(height: 8),
+          Text((promo['title'] ?? 'Little Nate moved this client').toString(),
+              style: const TextStyle(color: Color(0xFFC9A962), fontSize: 12)),
+        ],
         const SizedBox(height: 8),
         Container(
           width: double.infinity,

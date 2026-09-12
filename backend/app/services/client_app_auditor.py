@@ -133,6 +133,11 @@ TAB_ENDPOINTS = [
             ("GET", "/api/thrive/frameworks"),
             ("GET", "/api/thrive/audit_client/phase"),
             ("GET", "/api/thrive/audit_client/brief"),
+            ("GET", "/api/thrive/audit_client/healing-signal"),
+            ("GET", "/api/thrive/audit_client/focus"),
+            ("GET", "/api/thrive/audit_client/practices"),
+            ("GET", "/api/thrive/audit_client/practice-log"),
+            ("GET", "/api/thrive/coach/me/roster"),
         ],
     },
 ]

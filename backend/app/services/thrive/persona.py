@@ -55,6 +55,12 @@ def _focus_lines(focus_state: Optional[Dict[str, Any]]) -> List[str]:
     strengths = focus_state.get("strengths") or []
     if strengths:
         lines.append("Known signature strengths: " + ", ".join(str(s).replace("_", " ") for s in strengths[:5]) + ".")
+    quests = [q for q in (focus_state.get("active_quests") or []) if isinstance(q, str) and q.strip()]
+    if quests:
+        lines.append(f"Live Thera-World quest: {quests[0][:90]}.")
+    missions = [m for m in (focus_state.get("active_missions") or []) if isinstance(m, str) and m.strip()]
+    if missions:
+        lines.append(f"Open mission with {missions[0][:70]}.")
     # phase-aware growth memory — what this person has built, harvested, completed
     memory = [m for m in (focus_state.get("thrive_memory") or []) if isinstance(m, str) and m.strip()]
     if memory:

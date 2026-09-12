@@ -100,6 +100,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   List<Map<String, dynamic>> _lastDiff = const [];
   // Growth-phase session guidance — coach eyes only (INV-6: never spoken on air).
   List<Map<String, dynamic>> _thriveRoster = const [];
+  List<Map<String, dynamic>> _thrivePromotions = const [];
   String _guidanceClient = '';
   Map<String, dynamic>? _guidanceBrief;
   bool _guidanceBusy = false;
@@ -302,11 +303,19 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       ).timeout(const Duration(seconds: 15));
       if (!mounted || r.statusCode != 200) return;
       final j = json.decode(r.body) as Map<String, dynamic>;
-      final rows = (j['clients'] as List? ?? const [])
+      final raw = j['clients'] ?? j['roster'];
+      final rows = (raw is List ? raw : const [])
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      setState(() => _thriveRoster = rows);
+      final promos = (j['promotions'] as List? ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      setState(() {
+        _thriveRoster = rows;
+        _thrivePromotions = promos;
+      });
     } catch (_) {}
   }
 
@@ -345,6 +354,15 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     'thrive': Color(0xFF4ECDC4),
     'generative': Color(0xFF22C55E),
   };
+
+  String? _guidancePromoTitle() {
+    for (final p in _thrivePromotions) {
+      if ((p['client'] ?? '').toString() == _guidanceClient) {
+        return (p['title'] ?? 'Little Nate moved this client').toString();
+      }
+    }
+    return null;
+  }
 
   Widget _guidanceRail() {
     final brief = _guidanceBrief;
@@ -417,6 +435,11 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
               padding: EdgeInsets.symmetric(vertical: 8),
               child: LinearProgressIndicator(minHeight: 2, color: _gold),
             ),
+          if (_guidancePromoTitle() != null) ...[
+            const SizedBox(height: 8),
+            Text(_guidancePromoTitle()!,
+                style: const TextStyle(color: _gold, fontSize: 12)),
+          ],
           if (brief != null) ...[
             const SizedBox(height: 8),
             Row(children: [

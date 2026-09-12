@@ -362,6 +362,15 @@ async def _build_grounded_voice_prompt(username: str, db_pool):
         "You will receive the search results as a follow-up message. Summarize them conversationally. "
         "Never say you cannot search the internet.\n"
     )
+    # QUANTUM-CRYSTAL-ARCH — growth-phase register on call start
+    try:
+        from app.services.thrive.turn_inject import apply_growth_phase_turn as _gp_vp
+        prompt, _ = await _gp_vp(
+            db_pool, username, "", {"name": who}, prompt,
+            role="CLIENT", source="voice_call",
+        )
+    except Exception as _gp_pe:
+        print(f"[GROWTH PHASE] voice prompt non-fatal: {_gp_pe}")
     return prompt, crystal_scopes
 
 
@@ -1550,6 +1559,16 @@ async def run_twilio_grok_xtts_bridge(
                 if user_txt:
                     print(f"[VOICE-USER] '{user_txt[:120]}'")
                     user_turns.append({"text": user_txt, "ts": datetime.now(timezone.utc).isoformat()})
+                    # QUANTUM-CRYSTAL-ARCH — thrive sub-state + practice harvest
+                    if session_username and ctx.get("db_pool"):
+                        try:
+                            from app.services.thrive.turn_inject import apply_growth_phase_turn as _gp_v
+                            await _gp_v(
+                                ctx["db_pool"], session_username, user_txt, None, None,
+                                role="CLIENT", source="voice_call", inject=False,
+                            )
+                        except Exception as _gp_ve:
+                            print(f"[GROWTH PHASE] voice turn non-fatal: {_gp_ve}")
                     if _silence_companion:
                         _silence_companion.note_client_speech()
                     # SOVEREIGN-VOICE — GA hardening: detection-only bridge sweep (flag-gated)

@@ -38,7 +38,7 @@ The backend reports `STARTUP COMPLETE: N/135 services healthy` on boot. The targ
 | 21 | command_tab_auditor | 3x daily Sovereign Command 25-endpoint trust scorecard |
 | 22 | the_eye_auditor | 3x daily The Eye 21-endpoint trust scorecard |
 | 23 | login_auditor | 3x daily blind WebSocket login test (client + coach) |
-| 24 | client_app_auditor | 3x daily client-facing 30-endpoint trust scorecard (incl. thrive) |
+| 24 | client_app_auditor | 3x daily client-facing 35-endpoint trust scorecard (incl. thrive) |
 | 25 | coach_dojo_auditor | 3x daily coach portal/DOJO/Night School 46-endpoint trust scorecard |
 | 26 | billing_auditor | 3x daily billing pipeline 32-endpoint trust scorecard (incl. discount management CRUD) |
 | 27 | defense_auditor | 3x daily defense subsystem 8-check trust scorecard |

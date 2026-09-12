@@ -542,6 +542,34 @@ async def save_strengths(
 
 # ── compact state for the prompt / greeting ────────────────────────────────
 
+async def _sse_live(db_pool: Any, user_id: str) -> tuple:
+    """Active Thera-World quests / missions for the addendum (greeting reuse)."""
+    if db_pool is None:
+        return [], []
+    username = await resolve_username(db_pool, user_id) or user_id
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id::text, username, hardware_id FROM users WHERE username = $1 OR hardware_id = $1 LIMIT 1",
+                username,
+            )
+            if not row:
+                return [], []
+            ids = [x for x in (row["id"], row["username"], row["hardware_id"]) if x]
+            q = await conn.fetch(
+                "SELECT goal FROM sse_quests WHERE user_id = ANY($1::text[]) AND status='active' ORDER BY started_at DESC LIMIT 2",
+                ids,
+            )
+            m = await conn.fetch(
+                "SELECT relationship_target FROM sse_missions WHERE user_id = ANY($1::text[]) AND status='active' ORDER BY started_at DESC LIMIT 2",
+                ids,
+            )
+        return [r["goal"] for r in q if r["goal"]], [r["relationship_target"] for r in m if r["relationship_target"]]
+    except Exception as e:
+        logger.debug("practice_tracker: sse_live skipped: %s", e)
+        return [], []
+
+
 async def focus_state(db_pool: Any, user_id: str) -> Dict[str, Any]:
     """One dict the persona addendum + entry greeting can consume."""
     areas = await list_focus_areas(db_pool, user_id)
@@ -554,6 +582,7 @@ async def focus_state(db_pool: Any, user_id: str) -> Dict[str, Any]:
         memory = []
     now = datetime.now(timezone.utc)
     _method = (strengths or {}).get("method") or ""
+    quests, missions = await _sse_live(db_pool, user_id)
     return {
         # phase-aware growth memory (thrive/coaching crystals, reinforced on recall)
         "thrive_memory": memory,
@@ -582,4 +611,6 @@ async def focus_state(db_pool: Any, user_id: str) -> Dict[str, Any]:
         "best_streak": max([a.streak for a in areas], default=0),
         "goals_active": [g.to_dict() for g in goals if g.status == "active"],
         "goals_completed": [g.to_dict() for g in goals if g.status == "completed"],
+        "active_quests": quests,
+        "active_missions": missions,
     }

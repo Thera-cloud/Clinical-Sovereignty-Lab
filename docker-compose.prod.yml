@@ -212,6 +212,8 @@ services:
       - ENABLE_LETHAL_MEANS_GUIDANCE=${ENABLE_LETHAL_MEANS_GUIDANCE:-false}
       # QUANTUM-CRYSTAL-ARCH: CrystalGraph rebuild + constellation (Phase 5d; default off)
       - ENABLE_CRYSTAL_GRAPH=${ENABLE_CRYSTAL_GRAPH:-false}
+      # QUANTUM-CRYSTAL-ARCH — heal→thrive phase model (chat + voice + coach notify)
+      - ENABLE_GROWTH_PHASE=${ENABLE_GROWTH_PHASE:-true}
       - CRYSTAL_GRAPH_MAX_EDGE_NODES=${CRYSTAL_GRAPH_MAX_EDGE_NODES:-20000}
       # QUANTUM-CRYSTAL-ARCH: SSE Grok Imagine cost controls (journey/daily/weekly/monthly)
       - SSE_IMAGERY_GENERATION_ENABLED=${SSE_IMAGERY_GENERATION_ENABLED:-false}
@@ -467,6 +469,8 @@ services:
       - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      # QUANTUM-CRYSTAL-ARCH — heal→thrive phase model (bridge addendum)
+      - ENABLE_GROWTH_PHASE=${ENABLE_GROWTH_PHASE:-true}
       # QUANTUM-CRYSTAL-ARCH — LN7 Step 0 weld tree (W13); host dir is SA-unwritable
       - FROZEN_CONFIG_DIR=/opt/ln7/frozen-config
       # Coaching scope gate stack — dark-launch defaults; flip after 48h review + clinical sign-off
