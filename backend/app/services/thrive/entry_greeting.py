@@ -212,8 +212,24 @@ def _human_day_part(day_part: str) -> str:
     return _DAY_PART_HUMAN.get(day_part or "", (day_part or "").replace("_", " "))
 
 
+# "Lisa West disclosed: "…"" / "The client expressed that …" — source framing LN must never echo.
+_CRYSTAL_FRAMING = re.compile(
+    r"^\s*(?:the\s+)?(?:[A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+){0,3}|user|client)\s+"
+    r"(?:disclosed|expressed|said|shared|reported|described|noted|mentioned|stated|revealed|wrote|admitted|reflected)"
+    r"(?:\s+that)?\s*[:,]?\s*", re.I,
+)
+
+
+def _clean_crystal(text: str) -> str:
+    """Strip third-person framing and outer quotes so the memory reads as the client's own words."""
+    t = _CRYSTAL_FRAMING.sub("", (text or "").strip(), count=1).strip()
+    if len(t) >= 2 and t[0] in "\"“'‘" and t[-1] in "\"”'’":
+        t = t[1:-1].strip()
+    return t
+
+
 def _quotable_crystal(text: str) -> bool:
-    t = (text or "").strip()
+    t = _clean_crystal(text)
     return 30 <= len(t) <= 400 and not _META_CRYSTAL.search(t)
 
 
@@ -337,7 +353,7 @@ async def gather_signals(db_pool: Any, user_id: str) -> EntrySignals:
                     "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id = $1 AND confidence >= 0.4 AND superseded_by IS NULL ORDER BY created_at DESC LIMIT 12",
                     u["id"],
                 )
-                sig.crystals = [c["crystal_text"][:220] for c in cr if _quotable_crystal(c["crystal_text"])][:4]
+                sig.crystals = [_clean_crystal(c["crystal_text"])[:220] for c in cr if _quotable_crystal(c["crystal_text"])][:4]
             except Exception:
                 pass
 
@@ -570,14 +586,22 @@ _POLISH_LEAK = re.compile(
 )
 
 
-def _polish_is_clean(out: Dict[str, str], s: EntrySignals) -> bool:
+def _polish_leak(out: Dict[str, str], s: EntrySignals, drafts: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Return the offending token if the polished text leaks internal labels or third-person voice, else None."""
     joined = " ".join(out.values())
-    if _POLISH_LEAK.search(joined):
-        return False
+    m = _POLISH_LEAK.search(joined)
+    if m:
+        return m.group(0)
     full = (s.display_name or "").strip()
-    if " " in full and re.search(rf"\b{re.escape(full)}\b", joined):  # "Lisa West said…" — third person
-        return False
-    return True
+    draft_text = " ".join((drafts or {}).values())
+    # "Lisa West said…" — third person. Tolerated only if the drafts themselves already carried the name.
+    if " " in full and re.search(rf"\b{re.escape(full)}\b", joined) and full not in draft_text:
+        return full
+    return None
+
+
+def _polish_is_clean(out: Dict[str, str], s: EntrySignals, drafts: Optional[Dict[str, str]] = None) -> bool:
+    return _polish_leak(out, s, drafts) is None
 
 
 async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -> Optional[Dict[str, str]]:
@@ -629,9 +653,10 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
         if not all(isinstance(out.get(k), str) and out[k].strip() for k in ("welcome", "prime", "direction")):
             logger.warning("entry_greeting: LLM polish JSON missing parts for %s (%.1fs)", s.username, elapsed)
             return None
-        if not _polish_is_clean(out, s):
-            logger.warning("entry_greeting: LLM polish leaked internal labels for %s (%.1fs, provider=%s) — template kept",
-                           s.username, elapsed, _prov)
+        _leak = _polish_leak(out, s, drafts)
+        if _leak:
+            logger.warning("entry_greeting: LLM polish leaked %r for %s (%.1fs, provider=%s) — template kept",
+                           _leak, s.username, elapsed, _prov)
             return None
         logger.info("entry_greeting: LLM polish ok for %s (%.1fs, provider=%s)", s.username, elapsed, _prov)
         return {"welcome": _cap(_scrub(out["welcome"]), WELCOME_MAX),
