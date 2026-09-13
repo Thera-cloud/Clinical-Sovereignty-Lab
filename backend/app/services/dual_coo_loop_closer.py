@@ -107,6 +107,8 @@ class DualCooLoopCloser:
         if self._cycles % 2 == 0:
             out["patent_ideas"] = await self._cycle_patent_ideas()
         out["failover"] = await self._cycle_peer_failover()
+        # QUANTUM-CRYSTAL-ARCH — Queens + L5 watch AlphaLN Loop A (read pulse only)
+        out["alphaln_watch"] = await self._cycle_alphaln_watch()
         return out
 
     async def _log_event(self, kind: str, risk: str, detail: str, payload: Optional[dict] = None):
@@ -714,6 +716,47 @@ class DualCooLoopCloser:
             return {"status": "ok", "surfaced": n}
         except Exception as e:
             logger.warning("ln_rule cycle: %s", e)
+            return {"status": "error", "error": str(e)[:200]}
+
+    async def _cycle_alphaln_watch(self) -> Dict[str, Any]:
+        """Queens/L5 watch AlphaLN Loop A. Dual-COO writes L5; AlphaLN does not."""
+        try:
+            from app.services.alphaln_shadow_observer import pulse_from_app_state
+
+            pulse = pulse_from_app_state(self._app_state)
+            if not pulse and self.db_pool:
+                async with self.db_pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        """SELECT AVG(score)::float AS mean_s, COUNT(*)::int AS n
+                             FROM alphaln_shadow_observations
+                            WHERE observed_at > NOW() - INTERVAL '24 hours'
+                              AND source_table = 'conversation_history'""",
+                    )
+                    if row and int(row["n"] or 0):
+                        pulse = {
+                            "status": "ledger",
+                            "mean_24h": (
+                                round(float(row["mean_s"]), 3)
+                                if row["mean_s"] is not None
+                                else None
+                            ),
+                            "n_24h": int(row["n"] or 0),
+                        }
+            if not pulse:
+                return {"status": "idle"}
+            try:
+                from app.services.l5_sandbox.observer import ingest_l4_event
+
+                await ingest_l4_event(
+                    self.db_pool,
+                    event="alphaln_watch",
+                    detail=json.dumps(pulse, default=str)[:500],
+                    gate_class="",
+                )
+            except Exception as e:
+                logger.debug("alphaln L5 watch skip: %s", e)
+            return {"status": "ok", "pulse": pulse}
+        except Exception as e:
             return {"status": "error", "error": str(e)[:200]}
 
     # ── 6) Peer Queen failover ──────────────────────────────────────────

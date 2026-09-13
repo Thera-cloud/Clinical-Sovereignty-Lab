@@ -324,6 +324,8 @@ class TestMacQueenBeatSource(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("_probe_mac_agent_and_beat", src)
         self.assertIn("_cycle_attribution_density", src)
+        self.assertIn("_cycle_alphaln_watch", src)
+        self.assertIn("alphaln_watch", src)
         self.assertIn("google_patents_ingest", src)
 
 

@@ -121,6 +121,7 @@ class CliTaskBusConsumer:
                 RISK_GREEN,
                 RISK_RED,
                 RISK_YELLOW,
+                alphaln_shadow_watch_meta,
                 beat_queen,
                 classify_risk,
                 dual_coo_enabled,
@@ -136,7 +137,9 @@ class CliTaskBusConsumer:
         beat_consumer()
         # QUANTUM-CRYSTAL-ARCH — Dual-COO cloud Queen heartbeat + peer check
         if dual_coo_enabled():
-            beat_queen("cloud", meta={"chief": True, "cycle": self._cycles})
+            _qmeta = {"chief": True, "cycle": self._cycles}
+            _qmeta.update(alphaln_shadow_watch_meta(self._app_state))
+            beat_queen("cloud", meta=_qmeta)
             peer = peer_queen_alive("cloud")
             # Alert only when Mac had a beat that went stale — not perpetual no_beat
             if (

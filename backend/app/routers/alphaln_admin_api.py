@@ -676,6 +676,14 @@ async def alphaln_health(
     _require_dr_nevedal1(principal)
     db = _require_db(request)
     from app.services.alphaln_auditor import run_invariants
+    from app.services.alphaln_shadow_observer import is_enabled as _obs_on
     report = await run_invariants(db, getattr(request.app, "state", None))
     report["twin_enabled"] = _is_enabled()
+    _st = getattr(request.app, "state", None)
+    _obs = getattr(_st, "alphaln_shadow_observer", None) if _st else None
+    report["shadow_observer"] = {
+        "enabled": _obs_on(),
+        "last_tick": getattr(_obs, "last_tick", None) if _obs else None,
+        "pulse": getattr(_st, "alphaln_shadow_pulse", None) if _st else None,
+    }
     return report

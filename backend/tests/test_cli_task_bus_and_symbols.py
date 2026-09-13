@@ -373,6 +373,7 @@ def test_consumer_module_declared_in_source():
     assert "class CliTaskBusConsumer" in src
     assert "claim_task" in src
     assert "post_findings" in src
+    assert "alphaln_shadow_watch_meta" in src
     assert "consumer=\"agent\"" in src or "consumer='agent'" in src
     main_src = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text()
     assert "cli_task_bus_consumer" in main_src

@@ -261,6 +261,8 @@ services:
       - SIX_QUOTIENT_NIGHTLY_MEASURE=${SIX_QUOTIENT_NIGHTLY_MEASURE:-false}
       # QUANTUM-CRYSTAL-ARCH — AlphaLN shadow twin (DrNevedal1 only; pack drafts)
       - ENABLE_ALPHALN_TWIN=${ENABLE_ALPHALN_TWIN:-false}
+      # QUANTUM-CRYSTAL-ARCH — AlphaLN Loop A: score live LN replies (shadow ledger only)
+      - ENABLE_ALPHALN_SHADOW_OBSERVER=${ENABLE_ALPHALN_SHADOW_OBSERVER:-true}
       # QUANTUM-CRYSTAL-ARCH — D.14b intra-rater gap (14 default; 0 = ops override for finalize)
       - TIER1_RECHECK_MIN_GAP_DAYS=${TIER1_RECHECK_MIN_GAP_DAYS:-14}
       # QUANTUM-CRYSTAL-ARCH — D.14b calendar soak waiver (operator-approved; default off)
@@ -578,6 +580,9 @@ services:
       - ENABLE_GATE_CONFIDENCE_FEEDBACK=${ENABLE_GATE_CONFIDENCE_FEEDBACK:-true}
       - ENABLE_L5_OBSERVE=${ENABLE_L5_OBSERVE:-true}
       - ENABLE_L5_ADAPT=${ENABLE_L5_ADAPT:-true}
+      # QUANTUM-CRYSTAL-ARCH — LN clinical scratchpad (shadow = log only; no client addendum)
+      - ENABLE_NATE_CLINICAL_FAST_LOOP=${ENABLE_NATE_CLINICAL_FAST_LOOP:-true}
+      - NATE_CLINICAL_FAST_LOOP_SHADOW=${NATE_CLINICAL_FAST_LOOP_SHADOW:-true}
       # QUANTUM-CRYSTAL-ARCH — coaching workbook RAG (mounted at /Workbooks)
       - WORKBOOKS_DIR=/Workbooks
     ports:

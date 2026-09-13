@@ -130,6 +130,19 @@ def _redis():
         return None
 
 
+def alphaln_shadow_watch_meta(app_state: Any = None) -> Dict[str, Any]:
+    """Merge AlphaLN Loop A pulse into a Queen beat without a second SETEX."""
+    try:
+        from app.services.alphaln_shadow_observer import pulse_from_app_state
+
+        pulse = pulse_from_app_state(app_state)
+    except Exception:
+        pulse = {}
+    if not pulse:
+        return {}
+    return {"alphaln_shadow": pulse}
+
+
 def beat_queen(role: str, *, meta: Optional[Dict[str, Any]] = None) -> bool:
     """COO heartbeat so the peer Queen can detect peer liveness."""
     c = _redis()

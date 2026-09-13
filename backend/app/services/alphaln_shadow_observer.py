@@ -19,6 +19,12 @@ Scoring is intentionally a heuristic v1 (length + question-mark + reflective
 opener). We are seeding the ledger with cheap signal so Slice 4 (console) has
 something to display; a real twin scoring model can replace ``_score_reply``
 without changing the schema.
+
+Loop close (shadow only): each enabled tick dedups by ``reply_hash``, writes
+opinion rows, then stores a rolling pulse on ``app_state.alphaln_shadow_pulse``
+and ``last_tick``. Dual-COO Queens / L5 *read* that pulse — this module never
+calls ``beat_queen`` (would clobber the Chief heartbeat) and never writes
+``l5_observe_event``, ``outcome_envelope``, crystals, or ``conversation_history``.
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("nate.alphaln_shadow_observer")
 
@@ -49,6 +55,12 @@ LOOKBACK_MIN = 10      # look at replies newer than this
 def is_enabled() -> bool:
     raw = (os.getenv(_ENV_FLAG) or "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
+
+
+def pulse_from_app_state(app_state: Any) -> Dict[str, Any]:
+    """Read-only pulse for Queens / L5 / LN7. Never a write path."""
+    raw = getattr(app_state, "alphaln_shadow_pulse", None) if app_state else None
+    return dict(raw) if isinstance(raw, dict) else {}
 
 
 def _stable_salt() -> bytes:
@@ -152,15 +164,67 @@ class AlphaLNShadowObserver:
                 self.last_tick = {"ok": False, "error": str(exc)[:200]}
             await asyncio.sleep(CYCLE_SECONDS_ON if is_enabled() else CYCLE_SECONDS_OFF)
 
+    def _store_pulse(self, pulse: Dict[str, Any]) -> None:
+        """Queens/LN7/L5 read this; AlphaLN does not write their tables."""
+        if self.app_state is None:
+            return
+        try:
+            self.app_state.alphaln_shadow_pulse = pulse
+        except Exception:
+            pass
+
+    async def _rolling_stats(self, conn, new_scores: List[float]) -> Dict[str, Any]:
+        mean_24h = None
+        n_24h = 0
+        try:
+            row = await conn.fetchrow(
+                """SELECT AVG(score)::float AS mean_s, COUNT(*)::int AS n
+                     FROM alphaln_shadow_observations
+                    WHERE observed_at > NOW() - INTERVAL '24 hours'
+                      AND source_table = 'conversation_history'
+                      AND score IS NOT NULL""",
+            )
+            if row:
+                mean_24h = row["mean_s"]
+                n_24h = int(row["n"] or 0)
+        except Exception as exc:
+            logger.debug("alphaln rolling stats skip: %s", exc)
+        tick_mean = (
+            round(sum(new_scores) / len(new_scores), 3) if new_scores else None
+        )
+        return {
+            "tick_mean": tick_mean,
+            "mean_24h": round(float(mean_24h), 3) if mean_24h is not None else None,
+            "n_24h": n_24h,
+        }
+
     async def _tick(self) -> Dict[str, Any]:
         if not is_enabled():
-            return {"ok": True, "status": "flag_off", "written": 0}
+            pulse = {
+                "ok": True,
+                "status": "flag_off",
+                "written": 0,
+                "skipped": 0,
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._store_pulse(pulse)
+            return pulse
         if self.db_pool is None:
             return {"ok": False, "status": "no_db", "written": 0}
 
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=LOOKBACK_MIN)
         written = 0
+        skipped = 0
+        new_scores: List[float] = []
+        stats: Dict[str, Any] = {}
         async with self.db_pool.acquire() as conn:
+            seen_rows = await conn.fetch(
+                """SELECT reply_hash FROM alphaln_shadow_observations
+                    WHERE observed_at > $1
+                      AND source_table = 'conversation_history'""",
+                cutoff,
+            )
+            seen = {r["reply_hash"] for r in seen_rows}
             rows = await conn.fetch(
                 """SELECT id, user_id, ai_text, created_at
                      FROM conversation_history
@@ -173,6 +237,10 @@ class AlphaLNShadowObserver:
             )
             for r in rows:
                 ai_text = r["ai_text"] or ""
+                rh = _reply_hash(ai_text)
+                if rh in seen:
+                    skipped += 1
+                    continue
                 s = _score_reply(ai_text)
                 await conn.execute(
                     """INSERT INTO alphaln_shadow_observations
@@ -181,11 +249,23 @@ class AlphaLNShadowObserver:
                          VALUES ('conversation_history', $1, $2, $3, $4, $5, $6, $7)""",
                     str(r["id"]),
                     _pseudonym(r["user_id"]),
-                    _reply_hash(ai_text),
+                    rh,
                     len(ai_text),
                     s["score"],
                     s["score_method"],
                     json.dumps(s["dims"] or {}),
                 )
+                seen.add(rh)
+                new_scores.append(float(s["score"]))
                 written += 1
-        return {"ok": True, "status": "wrote", "written": written}
+            stats = await self._rolling_stats(conn, new_scores)
+        pulse = {
+            "ok": True,
+            "status": "wrote" if written else "idle",
+            "written": written,
+            "skipped": skipped,
+            "at": datetime.now(timezone.utc).isoformat(),
+            **stats,
+        }
+        self._store_pulse(pulse)
+        return pulse
