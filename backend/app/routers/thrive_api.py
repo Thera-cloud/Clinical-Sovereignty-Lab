@@ -134,7 +134,7 @@ async def entry_greeting(
     force: bool = False,
     user: Dict = Depends(get_current_user),
 ):
-    """LN's app-open greeting: welcome (≤600) / prime (300–500) / direction (≤900).
+    """LN's app-open greeting: one blended welcome + check-in + next step.
 
     Cached per user for LN_ENTRY_GREETING_CACHE_HOURS (default 4) unless
     ``force=true``. Includes ``thera_panel`` (latest Thera-World panel) so the

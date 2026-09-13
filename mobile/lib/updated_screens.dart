@@ -1628,7 +1628,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   Map<String, dynamic>? _recapData;
   bool _recapDismissed = false;
   Timer? _recapTimer;
-  // ── LN entry greeting (growth-phase v1): welcome / prime / direction ──
+  // ── LN entry greeting: one blended open (welcome + check-in + one step) ──
   bool _entryGreetingRequested = false;
   bool _entryGreetingShown = false;
   final Set<int> _dismissedSuggestions = {};
@@ -3003,10 +3003,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       "If you're willing, walk me through your reasoning and three focus topics for today; "
       "I may also want a deeper SIFT pass on the imagery.";
 
-  /// LN's app-open greeting (growth-phase v1). Three "Little Nate:" lines:
-  /// welcome chit-chat (≤600) → goals / last topic primer (300–500) →
-  /// direction with reasoning (≤900). Fetched once per screen lifetime after
-  /// the Neural Link is established; server caches per user for ~4h.
+  /// LN's app-open greeting: one blended "Little Nate:" line (welcome,
+  /// history check-in, one next step). Fetched once per screen lifetime
+  /// after the Neural Link is established; server caches per user for ~4h.
   Future<void> _fetchEntryGreeting() async {
     if (_entryGreetingRequested) return;
     _entryGreetingRequested = true;
@@ -3027,17 +3026,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           .timeout(const Duration(seconds: 20));
       if (resp.statusCode != 200 || !mounted || _entryGreetingShown) return;
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final parts = <String>[
-        (data['welcome'] ?? '').toString().trim(),
-        (data['prime'] ?? '').toString().trim(),
-        (data['direction'] ?? '').toString().trim(),
-      ].where((p) => p.isNotEmpty).toList();
-      if (parts.isEmpty) return;
+      final text = (data['greeting'] ?? data['full_text'] ?? '').toString().trim();
+      if (text.isEmpty) return;
       _entryGreetingShown = true;
       setState(() {
-        for (final p in parts) {
-          _chatHistory.add("Little Nate: $p");
-        }
+        _chatHistory.add("Little Nate: $text");
         // Surface the latest Thera-World panel on the welcome card even when
         // the recap endpoint had no journey row yet.
         final panel = data['thera_panel'];

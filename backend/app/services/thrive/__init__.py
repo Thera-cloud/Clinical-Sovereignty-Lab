@@ -13,5 +13,5 @@ phase_resolver      reads/writes the persisted phase, evaluates transitions
 healing_cycle       longitudinal "healing cycle" signal extraction
 persona             per-phase system-prompt addendum for LN
 practice_tracker    per-client focus areas, cadence, completions, goal ledger
-entry_greeting      three-part app-open greeting (600 / 300-500 / 900 chars)
+entry_greeting      one blended app-open greeting (welcome + check-in + direction)
 """

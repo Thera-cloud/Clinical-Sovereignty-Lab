@@ -1,19 +1,9 @@
 """LN entry greeting — what Little Nate says the moment the app opens.
 
-Three parts (character budgets are soft targets, hard-capped):
-
-1. ``welcome``   ≤ 600  — chit-chat grounded in the client's local time, their
-                          usual entry habits (morning coffee, "how was your day"
-                          openers, late-night check-ins), recent activity + mood.
-2. ``prime``     300–500 — the established goals / focus practices (thrive
-                          phases) *or* the last piece of trauma work that was
-                          on the table (process phases), so the conversation
-                          starts where the client actually is.
-3. ``direction`` ≤ 900  — where LN thinks today should go and why: 1–3
-                          topics/directions drawn from predictability
-                          (cycle_predictions), cycle detection, the latest
-                          Thera-World panel, life-coach goals, trauma-informed
-                          work. Reasoning stated plainly.
+One blended message (not three stacked asks): welcome, a brief check-in from
+history, and a single next step. Character budget is ``BLEND_MAX``. The
+``welcome`` / ``prime`` / ``direction`` columns stay for the log; blended
+copy lives in ``welcome`` (prime and direction empty).
 
 Signals are gathered deterministically; the prose is produced by the
 LittleNate inference pipeline when available and by templates otherwise.
@@ -45,6 +35,8 @@ logger = logging.getLogger(__name__)
 WELCOME_MAX = 600
 PRIME_MIN, PRIME_MAX = 300, 500
 DIRECTION_MAX = 900
+BLEND_MAX = 1200
+BLEND_V = 2
 CACHE_HOURS = float(os.getenv("LN_ENTRY_GREETING_CACHE_HOURS", "4"))
 ENABLE_LLM = os.getenv("LN_ENTRY_GREETING_LLM", "true").lower() in ("1", "true", "yes")
 SIGNALS_TIMEOUT_S = float(os.getenv("LN_ENTRY_GREETING_SIGNALS_TIMEOUT_S", "10"))
@@ -152,6 +144,7 @@ class EntryGreeting:
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["full_text"] = "\n\n".join(p for p in (self.welcome, self.prime, self.direction) if p)
+        d["greeting"] = d["full_text"]
         return d
 
 
@@ -575,18 +568,79 @@ def compose_direction(s: EntrySignals) -> str:
     return _cap(_scrub(text), DIRECTION_MAX)
 
 
+def compose_blend(s: EntrySignals) -> str:
+    """One spoken greeting: welcome, history check-in, one next step."""
+    name = _first(s.display_name)
+    open_word = "Hey" if s.day_part in ("midday", "late_night") else _greeting_word(s.day_part)
+    sentences: List[str] = [f"{open_word}, {name}."]
+
+    if s.day_part == "morning" and "coffee" in s.habits:
+        sentences.append("Coffee going?")
+    elif s.day_part == "morning" and "tea" in s.habits:
+        sentences.append("Tea steeping?")
+    elif s.day_part == "late_night":
+        sentences.append("It's late — I'm glad you came here.")
+    elif s.day_part == "evening" and "work" in s.habits:
+        sentences.append("Workday behind you?")
+    elif s.days_since_last is not None and s.days_since_last >= 7:
+        sentences.append(f"It's been about {int(s.days_since_last)} days. Good to see you.")
+    elif s.days_since_last is not None and s.days_since_last >= 2:
+        sentences.append(f"Last time was {s.last_seen_local or 'a few days ago'}.")
+
+    if s.mood:
+        sentences.append(f"Last I sensed you were {s.mood.lower()}.")
+
+    if s.working_through_topic:
+        sentences.append(f"We still have “{_cap(s.working_through_topic, 120)}” on the table if you want it.")
+    elif s.last_topic:
+        sentences.append(f"We left off on “{_cap(s.last_topic, 140)}.”")
+    elif s.goals_active:
+        g = s.goals_active[0]
+        sentences.append(f"Your live goal is still “{_cap(g.get('text', ''), 90)}.”")
+    elif s.crystals:
+        crystal = _clean_crystal(s.crystals[0])
+        if crystal:
+            sentences.append(f"I've been carrying this for you: {_cap(crystal, 120)}")
+
+    if s.sub_state == "crisis_hold":
+        sentences.append("Today we keep it steady: how is your body right now, and what would make the next few hours softer.")
+    elif s.cycle_predictions:
+        p = s.cycle_predictions[0]
+        when = "today" if p.get("in_days", 1) <= 0.5 else f"in about {max(1, int(round(p.get('in_days') or 1)))} days"
+        event = str(p.get("event") or "a familiar wave").replace("_", " ")
+        sentences.append(
+            f"If we point anywhere, I'd name the {_human_domain(str(p.get('domain') or ''))} pattern that looks like {event} {when} — naming it early keeps it smaller."
+        )
+    elif s.thera_panel and s.thera_panel.get("age_days") is not None and s.thera_panel["age_days"] <= 2:
+        biome = s.thera_panel.get("biome") or "your world"
+        sentences.append(f"Yesterday's Thera-World panel put you in {biome}. We can walk that, or you can start somewhere else.")
+    elif gp.is_coaching_phase(s.phase, s.sub_state) and s.practices_due and s.practices_due[0] in pc.PRACTICES:
+        pr_ = pc.PRACTICES[s.practices_due[0]]
+        sentences.append(f"If you have {pr_.minutes} minutes, {pr_.label} would fit — or just tell me what's true this {_human_day_part(s.day_part)}.")
+    elif gp.is_coaching_phase(s.phase, s.sub_state) and s.goals_active:
+        sentences.append("One small step on that goal is enough for today, if you want it.")
+    else:
+        sentences.append(f"Start wherever is true this {_human_day_part(s.day_part)}. I'll follow.")
+
+    return _cap(_scrub(" ".join(sentences)), BLEND_MAX)
+
+
+def _parts_from_greeting(text: str) -> Dict[str, str]:
+    return {"welcome": _cap(_scrub(text), BLEND_MAX), "prime": "", "direction": ""}
+
+
 # ── LLM polish ─────────────────────────────────────────────────────────────
 
 _LLM_SYSTEM = (
-    "You are Little Nate, an unconditionally warm, plain-spoken companion greeting a client you know well as they "
-    "open the app. Smooth the three DRAFT parts into your natural speaking voice. Speak as 'I' to 'you'; address the "
-    "client by FIRST NAME only, never in the third person. Keep every fact, quote, number, and topic exactly as given — "
-    "invent nothing, drop nothing important. Keep the draft's opening greeting line. "
-    "Never say or paraphrase internal labels: no phase names (stabilize, process, consolidate, thrive, generative), "
-    "no 'growth phase', no time zones or 'UTC', no percentages as bare numbers — say 'I'm fairly sure' instead. "
-    "Never use the words liminal, threshold, aching, tapestry, or 'journey through'. No headings; the only bullets "
-    "allowed are 1) 2) 3) in part three. Present tense, short sentences, warm and direct. "
-    "Return STRICT JSON only: {\"welcome\": str (<=600 chars), \"prime\": str (300-500 chars), \"direction\": str (<=900 chars)}."
+    "You are Little Nate, an unconditionally warm, plain-spoken companion. The client just opened the app. "
+    "Rewrite the DRAFT as ONE message — welcome, a brief check-in from their history, and one next step, woven together. "
+    "Do not write three paragraphs that restate the same ask. Do not greet them more than once. Do not number 1) 2) 3). "
+    "Speak as 'I' to 'you'; address them by FIRST NAME only, never in the third person. "
+    "Keep every fact, quote, and topic from the draft — invent nothing, drop nothing important. "
+    "Keep the draft's opening greeting line. Never say phase names (stabilize, process, consolidate, thrive, generative), "
+    "'growth phase', time zones, or 'UTC'. Never use liminal, threshold, aching, tapestry, or 'journey through'. "
+    "Present tense, short sentences, warm and direct. "
+    "Return STRICT JSON only: {\"greeting\": str (<=1200 chars)}."
 )
 
 # If the polished text leaks any of these, the template is the safer voice.
@@ -624,7 +678,7 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
             "client_first_name": _first(s.display_name),
             "moment": f"{s.weekday} {_human_day_part(s.day_part)}",
             "your_register_right_now": gp.framework_for(s.phase).ln_register,
-            "drafts": drafts,
+            "draft": drafts.get("welcome") or " ".join(p for p in drafts.values() if p),
         }, ensure_ascii=False)
         t0 = datetime.now(timezone.utc)
         _domain = "coaching" if gp.is_coaching_phase(s.phase, s.sub_state) else "clinical"
@@ -634,7 +688,7 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
             # littlenate_inference pipeline (SDH/story/EC + clinical chain incl. home_gpu)
             # routinely exceeded 120s here and starved the greeting.
             raw = await router.generate(
-                prompt=prompt, system=_LLM_SYSTEM, tier="utility", temperature=0.5, max_tokens=900, domain=_domain,
+                prompt=prompt, system=_LLM_SYSTEM, tier="utility", temperature=0.5, max_tokens=500, domain=_domain,
                 # Client-facing voice: prefer Grok (fast, ~$0.00025) over the small Workers AI model,
                 # which flattened the drafts and leaked internal labels in production testing.
                 providers_override=["grok", "workers_ai", "azure"],
@@ -642,7 +696,7 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
         else:
             raw = await inf.generate(
                 prompt, system=_LLM_SYSTEM, user_id=s.username, domain=_domain,
-                temperature=0.5, max_tokens=900, include_crystals=False, include_helix=False, include_quantum=False,
+                temperature=0.5, max_tokens=500, include_crystals=False, include_helix=False, include_quantum=False,
                 is_realtime=False,
             )
         # littlenate_inference.generate returns an InferenceResult dataclass; tolerate str/dict too.
@@ -660,18 +714,18 @@ async def _llm_polish(app_state: Any, s: EntrySignals, drafts: Dict[str, str]) -
                            s.username, elapsed, _prov)
             return None
         out = json.loads(m.group(0))
-        if not all(isinstance(out.get(k), str) and out[k].strip() for k in ("welcome", "prime", "direction")):
-            logger.warning("entry_greeting: LLM polish JSON missing parts for %s (%.1fs)", s.username, elapsed)
+        greeting = (out.get("greeting") or "").strip()
+        if not greeting:
+            logger.warning("entry_greeting: LLM polish JSON missing greeting for %s (%.1fs)", s.username, elapsed)
             return None
-        _leak = _polish_leak(out, s, drafts)
+        parts = _parts_from_greeting(greeting)
+        _leak = _polish_leak(parts, s, drafts)
         if _leak:
             logger.warning("entry_greeting: LLM polish leaked %r for %s (%.1fs, provider=%s) — template kept",
                            _leak, s.username, elapsed, _prov)
             return None
         logger.info("entry_greeting: LLM polish ok for %s (%.1fs, provider=%s)", s.username, elapsed, _prov)
-        return {"welcome": _cap(_scrub(out["welcome"]), WELCOME_MAX),
-                "prime": _cap(_scrub(out["prime"]), PRIME_MAX),
-                "direction": _cap(_scrub(out["direction"]), DIRECTION_MAX)}
+        return parts
     except Exception as e:
         logger.warning("entry_greeting: LLM polish skipped for %s: %s: %s", s.username, type(e).__name__, e)
         return None
@@ -696,6 +750,8 @@ async def _cached(db_pool: Any, username: str) -> Optional[EntryGreeting]:
     if not r:
         return None
     sigs = r["signals"] if isinstance(r["signals"], dict) else (json.loads(r["signals"]) if r["signals"] else {})
+    if int(sigs.get("blend_v") or 0) < BLEND_V:
+        return None
     return EntryGreeting(
         username=username, welcome=r["part_welcome"] or "", prime=r["part_prime"] or "", direction=r["part_direction"] or "",
         day_part=r["day_part"] or "midday", local_hour=int(r["local_hour"] or 12), growth_phase=r["growth_phase"] or gp.DEFAULT_PHASE,
@@ -721,7 +777,7 @@ async def build_entry_greeting(db_pool: Any, user_id: str, *, app_state: Any = N
     except asyncio.TimeoutError:
         logger.warning("entry_greeting: gather_signals timed out (%ss) for %s — minimal signals", SIGNALS_TIMEOUT_S, username)
         s = EntrySignals(username=username, display_name=username)
-    drafts = {"welcome": compose_welcome(s), "prime": compose_prime(s), "direction": compose_direction(s)}
+    drafts = _parts_from_greeting(compose_blend(s))
     polish_task = asyncio.ensure_future(_llm_polish(app_state, s, drafts))
     polished: Optional[Dict[str, str]] = None
     try:
@@ -755,6 +811,7 @@ async def _store(db_pool: Any, s: EntrySignals, g: EntryGreeting, *, delivered: 
     try:
         sigd = s.to_dict()
         sigd["generated_by"] = g.generated_by
+        sigd["blend_v"] = BLEND_V
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """

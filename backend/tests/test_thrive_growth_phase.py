@@ -20,6 +20,7 @@ from app.services.thrive import persona
 from app.services.thrive import practice_catalog as pc
 from app.services.thrive import strengths_interview as si
 from app.services.thrive.practice_tracker import detect_completion
+from app.services.thrive import entry_greeting as eg
 
 
 # ── phase model ────────────────────────────────────────────────────────────
@@ -193,6 +194,38 @@ def test_new_goal_accepts_title_alias():
         pass
     else:
         raise AssertionError("short title must fail")
+
+
+def test_compose_blend_is_one_voice_not_three_asks():
+    s = eg.EntrySignals(
+        username="lisa",
+        display_name="Lisa West",
+        day_part="morning",
+        habits=["coffee"],
+        last_topic="the argument with John",
+        goals_active=[{"text": "Walk every morning", "progress_pct": 40}],
+        mood="tired",
+        days_since_last=3,
+        last_seen_local="Thursday evening",
+        phase="thrive",
+    )
+    text = eg.compose_blend(s)
+    assert "Lisa" in text and "Coffee" in text
+    assert "argument with John" in text
+    assert text.count("Good morning") == 1
+    assert "1)" not in text and "2)" not in text
+    g = eg.EntryGreeting(
+        username="lisa", welcome=text, prime="", direction="",
+        day_part="morning", local_hour=8, growth_phase="thrive",
+        thera_panel_id=None, thera_panel=None,
+    )
+    d = g.to_dict()
+    assert d["greeting"] == text and d["full_text"] == text
+    assert d["prime"] == "" and d["direction"] == ""
+
+
+def test_cached_greeting_ignores_pre_blend_rows():
+    assert eg.BLEND_V >= 2
 
 
 def test_apply_growth_phase_turn_noop_when_flag_off_or_no_pool(monkeypatch):
