@@ -706,6 +706,7 @@ async def _prepare_therapeutic_context_faster(
     base_system_prompt: str,
     default_max_tokens: int,
     register_directive: Optional[str],
+    protective_affect_kind: Optional[str],
     locale: str,
     token_cap_fn,
 ) -> dict:
@@ -823,6 +824,7 @@ async def _prepare_therapeutic_context_faster(
             "bridge_event_severity": "info",
             "user_text_for_audit": (user_text or "")[:2000],
             "direct_action_request_kind": direct_action_kind,
+            "protective_affect_kind": protective_affect_kind,
             "state_symbol": _state_sym,
             "crisis_exempt": bool(_crisis),
             "crisis_class_fired": bool(_crisis),
@@ -912,6 +914,34 @@ async def prepare_therapeutic_context(
             )
             canonical_user_id = user_id
 
+    # Compassionate depth inquiry for explicitly named fear/shame. This stays
+    # dormant during crisis, activation, or shutdown, where stabilization wins.
+    protective_affect_kind = None
+    try:
+        from app.services.protective_affect_inquiry import (
+            build_inquiry_block as _build_affect_inquiry,
+            classify_protective_affect as _classify_affect,
+        )
+
+        _affect_candidate = _classify_affect(user_text or "")
+        _text_state_for_affect = _detect_state_from_text(user_text or "")
+        if (
+            _affect_candidate
+            and not _USER_CRISIS_INTENT.search(user_text or "")
+            and _text_state_for_affect not in ("activated", "shutdown")
+        ):
+            protective_affect_kind = _affect_candidate
+            _affect_block = _build_affect_inquiry(protective_affect_kind)
+            if _affect_block:
+                base_system_prompt = (
+                    (base_system_prompt or "") + "\n\n---\n" + _affect_block
+                )
+    except Exception as _affect_exc:
+        logger.warning(
+            "therapeutic_controller: protective affect inquiry skipped: %s",
+            _affect_exc,
+        )
+
     # QUANTUM-CRYSTAL-ARCH: Faster = conversational light path (~6–7s), not Extra dive
     try:
         from app.websocket.chat_depth_mode import (
@@ -927,6 +957,7 @@ async def prepare_therapeutic_context(
                 base_system_prompt=base_system_prompt,
                 default_max_tokens=default_max_tokens,
                 register_directive=register_directive,
+                protective_affect_kind=protective_affect_kind,
                 locale=locale,
                 token_cap_fn=_faster_tok,
             )
@@ -1374,6 +1405,7 @@ async def prepare_therapeutic_context(
             ) or "info",
             "user_text_for_audit": (user_text or "")[:2000],
             "direct_action_request_kind": direct_action_kind,
+            "protective_affect_kind": protective_affect_kind,
             # QUANTUM-CRYSTAL-ARCH — Phase 5b Key + Surface gates
             "state_symbol": _state_sym,
             "crisis_exempt": bool(_crisis_class),
@@ -1717,6 +1749,22 @@ def _audit_violations(response_text: str, audit_metadata: dict, recent_narrative
     except Exception as _da_exc:
         logger.warning("therapeutic_controller: direct-action audit skipped: %s", _da_exc)
 
+    protective_kind = audit_metadata.get("protective_affect_kind")
+    if (
+        protective_kind
+        and not audit_metadata.get("crisis_exempt")
+        and not audit_metadata.get("direct_action_request_kind")
+    ):
+        try:
+            from app.services.protective_affect_inquiry import response_violations
+
+            violations.extend(response_violations(response_text, protective_kind))
+        except Exception as _pa_exc:
+            logger.warning(
+                "therapeutic_controller: protective affect audit skipped: %s",
+                _pa_exc,
+            )
+
     violations.extend(_symbolic_audit_violations(response_text, audit_metadata))
 
     return violations
@@ -1920,11 +1968,19 @@ async def audit_therapeutic_response(
     if not audit_passed and not _direct_action_violations(violations):
         from app.services.stall_suppression import resolve_audit_fallback
 
-        final_text = resolve_audit_fallback(
-            user_text=audit_metadata.get("user_text_for_audit") or "",
-            bridge_event_severity=audit_metadata.get("bridge_event_severity") or "info",
-            default_fallback=TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
-        )
+        protective_kind = audit_metadata.get("protective_affect_kind")
+        if protective_kind and any(
+            str(v).startswith("protective_affect_") for v in violations
+        ):
+            from app.services.protective_affect_inquiry import compassionate_fallback
+
+            final_text = compassionate_fallback(protective_kind)
+        else:
+            final_text = resolve_audit_fallback(
+                user_text=audit_metadata.get("user_text_for_audit") or "",
+                bridge_event_severity=audit_metadata.get("bridge_event_severity") or "info",
+                default_fallback=TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
+            )
         print(
             f">>> [THERAPEUTIC-CTRL] audit_failed_transparent_fallback user={user_id} "
             f"violations={len(violations)}"
