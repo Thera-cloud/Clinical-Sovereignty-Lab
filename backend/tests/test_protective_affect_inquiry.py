@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.services.protective_affect_inquiry import (
@@ -33,6 +35,7 @@ def test_classifies_explicit_protective_affect(text: str, expected: str | None) 
 def test_protocol_requires_natural_non_deceptive_inquiry() -> None:
     block = build_inquiry_block("fear")
     assert "Ask ONE natural" in block
+    assert "question MUST explicitly connect" in block
     assert "NEVER use covert persuasion" in block
     assert "do not claim to know the hidden motive" in block.lower()
 
@@ -129,3 +132,17 @@ async def test_controller_uses_compassionate_fallback_on_miss() -> None:
     )
     assert out["response_text"] == compassionate_fallback("shame")
     assert "what do you wish" in out["response_text"].lower()
+
+
+def test_bridge_reemits_changed_audit_rewrite_after_azure_stream() -> None:
+    bridge = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "websocket"
+        / "bridge_server.py"
+    ).read_text(encoding="utf-8")
+    assert "_audit_rewrite_pending = True" in bridge
+    assert (
+        "_provider_used != \"azure\" or _buffer_for_therapeutic_audit "
+        "or _audit_rewrite_pending"
+    ) in bridge

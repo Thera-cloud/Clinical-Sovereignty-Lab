@@ -10925,6 +10925,8 @@ class AzureCortex:
             except Exception as _tr_err:
                 print(f">>> [TENSION-REROUTE] failed for {uid}: {_tr_err}")
 
+            # QUANTUM-CRYSTAL-ARCH — audited rewrites must replace pre-audit streams.
+            _audit_rewrite_pending = False
             # FIX-THERAPEUTIC-CONTROLLER — post-flight: audit + optional regenerate
             if _ttc_audit_meta and full_response.strip():
                 try:
@@ -10959,6 +10961,7 @@ class AzureCortex:
                     if _ttc_audited and _ttc_audited.get("response_text"):
                         full_response = _ttc_audited["response_text"]
                     if _stream_before_audit and _already_streamed and full_response.strip() != (_pre_audit_text or "").strip():
+                        _audit_rewrite_pending = True
                         _already_streamed = False  # QUANTUM-CRYSTAL-ARCH: re-emit audit rewrite
                 except Exception as _ttc_post_err:
                     print(f">>> [THERAPEUTIC-CTRL] post-audit failed for {uid}: {_ttc_post_err}")
@@ -11018,7 +11021,7 @@ class AzureCortex:
 
             # SOVEREIGN-VOICE — emit completed provider text; C1 defers until after audit when buffering (any provider).
             _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
-            if _emit_after_inference and (_provider_used != "azure" or _buffer_for_therapeutic_audit):
+            if _emit_after_inference and (_provider_used != "azure" or _buffer_for_therapeutic_audit or _audit_rewrite_pending):
                 await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
 
             # SOVEREIGN-VOICE — zero-cost token refund
