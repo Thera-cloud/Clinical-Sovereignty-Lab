@@ -642,6 +642,10 @@ class UserStore:
         rfam = row.get("resolved_family_code")
         if rfam:
             profile["family_id"] = rfam
+        if row.get("id"):
+            profile["id"] = str(row["id"])
+        if row.get("family_id"):
+            profile["family_uuid"] = str(row["family_id"])
 
         # Overlay additional indexed columns when present in the row
         if row.get("tier"):

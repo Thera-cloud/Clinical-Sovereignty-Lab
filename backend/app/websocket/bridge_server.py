@@ -6741,6 +6741,12 @@ class BillingSystem:
         )
 
         registry = load_registry()
+        # QUANTUM-CRYSTAL-ARCH — spouse/partner draws from HoH pool
+        try:
+            from app.services.family_token_payer import resolve_token_payer_hardware_id
+            user_id = resolve_token_payer_hardware_id(registry, user_id)
+        except Exception:
+            pass
 
         for k, v in registry.items():
             profile = v.get("profile", {})
@@ -6881,6 +6887,13 @@ class BillingSystem:
             tokens_used = int(tokens_used or 0)
         except Exception:
             tokens_used = 0
+
+        # QUANTUM-CRYSTAL-ARCH — spouse/partner usage attributes to HoH
+        try:
+            from app.services.family_token_payer import resolve_token_payer_hardware_id
+            user_id = resolve_token_payer_hardware_id(load_registry(), user_id)
+        except Exception:
+            pass
 
         if tokens_used <= 0:
             registry = load_registry()
@@ -13990,6 +14003,12 @@ async def handle_client(websocket, path=None):
                             res["display_name_public"] = _dnp
                     except Exception as _dnp_err:
                         print(f"[bridge] display_name_public skip: {_dnp_err}")
+                    # QUANTUM-CRYSTAL-ARCH — spouse login shows HoH token pool
+                    try:
+                        from app.services.family_token_payer import overlay_family_token_balance
+                        overlay_family_token_balance(res, load_registry())
+                    except Exception:
+                        pass
                     login_payload = {"type": "login_success", "token": tok, "profile": res}
                     # SOVEREIGN-VOICE — attach session recovery token
                     if _gen_recovery:
@@ -16860,12 +16879,14 @@ async def handle_client(websocket, path=None):
                         try:
                             async with db_pool.acquire() as _gp_conn:
                                 _gp_row = await _gp_conn.fetchrow(
-                                    """SELECT username, role, email, name, hardware_id, family_id,
-                                              tier, subscription_status, token_balance,
-                                              profile_data, created_at, last_login_at,
-                                              company_id, password_hash IS NOT NULL AS has_password
-                                       FROM users
-                                       WHERE hardware_id = $1 OR username = $1
+                                    """SELECT u.username, u.role, u.email, u.name, u.hardware_id, u.family_id,
+                                              u.tier, u.subscription_status, u.token_balance,
+                                              u.profile_data, u.created_at, u.last_login_at,
+                                              u.company_id, u.password_hash IS NOT NULL AS has_password,
+                                              f.family_code
+                                       FROM users u
+                                       LEFT JOIN families f ON f.id = u.family_id
+                                       WHERE u.hardware_id = $1 OR u.username = $1
                                        LIMIT 1""",
                                     _gp_hw or _gp_uname,
                                 )
@@ -16889,10 +16910,22 @@ async def handle_client(websocket, path=None):
                                     _gp_profile["email"] = _gp_raw_email
                                     _gp_profile["name"] = _gp_row["name"] or _gp_profile.get("name", "")
                                     _gp_profile["hardware_id"] = _gp_row["hardware_id"]
-                                    _gp_profile["family_id"] = str(_gp_row["family_id"]) if _gp_row["family_id"] else None
+                                    # QUANTUM-CRYSTAL-ARCH — keep FAM_ code; UUID is family_uuid
+                                    if _gp_row["family_id"]:
+                                        _gp_profile["family_uuid"] = str(_gp_row["family_id"])
+                                    _gp_profile["family_id"] = (
+                                        _gp_row["family_code"]
+                                        or (_gp_pdata.get("family_id") if isinstance(_gp_pdata, dict) else None)
+                                        or (str(_gp_row["family_id"]) if _gp_row["family_id"] else None)
+                                    )
                                     _gp_profile["tier"] = _gp_row["tier"]
                                     _gp_profile["subscription_status"] = _gp_row["subscription_status"]
                                     _gp_profile["token_balance"] = int(_gp_row["token_balance"] or 0)
+                                    try:
+                                        from app.services.family_token_payer import overlay_family_token_balance
+                                        overlay_family_token_balance(_gp_profile, load_registry())
+                                    except Exception:
+                                        pass
                                     _gp_profile["coach_id"] = _gp_pdata.get("coach_id") or _gp_profile.get("coach_id")
                                     _gp_profile["company_id"] = str(_gp_row["company_id"]) if _gp_row["company_id"] else None
                                     if _gp_row.get("created_at"):

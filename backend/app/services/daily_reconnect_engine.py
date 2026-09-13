@@ -227,6 +227,8 @@ class DailyReconnectEngine:
             await self._send(websocket, {"type": "reconnect_error", **block})
             return
 
+        # QUANTUM-CRYSTAL-ARCH — FAM_ code and families.id UUID are one household
+        family_id = (await self._canonical_family_id(family_id)) or family_id
         session = await self._get_active_session(family_id)
         warm_return = False
         if not session:
@@ -351,13 +353,15 @@ class DailyReconnectEngine:
             await self._send(websocket, {"type": "reconnect_error", "message": f"wrong_state_{session['state']}"})
             return
 
-        if session.get("current_turn_user_id") != username:
-            await self._send(websocket, {"type": "reconnect_error", "message": "not_your_turn"})
-            return
-
         prompt_index = int(session.get("current_prompt_index") or 0)
         if prompt_index >= _prompt_count():
             await self._send(websocket, {"type": "reconnect_error", "message": "ritual_complete"})
+            return
+
+        # QUANTUM-CRYSTAL-ARCH — both adults answer the same prompt; do not hide
+        # the spouse behind a stale current_turn_user_id (LetsGoLisa / LetsGoBill).
+        if await self._user_answered_prompt(session_id, username, prompt_index):
+            await self._send(websocket, {"type": "reconnect_error", "message": "turn_already_locked"})
             return
 
         kind, _, _phase = _resolve_prompt(prompt_index)
@@ -971,17 +975,27 @@ class DailyReconnectEngine:
         return session
 
     async def _get_active_session(self, family_id: str) -> Optional[Dict]:
+        aliases = await self._family_id_aliases(family_id)
         async with self.db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT * FROM daily_reconnect_session
-                WHERE family_id = $1 AND closed_at IS NULL
+                WHERE family_id = ANY($1::text[]) AND closed_at IS NULL
                   AND state NOT IN ('CLOSED', 'CRISIS_BYPASS', 'ENTER_FS')
-                ORDER BY created_at DESC LIMIT 1
+                ORDER BY
+                  CASE WHEN state IN ('ACTIVE', 'SOFT_DEESCALATION', 'CONSENT_CHECKPOINT')
+                       THEN 0
+                       WHEN state = 'WRAP_UP' THEN 2
+                       ELSE 1 END,
+                  updated_at DESC NULLS LAST
+                LIMIT 1
                 """,
-                family_id,
+                aliases,
             )
-        return dict(row) if row else None
+        session = dict(row) if row else None
+        if session and session.get("state") == "WRAP_UP":
+            session = await self._maybe_close_stale_wrap_up(session)
+        return session
 
     async def _load_session(self, session_id: str) -> Optional[Dict]:
         async with self.db_pool.acquire() as conn:
@@ -1060,6 +1074,7 @@ class DailyReconnectEngine:
                 """,
                 session_id, username, role,
             )
+        await self._ensure_user_in_turn_order(session_id, username)
 
     async def _all_present_consented(self, session_id: str) -> bool:
         async with self.db_pool.acquire() as conn:
@@ -1076,12 +1091,19 @@ class DailyReconnectEngine:
 
     async def _build_turn_order(self, family_id: str) -> List[str]:
         registry = self._load_registry()
+        try:
+            from app.services.family_token_payer import family_id_aliases, family_id_set
+            aliases = set(family_id_aliases(family_id, registry or {}))
+        except Exception:
+            family_id_set = lambda p: {str((p or {}).get("family_id") or "")}  # noqa: E731
+            aliases = {str(family_id)}
         usernames: List[str] = []
         for _k, entry in (registry or {}).items():
             if isinstance(_k, str) and _k.startswith("_"):
                 continue
             prof = (entry or {}).get("profile") or entry or {}
-            if prof.get("family_id") != family_id:
+            keys = family_id_set(prof)
+            if not (keys & aliases):
                 continue
             role = (prof.get("family_role") or "").upper()
             if role == "DEPENDENT":
@@ -1091,35 +1113,143 @@ class DailyReconnectEngine:
                 usernames.append(str(un))
         return usernames[:8]
 
+    async def _family_id_aliases(self, family_id: str) -> List[str]:
+        extras: List[str] = []
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id::text AS fid, family_code
+                    FROM families
+                    WHERE id::text = $1 OR family_code = $1
+                    """,
+                    family_id,
+                )
+            if row:
+                if row.get("fid"):
+                    extras.append(str(row["fid"]))
+                if row.get("family_code"):
+                    extras.append(str(row["family_code"]))
+        except Exception as e:
+            _log(f"family alias lookup failed: {e}")
+        try:
+            from app.services.family_token_payer import family_id_aliases
+
+            return family_id_aliases(
+                family_id, self._load_registry() or {}, extra=extras
+            )
+        except Exception:
+            aliases = {str(family_id), *extras}
+            return [a for a in aliases if a]
+
+    async def _canonical_family_id(self, family_id: str) -> Optional[str]:
+        aliases = await self._family_id_aliases(family_id)
+        for alias in aliases:
+            if str(alias).startswith("FAM_"):
+                return str(alias)
+        return aliases[0] if aliases else family_id
+
+    async def _maybe_close_stale_wrap_up(self, session: Dict) -> Optional[Dict]:
+        updated = session.get("updated_at")
+        if isinstance(updated, str):
+            try:
+                updated = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            except ValueError:
+                updated = None
+        if updated and getattr(updated, "tzinfo", None) is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        age = (_utcnow() - updated).total_seconds() if updated else 10**9
+        if age < 6 * 3600:
+            return session
+        sid = str(session["id"])
+        await self._transition(sid, "CLOSED", "stale_wrap_up")
+        return None
+
+    async def _user_answered_prompt(
+        self, session_id: str, username: str, prompt_index: int
+    ) -> bool:
+        turns = await self.get_locked_turns(session_id)
+        return any(
+            str(t.get("user_id") or "") == username
+            and int(t.get("prompt_index") or 0) == prompt_index
+            for t in turns
+        )
+
+    async def _live_turn_order(self, session_id: str, session: Dict) -> List[str]:
+        order = session.get("turn_order") or []
+        if isinstance(order, str):
+            try:
+                order = json.loads(order)
+            except Exception:
+                order = []
+        names: List[str] = [str(u) for u in (order or []) if u]
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT user_id, family_role FROM daily_reconnect_participant
+                WHERE session_id = $1::uuid AND left_at IS NULL
+                """,
+                session_id,
+            )
+        for row in rows:
+            role = str(row.get("family_role") or "").upper()
+            if role == "DEPENDENT":
+                continue
+            uid = str(row["user_id"])
+            if uid not in names:
+                names.append(uid)
+        return names[:8]
+
+    async def _ensure_user_in_turn_order(self, session_id: str, username: str) -> None:
+        session = await self._load_session(session_id)
+        if not session:
+            return
+        order = await self._live_turn_order(session_id, session)
+        if username not in order:
+            order.append(username)
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE daily_reconnect_session
+                SET turn_order = $2::jsonb, updated_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                session_id, json.dumps(order[:8]),
+            )
+
     async def _advance_turn_order(self, session_id: str) -> None:
         session = await self._load_session(session_id)
         if not session:
             return
-        order = session.get("turn_order") or []
-        if isinstance(order, str):
-            order = json.loads(order)
-        idx = int(session.get("current_prompt_index") or 0) + 1
-        user_idx = 0
-        if order:
-            cur = session.get("current_turn_user_id")
-            try:
-                user_idx = (order.index(cur) + 1) % len(order) if cur in order else 0
-            except ValueError:
-                user_idx = 0
-        if idx >= _prompt_count():
-            await self._complete_ritual(session_id)
-            return
-        next_user = order[user_idx] if order else None
+        order = await self._live_turn_order(session_id, session)
+        idx = int(session.get("current_prompt_index") or 0)
+        turns = await self.get_locked_turns(session_id)
+        answered = {
+            str(t.get("user_id") or "")
+            for t in turns
+            if int(t.get("prompt_index") or 0) == idx
+        }
+        pending = [u for u in order if u not in answered]
+        if pending:
+            next_user = pending[0]
+            next_idx = idx
+        else:
+            next_idx = idx + 1
+            if next_idx >= _prompt_count():
+                await self._complete_ritual(session_id)
+                return
+            next_user = order[0] if order else None
         async with self.db_pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE daily_reconnect_session
                 SET current_prompt_index = $2,
                     current_turn_user_id = $3,
+                    turn_order = $4::jsonb,
                     updated_at = NOW()
                 WHERE id = $1::uuid
                 """,
-                session_id, idx, next_user,
+                session_id, next_idx, next_user, json.dumps(order),
             )
 
     async def _complete_ritual(self, session_id: str) -> None:
@@ -1167,6 +1297,14 @@ class DailyReconnectEngine:
             return existing.get("sanctuary_id")
         try:
             hw = profile.get("hardware_id") or profile.get("username")
+            try:
+                from app.services.family_token_payer import resolve_token_payer_hardware_id
+
+                hw = resolve_token_payer_hardware_id(
+                    self._load_registry() or {}, hw, profile
+                ) or hw
+            except Exception:
+                pass
             return await self.sanctuary_engine.create_sanctuary(
                 family_id=family_id,
                 head_of_household_id=hw,
@@ -1254,6 +1392,11 @@ class DailyReconnectEngine:
             ),
             "reward_message": self._reward_expression(warm_return),
             "current_turn_user_id": session.get("current_turn_user_id"),
+            "answered_current_prompt": any(
+                str(t.get("user_id") or "") == username
+                and int(t.get("prompt_index") or 0) == prompt_index
+                for t in turns_raw
+            ),
             "turns": turns,
             "warm_return": warm_return,
             "warm_return_message": (

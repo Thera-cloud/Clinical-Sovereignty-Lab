@@ -79,6 +79,9 @@ PRICES = {
     "FAMILY_TIER_2": os.getenv("STRIPE_PRICE_FAMILY_TIER_2"),  # $60/mo
     "FAMILY_TIER_3": os.getenv("STRIPE_PRICE_FAMILY_TIER_3"),  # $45/mo
     "FAMILY_TIER_4": os.getenv("STRIPE_PRICE_FAMILY_TIER_4"),  # $30/mo
+    # Family HoH Sovereign Circle — $30/mo (LetsGoBill), not catalog $149
+    "FAMILY_HOH_CIRCLE": os.getenv("STRIPE_PRICE_FAMILY_HOH_CIRCLE")
+    or os.getenv("STRIPE_PRICE_FAMILY_TIER_4"),
     "COACHING_SINGLE": os.getenv("STRIPE_PRICE_COACHING_SINGLE"),  # $175
     "COACHING_4PACK": os.getenv("STRIPE_PRICE_COACHING_4PACK"),    # $600
     "COACHING_8PACK": os.getenv("STRIPE_PRICE_COACHING_8PACK"),    # $1,120
@@ -627,6 +630,16 @@ class StripeService:
             price_id = PRICES.get(annual_key_map[tier.value]) or PRICES.get(tier.value)
         else:
             price_id = PRICES.get(tier.value)
+        if billing_cycle != "annual" and getattr(tier, "value", None) == "TOP_TIER":
+            try:
+                _fam_role = await self.db.fetchval(
+                    "SELECT UPPER(COALESCE(profile_data->>'family_role', '')) FROM users WHERE id = $1",
+                    db_uid,
+                )
+                if _fam_role in ("HEAD", "HOH", "HEAD_OF_HOUSEHOLD"):
+                    price_id = PRICES.get("FAMILY_HOH_CIRCLE") or PRICES.get("FAMILY_TIER_4") or price_id
+            except Exception:
+                pass
         
         if not price_id:
             raise HTTPException(500, f"Price not configured for {tier.value}")
@@ -1462,6 +1475,16 @@ class StripeService:
         
         # Calculate total
         base_price = 14900 if sub['tier'] == 'TOP_TIER' else 4900
+        try:
+            from app.services.family_token_payer import FAMILY_HOH_CIRCLE_MONTHLY_CENTS, HOH_ROLES
+            _fam_role = await self.db.fetchval(
+                "SELECT UPPER(COALESCE(profile_data->>'family_role', '')) FROM users WHERE id = $1",
+                db_uid,
+            )
+            if sub['tier'] == 'TOP_TIER' and str(_fam_role or "") in HOH_ROLES:
+                base_price = FAMILY_HOH_CIRCLE_MONTHLY_CENTS
+        except Exception:
+            pass
         family_total = sum(m['price_cents'] or 0 for m in members)
         
         return SubscriptionResponse(

@@ -37,6 +37,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   int _currentPromptIndex = 0;
   String _promptText = '';
   String? _currentTurnUserId;
+  bool _answeredCurrentPromptFlag = false;
   String? _nateMessage;
   String? _warmReturnMessage;
   String? _missEncouragement;
@@ -145,7 +146,12 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     _promptPhase = msg['prompt_phase'] as String? ?? _promptPhase;
     _currentPromptIndex = msg['current_prompt_index'] as int? ?? _currentPromptIndex;
     _coupleDiscussionMessage = msg['couple_discussion_message'] as String? ?? _coupleDiscussionMessage;
-    _currentTurnUserId = msg['current_turn_user_id'] as String?;
+    if (msg.containsKey('current_turn_user_id')) {
+      _currentTurnUserId = msg['current_turn_user_id'] as String?;
+    }
+    if (msg.containsKey('answered_current_prompt')) {
+      _answeredCurrentPromptFlag = msg['answered_current_prompt'] == true;
+    }
     _warmReturnMessage = msg['warm_return_message'] as String?;
     _missEncouragement = msg['miss_encouragement'] as String?;
     _nateMessage = msg['nate_message'] as String?;
@@ -361,20 +367,34 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
     } catch (_) {}
   }
 
-  bool get _isMyTurn {
-    final me = _me;
-    return _currentTurnUserId != null && me != null && _currentTurnUserId == me;
+  Set<String> get _myIds {
+    final ids = <String>{};
+    final username = (widget.username ?? widget.profile['username'])?.toString();
+    final hw = widget.profile['hardware_id']?.toString();
+    if (username != null && username.isNotEmpty) ids.add(username);
+    if (hw != null && hw.isNotEmpty) ids.add(hw);
+    return ids;
   }
+
+  bool get _alreadyAnsweredCurrentPrompt {
+    if (_answeredCurrentPromptFlag) return true;
+    return _turns.any((t) {
+      final uid = t['user_id']?.toString();
+      final raw = t['prompt_index'];
+      final idx = raw is int ? raw : int.tryParse('$raw') ?? -1;
+      return uid != null && _myIds.contains(uid) && idx == _currentPromptIndex;
+    });
+  }
+
+  bool get _canShare => _inRitualChat && !_alreadyAnsweredCurrentPrompt;
 
   String? get _me =>
       (widget.username ?? widget.profile['username'])?.toString();
 
   /// Whether *this* user has already acknowledged consent for the session.
   bool get _iConsented {
-    final me = _me;
-    if (me == null) return false;
     for (final p in _participants) {
-      if (p is Map && p['user_id']?.toString() == me) {
+      if (p is Map && _myIds.contains(p['user_id']?.toString())) {
         return p['consented'] == true;
       }
     }
@@ -480,7 +500,7 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 const Spacer(),
               _buildCurrentPromptCard(),
               const SizedBox(height: 12),
-              if (_isMyTurn) ...[
+              if (_canShare) ...[
                 TextField(
                   controller: _turnController,
                   maxLines: 4,
@@ -505,7 +525,9 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
                 ),
               ] else
                 Text(
-                  _isMyTurn ? 'Your turn to answer above.' : 'Listening for their answer…',
+                  _canShare
+                      ? 'Your turn to answer above.'
+                      : 'Waiting for them to share this question…',
                   style: TextStyle(color: Colors.white.withOpacity(0.5)),
                   textAlign: TextAlign.center,
                 ),

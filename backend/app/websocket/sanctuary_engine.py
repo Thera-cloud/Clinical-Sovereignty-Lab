@@ -138,8 +138,20 @@ class FamilySanctuaryEngine:
 
     def get_active_sanctuary_for_family(self, family_id: str) -> Optional[Dict]:
         """Get active sanctuary for a family if one exists"""
+        aliases = {str(family_id or "")}
+        try:
+            from app.services.family_token_payer import family_id_aliases
+            from app.websocket.bridge_server import load_registry
+            aliases.update(family_id_aliases(family_id, load_registry() or {}))
+        except Exception:
+            try:
+                from app.services.family_token_payer import family_id_aliases
+                aliases.update(family_id_aliases(family_id))
+            except Exception:
+                pass
+        aliases.discard("")
         for sanctuary_id, sanctuary in self.data.get('active_sanctuaries', {}).items():
-            if (sanctuary.get('family_id') == family_id and 
+            if (sanctuary.get('family_id') in aliases and 
                 sanctuary.get('status') not in ['COMPLETED', 'CANCELLED']):
                 return sanctuary
         return None

@@ -196,6 +196,22 @@ def test_fs_offer_accept_attaches_sanctuary():
     assert "_ensure_sanctuary_room" in handle
 
 
+def test_both_adults_answer_same_prompt():
+    src = Path(__file__).resolve().parents[1] / "app" / "services" / "daily_reconnect_engine.py"
+    handle = src.read_text().split("async def _handle_turn", 1)[1].split("async def _handle_", 1)[0]
+    assert "current_turn_user_id !=" not in handle
+    assert "_user_answered_prompt" in handle
+    assert "family_id = ANY($1::text[])" in src.read_text()
+
+
+def test_reconnect_ui_shows_composer_until_answered():
+    dart = Path(__file__).resolve().parents[2] / "mobile" / "lib" / "screens" / "daily_reconnect_screen.dart"
+    text = dart.read_text()
+    assert "_canShare" in text
+    assert "_alreadyAnsweredCurrentPrompt" in text
+    assert "_myIds" in text
+
+
 def test_daily_reconnect_ui_does_not_auto_dump_into_sanctuary():
     dart = Path(__file__).resolve().parents[2] / "mobile" / "lib" / "screens" / "daily_reconnect_screen.dart"
     text = dart.read_text()
