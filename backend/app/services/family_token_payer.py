@@ -161,6 +161,8 @@ def overlay_family_token_balance(
         sub, purch = split_balances_from_profile(payer_profile)
         total = total_balance(sub, purch)
         profile["token_balance"] = total
+        profile["subscription_token_balance"] = sub
+        profile["purchased_token_balance"] = purch
         profile["family_token_balance"] = total
         profile["token_payer"] = payer_profile.get("username") or payer_hw
         profile["token_pool"] = "household"

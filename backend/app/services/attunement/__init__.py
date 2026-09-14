@@ -8,6 +8,7 @@ from app.services.attunement.flags import enabled
 from app.services.attunement.hooks import (
     apply_context_rank,
     apply_postflight,
+    apply_surface_postflight,
     format_critical_recall,
     merge_live_ring,
     on_last_socket,
@@ -21,6 +22,7 @@ __all__ = [
     "enabled",
     "apply_context_rank",
     "apply_postflight",
+    "apply_surface_postflight",
     "format_critical_recall",
     "merge_live_ring",
     "on_last_socket",

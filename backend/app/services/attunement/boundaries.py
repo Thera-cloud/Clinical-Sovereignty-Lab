@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from app.services.attunement import flags, store
-from app.services.attunement.live_ring import is_reconnect
+from app.services.attunement.live_ring import is_reconnect, load as ring_load
 from app.services.attunement.tokens import last_clause
 from app.services.attunement.turn_contract import is_high_affect
 
@@ -21,7 +21,8 @@ def _hold_k(uid: str) -> str:
 
 
 def should_clear_live_on_login(uid: str) -> bool:
-    if flags.reconnect() and is_reconnect(uid):
+    # Keep in-memory turns when Redis ring still holds this session (30 min TTL).
+    if flags.reconnect() and (is_reconnect(uid) or ring_load(uid)):
         return False
     return True
 

@@ -815,7 +815,16 @@ class NateResponseValidator:
             elif isinstance(crystal, str):
                 text = crystal
             flagged = False
+            try:
+                from app.services.attunement.turn_contract import is_boundary_leak
+
+                if is_boundary_leak(text):
+                    flagged = True
+            except Exception:
+                pass
             for patt in cls.CRYSTAL_ASSERTION_PATTERNS:
+                if flagged:
+                    break
                 if patt.search(text):
                     logger.info(
                         "NateResponseValidator: filtered recalled crystal containing "

@@ -249,6 +249,12 @@ async def fetch_pg_history_for_chat(
             for r in reversed(rows):
                 u = (r["user_text"] or "")[:_cap]
                 a = (r["ai_text"] or "")[:_cap]
+                try:
+                    from app.services.attunement.turn_contract import scrub_ai_for_prompt
+
+                    a = scrub_ai_for_prompt(a)[:_cap]
+                except Exception:
+                    pass
                 ts = r["created_at"].strftime("%b %d") if r["created_at"] else ""
                 if u:
                     parts.append(f"[{ts}] Client: {u}")
@@ -313,6 +319,12 @@ async def search_conversation_history_ch(
             ts = r["created_at"].strftime("%b %d %I:%M%p") if r["created_at"] else ""
             u = (r["user_text"] or "")[:250]
             a = (r["ai_text"] or "")[:250]
+            try:
+                from app.services.attunement.turn_contract import scrub_ai_for_prompt
+
+                a = scrub_ai_for_prompt(a)[:250]
+            except Exception:
+                pass
             entry = f"[{ts}]"
             if u:
                 entry += f" {username}: {u}"

@@ -37,6 +37,19 @@ def pg_history_limit(mode: str) -> int:
     return 6 if is_faster(mode) else 15
 
 
+def pg_history_limit_for(mode: str, user_text: str = "") -> int:
+    """Widen the PG window on session-review / repair turns."""
+    # QUANTUM-CRYSTAL-ARCH
+    try:
+        from app.services.attunement.turn_contract import is_session_review
+
+        if is_session_review(user_text):
+            return 40
+    except Exception:
+        pass
+    return 12 if is_faster(mode) else 15
+
+
 def allow_enrichment(mode: str) -> bool:
     return not is_faster(mode)
 

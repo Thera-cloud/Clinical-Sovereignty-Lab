@@ -24,9 +24,20 @@ from app.services.attunement.context_rank import rank
 from app.services.attunement.live_ring import append as ring_append
 from app.services.attunement.live_ring import is_reconnect, merge as ring_merge
 from app.services.attunement.recall_cache import fetch as cache_fetch
-from app.services.attunement.tokens import any_overlap
-from app.services.attunement.turn_contract import evaluate
-from app.services.attunement.unacked import ack_if_covered, format_block, peek, push
+from app.services.attunement.tokens import any_overlap, cover
+from app.services.attunement.turn_contract import (
+    evaluate,
+    is_meta_repair,
+    scrub_ai_for_prompt,
+    should_bind_stale_unacked,
+)
+from app.services.attunement.unacked import (
+    ack_if_covered,
+    format_block,
+    note_skipped,
+    peek,
+    push,
+)
 from app.services.attunement.voice import (
     name_cap,
     register_directive,
@@ -44,11 +55,19 @@ def should_clear_live_on_login(uid: str) -> bool:
 
 
 def merge_live_ring(uid: str, mem_turns: Optional[List[dict]]) -> List[dict]:
-    return ring_merge(uid, mem_turns)
+    turns = ring_merge(uid, mem_turns)
+    return [
+        {**t, "ai_text": scrub_ai_for_prompt(t.get("ai_text") or "")}
+        for t in turns
+    ]
 
 
-def format_critical_recall(uid: str, live_turns: Optional[List[dict]] = None) -> str:
-    parts = [format_block(uid, live_turns)]
+def format_critical_recall(
+    uid: str,
+    live_turns: Optional[List[dict]] = None,
+    user_text: str = "",
+) -> str:
+    parts = [format_block(uid, live_turns, user_text=user_text)]
     recon = reconnect_directive(uid)
     if recon:
         parts.append(recon)
@@ -130,7 +149,19 @@ def apply_postflight(
         out = strip_greeting(out)
     if ev["collapsed"] and not already_streamed:
         out = ev["reply"]
-    if ev["collapsed"] or ev["hold_cover"] < 0.15 and len(user_text or "") >= 80:
+    if last_u and not should_bind_stale_unacked(user_text):
+        note_skipped(uid)
+    reply_cover = cover(user_text or "", out)
+    # Only queue as unanswered when Nate actually collapsed / skipped the share.
+    if (
+        ev["collapsed"]
+        or (
+            ev["hold_cover"] < 0.15
+            and reply_cover < 0.15
+            and len(user_text or "") >= 80
+            and len(out) < 80
+        )
+    ) and not is_meta_repair(user_text):
         push(uid, user_text, turn_id)
     acked = ack_if_covered(uid, out)
     session_turn_index(uid, bump=True)
@@ -142,8 +173,18 @@ def apply_postflight(
         "acked_turn_id": acked,
         "memory_claim_ok": ev["memory_claim_ok"],
         "reconnect": is_reconnect(uid),
+        "rewritten": out != (reply or ""),
+        "reply_cover": round(reply_cover, 3),
     }
     return out, meta
+
+
+def apply_surface_postflight(uid: str, user_text: str, reply: str) -> str:
+    """Sanctuary / group / private — same contract, no stream path."""
+    if not uid or not (reply or "").strip():
+        return reply
+    out, _ = apply_postflight(uid, user_text, reply)
+    return out
 
 
 def on_turn_committed(uid: str, user_text: str, ai_text: str, meta: Optional[dict] = None) -> None:

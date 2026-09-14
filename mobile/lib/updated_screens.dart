@@ -2137,11 +2137,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             status == 'declined' ||
             status == 'completed';
         if (cleared) {
-          if (mounted) {
+          if (mounted && _skillPlanStatus != null) {
             setState(() {
               _skillPlanStatus = null;
-              _chatHistory.add('System: [Skill plan cleared]');
-              _scrollToBottom();
             });
           }
         } else {

@@ -17,6 +17,7 @@ from app.websocket.chat_depth_mode import (
     faster_max_tokens,
     normalize_depth_mode,
     pg_history_limit,
+    pg_history_limit_for,
     relational_timeout_s,
     stream_before_therapeutic_audit,
 )
@@ -81,3 +82,12 @@ def test_faster_richness_hybrid():
     assert "EXTRA" in build_depth_richness_directive("extra", text)
     # Faster directive stays shorter than Extra
     assert len(fast) < len(build_extra_quotient_directive(text))
+
+
+def test_pg_history_limit_for_session_review():
+    assert pg_history_limit("faster") == 6
+    assert pg_history_limit_for("faster") == 12
+    assert pg_history_limit_for("extra") == 15
+    assert pg_history_limit_for(
+        "faster", "review today's session from the beginning"
+    ) == 40

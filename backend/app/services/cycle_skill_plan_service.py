@@ -1944,6 +1944,9 @@ def schedule_skill_plan_post_turn(
         pass
 
 
+_skill_plan_had_status: set[str] = set()
+
+
 async def push_skill_plan_ws_update(
     sockets: Any,
     uid: str,
@@ -1953,21 +1956,24 @@ async def push_skill_plan_ws_update(
 ) -> None:
     """Send cycle_skill_plan_update to open sockets for uid.
 
-    QUANTUM-CRYSTAL-ARCH: when no suggested/active plan remains, still push
-    cleared=true so Flutter drops the sticky skill-plan banner.
+    QUANTUM-CRYSTAL-ARCH: only push cleared=true after a plan existed this
+    process — never spam empty-plan clients every turn (LetsGoLisa 2026-09-14).
     """
     if not sockets or uid not in sockets:
         return
     st = await build_client_skill_plan_status(db_pool, user_id)
-    payload = (
-        {"type": "cycle_skill_plan_update", **st}
-        if st
-        else {
+    if st:
+        _skill_plan_had_status.add(uid)
+        payload = {"type": "cycle_skill_plan_update", **st}
+    elif uid in _skill_plan_had_status:
+        _skill_plan_had_status.discard(uid)
+        payload = {
             "type": "cycle_skill_plan_update",
             "cleared": True,
             "status": "cleared",
         }
-    )
+    else:
+        return
     for _ws in list(sockets.get(uid, [])):
         if ctx is not None and getattr(_ws, "_eviction_context", "main") != ctx:
             continue

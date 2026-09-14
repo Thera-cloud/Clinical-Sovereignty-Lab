@@ -13,7 +13,7 @@ from app.services.attunement import flags, store
 
 _TTL = 30 * 60
 _LIMIT = 8
-_RECONNECT_S = 10 * 60
+_RECONNECT_S = 30 * 60  # match ring TTL so a 12–30 min flap still hydrates
 
 
 def _k(uid: str) -> str:

@@ -7776,11 +7776,11 @@ async def _fetch_pg_history_for_chat(db_pool, username: str, hardware_id: str, l
         return ""
 
 
-def _format_critical_recall_facts(uid: str) -> str:
+def _format_critical_recall_facts(uid: str, user_text: str = "") -> str:
     """Pin salient in-session facts for recall prompts (Gap 3)."""
     try:
         from app.services.attunement.hooks import format_critical_recall
-        return format_critical_recall(uid, _chat_live_turns.get(uid) or [])
+        return format_critical_recall(uid, _chat_live_turns.get(uid) or [], user_text=user_text)
     except Exception:
         return ""
 
@@ -9007,7 +9007,7 @@ class AzureCortex:
                 normalize_depth_mode as _norm_depth,
                 is_faster as _is_faster_depth,
                 crystal_max_results as _crystal_max,
-                pg_history_limit as _pg_hist_lim,
+                pg_history_limit_for as _pg_hist_lim,
                 allow_enrichment as _allow_enrich,
                 allow_plan_heavy as _allow_plan_heavy,
                 allow_plan_context as _allow_plan_ctx,
@@ -9026,7 +9026,7 @@ class AzureCortex:
             _depth = "extra"
             _is_faster_depth = lambda m: False  # noqa: E731
             _crystal_max = lambda m: 8  # noqa: E731
-            _pg_hist_lim = lambda m: 15  # noqa: E731
+            _pg_hist_lim = lambda m, t="": 15  # noqa: E731
             _allow_enrich = lambda m: True  # noqa: E731
             _allow_plan_heavy = lambda m: True  # noqa: E731
             _allow_plan_ctx = lambda m: True  # noqa: E731
@@ -9407,7 +9407,7 @@ class AzureCortex:
             _timed("relational", _rel_capped()),
             _timed("checkin", self._get_checkin_context(profile)),
             _timed("crystals", _recall_with_skill_bias(_cpool, _hw_id, user_text, _uname)),
-            _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=_pg_hist_lim(_depth))),
+            _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=_pg_hist_lim(_depth, user_text))),
             _timed("intake_s1", _fetch_intake_context()),
             _timed("fsf", _fetch_fsf_context()),
             _timed("reconnect", _fetch_reconnect_context()),
@@ -9466,7 +9466,7 @@ class AzureCortex:
         except Exception:
             pass
         _live_turn_context = _format_live_turn_context(uid)
-        _critical_recall_context = _format_critical_recall_facts(uid)
+        _critical_recall_context = _format_critical_recall_facts(uid, user_text)
         try:  # QUANTUM-CRYSTAL-ARCH
             from app.services.attunement.hooks import apply_context_rank
             _live_turn_context, _critical_recall_context, crystal_context, pg_history_context, relational_context = apply_context_rank(_live_turn_context, _critical_recall_context, crystal_context, pg_history_context, relational_context)
@@ -11139,15 +11139,18 @@ class AzureCortex:
             try:  # QUANTUM-CRYSTAL-ARCH
                 from app.services.attunement.hooks import apply_postflight
                 _fn = ((profile.get("name") or "").strip().split() or [""])[0]
+                _pre_attune = _final_response
                 _final_response, _attune_meta = apply_postflight(
                     uid, user_text, _final_response,
                     live_turns=_chat_live_turns.get(uid) or [],
                     first_name=_fn, crystal_ids=_crystal_ids_for_turn,
                     pg_context=pg_history_context, depth=_depth, turn_id=_turn_id,
-                    already_streamed=bool(_stream_before_audit),
+                    already_streamed=bool(_already_streamed),
                 )
-            except Exception:
-                pass
+                if _final_response != _pre_attune and _final_response.strip():
+                    await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
+            except Exception as _attune_err:
+                print(f">>> [ATTUNE] postflight error (non-fatal): {_attune_err}")
 
             # QUANTUM-CRYSTAL-ARCH — Layer 8 factual grounding post-check
             if _validate_factual and _role == "CLIENT" and _final_response.strip():
@@ -11948,6 +11951,12 @@ class AzureCortex:
                     )
                 except Exception:
                     pass
+                try:  # QUANTUM-CRYSTAL-ARCH
+                    from app.services.attunement.hooks import apply_surface_postflight
+                    _u_att = (recent_messages[-1].get("content") if recent_messages else "") or ""
+                    clean_response = apply_surface_postflight(hoh_id or "", _u_att, clean_response)
+                except Exception:
+                    pass
                     
                 try:
                     _hw_by_id = {p.get("hardware_id", ""): p.get("name", "Member") for p in family_profiles if p.get("hardware_id")}
@@ -12310,6 +12319,13 @@ class AzureCortex:
                         result["suggested_response"] = _gc_response
                     except Exception:
                         pass
+                    try:  # QUANTUM-CRYSTAL-ARCH
+                        from app.services.attunement.hooks import apply_surface_postflight
+                        _gu = next((m.get("content") or "" for m in reversed(recent_messages[-8:]) if (m.get("sender_id") or m.get("user_id")) == _target_hw), "")
+                        _gc_response = apply_surface_postflight(_target_hw, _gu, _gc_response)
+                        result["suggested_response"] = _gc_response
+                    except Exception:
+                        pass
                     # QUANTUM-CRYSTAL-ARCH — GA hardening: sweep target's latest message (flag-gated)
                     for _sb_m in reversed(recent_messages[-8:]):
                         if (_sb_m.get("sender_id") or _sb_m.get("user_id")) == _target_hw and _sb_m.get("content"):
@@ -12661,6 +12677,11 @@ class AzureCortex:
                             clean_response, user_text=user_prompt, user_id=member_id or "", db_pool=db_pool,
                             crystal_scopes=_pc_scopes,
                         )
+                    except Exception:
+                        pass
+                    try:  # QUANTUM-CRYSTAL-ARCH
+                        from app.services.attunement.hooks import apply_surface_postflight
+                        clean_response = apply_surface_postflight(member_id or "", user_prompt, clean_response)
                     except Exception:
                         pass
 
@@ -14007,8 +14028,8 @@ async def handle_client(websocket, path=None):
                     try:
                         from app.services.family_token_payer import overlay_family_token_balance
                         overlay_family_token_balance(res, load_registry())
-                    except Exception:
-                        pass
+                    except Exception as _tok_ov:
+                        print(f"[bridge] family token overlay skip: {_tok_ov}")
                     login_payload = {"type": "login_success", "token": tok, "profile": res}
                     # SOVEREIGN-VOICE — attach session recovery token
                     if _gen_recovery:

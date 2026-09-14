@@ -41,7 +41,10 @@ def ack_if_covered(uid: str, reply: str, threshold: float = 0.3) -> Optional[str
     if not q:
         return None
     last = q[-1]
-    if cover(last.get("user_text") or "", reply) < threshold:
+    full = last.get("user_text") or ""
+    clause = last_clause(full, 12)
+    score = max(cover(full, reply), cover(clause, reply) if clause else 0.0)
+    if score < threshold:
         return None
     q = q[:-1]
     if q:
@@ -51,11 +54,37 @@ def ack_if_covered(uid: str, reply: str, threshold: float = 0.3) -> Optional[str
     return last.get("turn_id") or "unacked"
 
 
-def format_block(uid: str, live_turns: Optional[List[dict]] = None) -> str:
+def note_skipped(uid: str, max_skips: int = 2) -> None:
+    """Drop a stale unacked after two turns that did not bind it."""
+    # QUANTUM-CRYSTAL-ARCH
+    q = peek(uid)
+    if not q:
+        return
+    last = dict(q[-1])
+    last["skips"] = int(last.get("skips") or 0) + 1
+    if last["skips"] >= max_skips:
+        q = q[:-1]
+    else:
+        q[-1] = last
+    if q:
+        store.set_json(_k(uid), q, _TTL)
+    else:
+        store.delete(_k(uid))
+
+
+def format_block(
+    uid: str,
+    live_turns: Optional[List[dict]] = None,
+    user_text: str = "",
+) -> str:
     """Binding facts from unacked + last live disclosure — no hardcoded names."""
+    from app.services.attunement.turn_contract import should_bind_stale_unacked
+
     parts: List[str] = []
     q = peek(uid)
-    if q:
+    # QUANTUM-CRYSTAL-ARCH: do not tell the model to bind a stale clause on a
+    # new share or repair turn — that is how Lisa's chat looped.
+    if q and should_bind_stale_unacked(user_text):
         last = q[-1].get("user_text") or ""
         parts.append(f"UNANSWERED (bind first): {last_clause(last, 16)}")
     for t in (live_turns or [])[-2:]:

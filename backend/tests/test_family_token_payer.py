@@ -68,6 +68,8 @@ def test_lisa_login_shows_household_pool():
     lisa = dict(reg["client_LetsGoLisa"]["profile"])
     overlay_family_token_balance(lisa, reg)
     assert lisa["token_balance"] == 31020
+    assert lisa["subscription_token_balance"] == 31020
+    assert lisa["purchased_token_balance"] == 0
     assert lisa["token_pool"] == "household"
     assert lisa["token_payer"] == "LetsGoBill"
 

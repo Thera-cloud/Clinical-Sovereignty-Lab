@@ -25,8 +25,31 @@ _STAY = re.compile(
     r"\b(stay with (this|that|me)|just listen|don't (fix|go there|analyze)|hold (this|that))\b",
     re.I,
 )
+# QUANTUM-CRYSTAL-ARCH: LetsGoLisa 2026-09-14 — do not glue a stale unacked
+# clause onto a new share or a "you're not working" repair turn.
+_META_REPAIR = re.compile(
+    r"(something is off|how you are functioning|incongruent|"
+    r"can you please review|review (all )?(of )?(our |the )?"
+    r"(interactions|session|paragraphs|conversation)|"
+    r"from the beginning|rewrite it again|start over)",
+    re.I,
+)
 _AFFECT = re.compile(
     r"\b(ashamed|afraid|scared|hurt|angry|alone|suicid|kill|die|hopeless|trauma)\b",
+    re.I,
+)
+_SESSION_REVIEW = re.compile(
+    r"\b(this session|today'?s session|from the (start|beginning)|"
+    r"earlier (today|in (this|our) session)|our interactions)\b",
+    re.I,
+)
+_GLUE_PREFIX = re.compile(
+    r"^I'm still with that last part\s*[—–-]\s*.{0,240}?\.\s*",
+    re.I,
+)
+_BOUNDARY_LEAK = re.compile(
+    r"(you need to seek a therapist|"
+    r"this isn'?t the place to go back into trauma processing)",
     re.I,
 )
 
@@ -81,11 +104,53 @@ def stay_with_this(user_text: str) -> bool:
     return bool(_STAY.search(user_text or ""))
 
 
+def is_meta_repair(user_text: str) -> bool:
+    return bool(_META_REPAIR.search(user_text or ""))
+
+
+def is_session_review(user_text: str) -> bool:
+    t = user_text or ""
+    return is_meta_repair(t) or bool(_SESSION_REVIEW.search(t))
+
+
+def scrub_persisted_glue(ai_text: str) -> str:
+    """Strip leftover miss-ack prepend so recall does not re-teach it."""
+    return _GLUE_PREFIX.sub("", ai_text or "", count=1).strip()
+
+
+def scrub_boundary_leak(ai_text: str) -> str:
+    if not ai_text:
+        return ""
+    return _BOUNDARY_LEAK.sub("", ai_text).strip()
+
+
+def scrub_ai_for_prompt(ai_text: str) -> str:
+    return scrub_boundary_leak(scrub_persisted_glue(ai_text))
+
+
+def is_boundary_leak(text: str) -> bool:
+    return bool(_BOUNDARY_LEAK.search(text or ""))
+
+
+def should_bind_stale_unacked(user_text: str) -> bool:
+    """Glue a prior unacked clause only onto thin follow-ups (e.g. 'anyway')."""
+    t = (user_text or "").strip()
+    if not t or is_meta_repair(t):
+        return False
+    if len(t) >= 80:
+        return False
+    return True
+
+
 def hold_cover(user_text: str, reply: str, last_unacked: str = "") -> float:
     hold = first_sentence(reply)
     c = cover(user_text, hold)
     if last_unacked:
-        c = max(c, cover(last_unacked, hold))
+        c = max(
+            c,
+            cover(last_unacked, hold),
+            cover(last_clause(last_unacked, 12), hold),
+        )
     return round(c, 3)
 
 
@@ -113,8 +178,12 @@ def evaluate(
     if collapsed:
         cleaned = witnessing_fallback(user_text)
     hc = hold_cover(user_text, cleaned, last_unacked)
-    if miss_ack and last_unacked and hc < 0.3:
-        seed = last_clause(last_unacked, 8)
+    if (
+        miss_ack
+        and last_unacked
+        and hc < 0.3
+        and should_bind_stale_unacked(user_text)
+    ):
         cleaned = f"{witnessing_fallback(last_unacked)} {cleaned}".strip()
         hc = max(hc, hold_cover(last_unacked, cleaned))
     claim_ok = memory_claim_ok(cleaned, has_crystal=has_crystal, has_pg_overlap=has_pg_overlap)
