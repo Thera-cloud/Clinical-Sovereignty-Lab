@@ -20351,21 +20351,19 @@ async def handle_client(websocket, path=None):
                             session_client_ids = set()
                             session_client_meta = {}
 
-                    # NOTE: master_coach_ids fetch retained but no longer used in
-                    # assigned_ok check (inheritance removed). Future cleanup may drop
-                    # this block entirely.
-                    # Resolve master coach IDs if this coach is an assistant
+                    # QUANTUM-CRYSTAL-ARCH: assistant inherits master-coach clients
                     master_coach_ids = set()
                     if not is_admin and db_pool:
                         try:
                             async with db_pool.acquire() as _hconn:
                                 _master_rows = await _hconn.fetch(
                                     """SELECT master_coach_id FROM coach_hierarchy
-                                       WHERE assistant_id = $1 AND status = 'active'""",
-                                    coach_id,
+                                       WHERE assistant_id = ANY($1::text[]) AND status = 'active'""",
+                                    [x for x in (coach_id, coach_username) if x],
                                 )
                                 for _mr in _master_rows:
-                                    master_coach_ids.add(_mr["master_coach_id"])
+                                    if _mr["master_coach_id"]:
+                                        master_coach_ids.add(_mr["master_coach_id"])
                         except Exception:
                             master_coach_ids = set()
 
@@ -20380,6 +20378,20 @@ async def handle_client(websocket, path=None):
                                     registry_clients_by_id[hid] = p
                     except Exception:
                         registry_clients_by_id = {}
+
+                    if master_coach_ids:
+                        try:
+                            for _, v in (registry or {}).items():
+                                rp = (v.get("profile") or {})
+                                hid = (rp.get("hardware_id") or "").strip()
+                                un = (rp.get("username") or "").strip()
+                                if hid in master_coach_ids or un in master_coach_ids:
+                                    if hid:
+                                        master_coach_ids.add(hid)
+                                    if un:
+                                        master_coach_ids.add(un)
+                        except Exception:
+                            pass
                     
                     for k, v in registry.items():
                         p = v.get("profile", {})
@@ -20393,14 +20405,16 @@ async def handle_client(websocket, path=None):
                         # - For ADMIN: return all clients (optionally filterable later)
                         assigned_ok = is_admin
                         if not is_admin:
-                            # Removed assistant→master inheritance: assistants no longer see
-                            # the master coach's clients. Direct primary assignment + scheduled
-                            # session fallback only.
                             assigned_ok = (
                                 (p.get("coach_id") and p.get("coach_id") == coach_id)
                                 or (p.get("assigned_coach_id") and p.get("assigned_coach_id") == coach_id)
                                 or (p.get("assigned_coach") and coach_username and p.get("assigned_coach") == coach_username)
                                 or (p.get("hardware_id") in session_client_ids)
+                                or (master_coach_ids and (
+                                    (p.get("coach_id") and p.get("coach_id") in master_coach_ids)
+                                    or (p.get("assigned_coach_id") and p.get("assigned_coach_id") in master_coach_ids)
+                                    or (p.get("assigned_coach") and p.get("assigned_coach") in master_coach_ids)
+                                ))
                             )
                         if not assigned_ok:
                             continue
@@ -20440,6 +20454,8 @@ async def handle_client(websocket, path=None):
 
                         clients.append({
                             "id": p.get("hardware_id"),
+                            "hardware_id": p.get("hardware_id") or "",
+                            "username": p.get("username") or "",
                             "name": p.get("name"),
                             "tier": p.get("subscription_plan") or p.get("tier") or "STANDARD",
                             "subscription_plan": p.get("subscription_plan") or p.get("tier") or "STANDARD",
@@ -20497,6 +20513,8 @@ async def handle_client(websocket, path=None):
                                 }
                                 clients.append({
                                     "id": cid,
+                                    "hardware_id": p.get("hardware_id") or cid,
+                                    "username": p.get("username") or "",
                                     "name": name,
                                     "tier": p.get("subscription_plan") or p.get("tier") or "STANDARD",
                                     "subscription_plan": p.get("subscription_plan") or p.get("tier") or "STANDARD",

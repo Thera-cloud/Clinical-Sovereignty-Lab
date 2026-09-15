@@ -11930,6 +11930,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildClientsTab() {
+    if (_isLoading && _clients.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFFC9A962)),
+      );
+    }
     if (_clients.isEmpty) {
       return const Center(
         child:
@@ -12042,6 +12047,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
+                          Text(
+                            "${(f['total_sessions'] is num) ? (f['total_sessions'] as num).toInt() : 0} sessions",
+                            style: const TextStyle(
+                                color: Color(0xFFC9A962), fontSize: 10),
+                          ),
                         ],
                       ),
                     ),
@@ -12050,19 +12060,32 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () {
+                        final folderClients =
+                            List<Map<String, dynamic>>.from(
+                                f['clients'] ?? []);
                         _openFolder(
                           folderId: f['folder_id'],
                           label: f['label'],
                           familyId: f['family_id'],
-                          clients: List<Map<String, dynamic>>.from(
-                              f['clients'] ?? []),
+                          clients: folderClients,
                         );
                         _tabController.animateTo(3); // BRIEFINGS
+                        if (folderClients.length == 1) {
+                          final briefId =
+                              _clientIdFromMap(folderClients.first);
+                          if (briefId.isNotEmpty) {
+                            _fetchClientBrief(briefId);
+                          }
+                        }
                       },
                       style: TextButton.styleFrom(
                         foregroundColor: const Color(0xFFFFD700),
                       ),
-                      child: const Text("Open Folder"),
+                      child: Text(
+                        List<dynamic>.from(f['clients'] ?? []).length == 1
+                            ? "View Brief"
+                            : "Open Folder",
+                      ),
                     ),
                   ],
                 ),
@@ -15948,7 +15971,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             controller: _clientSearchController,
             style: const TextStyle(color: Colors.white, fontSize: 13),
             decoration: InputDecoration(
-              hintText: 'Search by name, company, or family...',
+              hintText: 'Search by name, username, company, or family...',
               hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
               prefixIcon:
                   const Icon(Icons.search, color: Colors.grey, size: 20),
@@ -16061,13 +16084,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       if (_clientSearchQuery.isNotEmpty) {
         final q = _clientSearchQuery.toLowerCase();
         final name = (m['name'] ?? '').toString().toLowerCase();
+        final username = (m['username'] ?? '').toString().toLowerCase();
         final companyName = (m['company_name'] ?? '').toString().toLowerCase();
         final cId = (m['company_id'] ?? '').toString().toLowerCase();
         final fId = (m['family_id'] ?? '').toString().toLowerCase();
+        final hid = (m['hardware_id'] ?? m['id'] ?? '').toString().toLowerCase();
         if (!name.contains(q) &&
+            !username.contains(q) &&
             !companyName.contains(q) &&
             !cId.contains(q) &&
-            !fId.contains(q)) {
+            !fId.contains(q) &&
+            !hid.contains(q)) {
           continue;
         }
       }
@@ -16490,6 +16517,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       }
     }
 
+    int sessionSum(List<Map<String, dynamic>> members) {
+      var n = 0;
+      for (final m in members) {
+        final t = m['total_sessions'];
+        if (t is num) {
+          n += t.toInt();
+        } else {
+          n += int.tryParse('$t') ?? 0;
+        }
+      }
+      return n;
+    }
+
     byFamily.forEach((familyId, members) {
       out.add({
         "folder_id": "family:$familyId",
@@ -16499,6 +16539,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         "risk_level": worstRisk(members),
         "clients": members,
         "folder_type": "family",
+        "total_sessions": sessionSum(members),
       });
     });
 
@@ -16515,6 +16556,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         "risk_level": worstRisk(members),
         "clients": members,
         "folder_type": "company",
+        "total_sessions": sessionSum(members),
       });
     });
 
@@ -16543,6 +16585,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         "clients": [c],
         "folder_type": isCoachOnly ? "coach_only" : "individual",
         "subscription_plan": plan,
+        "total_sessions": sessionSum([c]),
       });
     }
 
