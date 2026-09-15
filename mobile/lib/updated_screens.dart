@@ -12732,6 +12732,25 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         const SizedBox(width: 10),
                         Expanded(
                           child: OutlinedButton.icon(
+                            icon: const Icon(Icons.phone_in_talk, size: 18),
+                            label: const Text('FaceTime'),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Color(0xFF4ECDC4)),
+                              foregroundColor: const Color(0xFF4ECDC4),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            onPressed: () =>
+                                _openFaceTimeLaunchDialog(session),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
                             icon: const Icon(Icons.event_busy, size: 18),
                             label: const Text('Cancel'),
                             style: OutlinedButton.styleFrom(
@@ -12816,14 +12835,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           },
                         ),
                       ),
+                      IconButton(
+                        tooltip: "Start FaceTime",
+                        icon: const Icon(Icons.phone_in_talk,
+                            color: Color(0xFF4ECDC4)),
+                        onPressed: () => _openFaceTimeLaunchDialog(session),
+                      ),
                       // Always show the 3-dot menu for session management
-                      const SizedBox(width: 10),
                       PopupMenuButton<String>(
                         tooltip: "Session actions",
                         color: const Color(0xFF0A0A0F),
                         icon:
                             const Icon(Icons.more_vert, color: Colors.white70),
                         onSelected: (v) async {
+                          if (v == "start_facetime") {
+                            await _openFaceTimeLaunchDialog(session);
+                          }
                           if (v == "resend_link") {
                             await _resendSessionLink(sessionId);
                           }
@@ -12901,6 +12928,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           }
                         },
                         itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                            value: "start_facetime",
+                            child: Row(
+                              children: [
+                                Icon(Icons.phone_in_talk,
+                                    size: 18, color: Color(0xFF4ECDC4)),
+                                SizedBox(width: 8),
+                                Text("Start FaceTime",
+                                    style:
+                                        TextStyle(color: Color(0xFF4ECDC4))),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuDivider(),
                           // Only show Zoom options if there's a Zoom meeting ID
                           if (zoomMeetingId.trim().isNotEmpty) ...[
                             const PopupMenuItem(
@@ -14280,6 +14321,137 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         ),
       );
     }
+  }
+
+  Map<String, String> _faceTimeContactFor(Map session) {
+    final cid = (session['client_id'] ?? session['id'] ?? '').toString();
+    String phone =
+        (session['client_phone'] ?? session['phone'] ?? '').toString().trim();
+    String email =
+        (session['client_email'] ?? session['email'] ?? '').toString().trim();
+    for (final raw in _clients) {
+      if (raw is! Map) continue;
+      final c = Map<String, dynamic>.from(raw);
+      final id = (c['hardware_id'] ?? c['id'] ?? c['client_id'] ?? '').toString();
+      if (id.isNotEmpty && id == cid) {
+        if (phone.isEmpty) phone = (c['phone'] ?? '').toString().trim();
+        if (email.isEmpty) email = (c['email'] ?? '').toString().trim();
+        break;
+      }
+    }
+    return {'phone': phone, 'email': email};
+  }
+
+  String? _faceTimeUrl(String dest) {
+    final t = dest.trim();
+    if (t.isEmpty) return null;
+    if (t.startsWith('https://facetime.apple.com') ||
+        t.startsWith('facetime:') ||
+        t.startsWith('facetime-audio:')) {
+      return t;
+    }
+    if (t.contains('@')) return 'facetime:${Uri.encodeComponent(t)}';
+    final digits = t.replaceAll(RegExp(r'[^\d+]'), '');
+    if (digits.length < 7) return null;
+    return 'facetime:$digits';
+  }
+
+  Future<void> _launchFaceTimeUrl(String url) async {
+    if (kIsWeb) {
+      launchDojoUrl(url);
+      return;
+    }
+    try {
+      final launched = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('FaceTime needs an Apple device to open.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open FaceTime: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _openFaceTimeLaunchDialog(Map session) async {
+    final contact = _faceTimeContactFor(session);
+    final destCtrl = TextEditingController(
+      text: contact['phone']!.isNotEmpty
+          ? contact['phone']!
+          : (contact['email'] ?? ''),
+    );
+    final opened = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: const Text('Start FaceTime',
+            style: TextStyle(color: Color(0xFF4ECDC4))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Opens FaceTime on Apple devices. Paste a FaceTime Link, phone, or Apple ID.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: destCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Phone, Apple ID, or FaceTime Link',
+                hintStyle: TextStyle(color: Colors.white38),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF4ECDC4))),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4ECDC4),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Open FaceTime'),
+          ),
+        ],
+      ),
+    );
+    final dest = destCtrl.text;
+    destCtrl.dispose();
+    if (opened != true) return;
+    final url = _faceTimeUrl(dest);
+    if (url == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Enter a phone, Apple ID, or FaceTime Link.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+    await _launchFaceTimeUrl(url);
   }
 
   void _showMeetingLinkDialog(String url) {
