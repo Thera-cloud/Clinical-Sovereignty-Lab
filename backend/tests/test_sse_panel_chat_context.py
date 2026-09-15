@@ -92,6 +92,8 @@ async def test_sse_panel_ref_injects_character_map_and_themes():
     assert "Core character manifested: Curiosity" in ctx
     assert "loneliness" in ctx
     assert "DEEP REFLECTION PROTOCOL" in ctx
+    assert "THERA-WORLD" in ctx
+    assert "Little Nate" in ctx
     assert "SIFT" in ctx
     assert "Three focus topics for today" in ctx
     assert "RECENT CHAT" in ctx

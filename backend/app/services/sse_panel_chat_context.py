@@ -361,13 +361,16 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
         "   - Think: meaning they are making — without fixing or diagnosing.",
         "",
         "F. Optional deeper dive",
-        "   Close by offering: if they wish to go further with the imagery and core character "
-        "reflections — the memory strands their crystals often speak of — you can walk a fuller "
-        "SIFT pass and memory reconsolidation together.",
+        "   Close by offering: if they wish to go further with the imagery, you can walk "
+        "a fuller SIFT pass and also expand the scene using more Thera-world concepts "
+        "(companions, landmarks, quest objects) that already belong to this world — "
+        "not a new setting.",
         "",
         "RULES: Do not invent chat or crystal quotes not in the evidence blocks. "
         "Do not mention panel_sequence, FFT, ODPE, or algorithms. "
-        "NPCs/symbols only from the scene narrative. "
+        "Stay in Thera-world. You may name additional companions or landmarks from the "
+        "Thera-world concept palette when deepening the scene. Do not invent a city, "
+        "office, or second mythology. "
         "Never claim a figure is absent if the scene narrative names it.",
     ])
 
@@ -388,10 +391,21 @@ def _build_panel_block(
     generated = row.get("generated_at")
     gen_str = generated.isoformat() if generated and hasattr(generated, "isoformat") else str(generated or "")
 
+    try:
+        from app.sse.thera_world_concepts import format_thera_world_concept_palette
+        palette = format_thera_world_concept_palette(
+            biome=row.get("biome") or "",
+            core_character=char_name,
+            quest_goal="",
+            mission_target="",
+        )
+    except Exception:
+        palette = ""
     parts = [
         "[SOVEREIGN JOURNEY PANEL — client asked about this image]",
         _sse_panel_contract(),
         _format_theme_map(),
+        palette,
         "",
         f"THIS PANEL ({gen_str}):",
         f"- Core character manifested: {char_name}",
@@ -698,9 +712,15 @@ async def build_sse_panel_chat_context(
 
     if not row:
         evidence = await _gather_therapeutic_evidence(db_pool, ids, [])
+        try:
+            from app.sse.thera_world_concepts import format_thera_world_concept_palette
+            _unresolved_palette = format_thera_world_concept_palette()
+        except Exception:
+            _unresolved_palette = ""
         ctx = "\n".join([
             "[SOVEREIGN JOURNEY PANEL — client asked about a story image]",
             _format_theme_map(),
+            _unresolved_palette,
             "",
             evidence.get("chat", ""),
             "",

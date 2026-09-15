@@ -451,6 +451,28 @@ def _protagonist_gender_lock(character_visual: str, archetype_hint: str = "") ->
     return ""
 
 
+async def _append_story_bible_visuals(
+    image_prompt: str, *, arc: str = "", archetype_hint: str = "",
+) -> str:
+    """QUANTUM-CRYSTAL-ARCH — keep Grok Imagine inside Thera-world story-bible looks."""
+    prompt = image_prompt or ""
+    try:
+        from app.sse.adapters.world_story_bible import (
+            get_character_manifestation,
+            get_visual_style_suffix,
+        )
+        bible = await get_character_manifestation(
+            arc or "fog", archetype_hint=archetype_hint or None,
+        )
+        vs = get_visual_style_suffix(archetype_hint or None)
+        extra = ", ".join(p for p in (bible, vs) if p)
+        if extra and extra.lower() not in prompt.lower():
+            return f"{prompt.rstrip()}, {extra}" if prompt else extra
+    except Exception:
+        pass
+    return prompt
+
+
 def apply_protagonist_gender_lock(image_prompt: str, character_visual: str,
                                   archetype_hint: str = "") -> str:
     """Append gender lock once if missing from prompt."""
@@ -805,6 +827,9 @@ async def compose_journey_narrative(
     key = _cfg_key
     model = _cfg_model
     if not url or not key:
+        fallback["image_prompt"] = await _append_story_bible_visuals(
+            fallback["image_prompt"], arc=arc, archetype_hint=archetype_hint,
+        )
         return fallback
 
     richness_guidance = {
@@ -959,10 +984,26 @@ async def compose_journey_narrative(
                 " Assessment suggests high anxiety: prefer meditative or restoration_sands over action_sequence.\n"
             )
 
+    heritage_lms: list[str] = []
+    for lm in (family_ctx.get("heritage_landmarks") or [])[:3]:
+        vis = (lm.get("visual") if isinstance(lm, dict) else "") or ""
+        if vis:
+            heritage_lms.append(vis[:80])
+    from app.sse.thera_world_concepts import format_thera_world_concept_palette
+    palette_block = format_thera_world_concept_palette(
+        biome=biome_name,
+        core_character=char_name,
+        quest_goal=str(quest_goal_eff or ""),
+        mission_target=str(mission_target_eff or ""),
+        present_npcs=todays_npcs,
+        extra_landmarks=heritage_lms,
+    )
+
     sys_prompt = (
-        "You are a therapeutic narrative composer for the Sovereign Story Engine. "
-        "Generate a short scene description (2-3 sentences) and a Grok Imagine image prompt "
-        "for a user's daily story panel.\n\n"
+        "You are Little Nate composing Thera-world — one voice, one world. "
+        "Generate a short scene description (2-4 sentences) and a Grok Imagine image prompt "
+        "for this user's journey panel. Stay inside Thera-world concepts.\n\n"
+        f"{palette_block}\n\n"
         f"{age_gate_block}"
         f"{protagonist_block}"
         f"User's current biome: {biome_name} — {biome_desc}\n"
@@ -983,7 +1024,8 @@ async def compose_journey_narrative(
         "- Reflect where the user is therapeutically (not literally — metaphorically)\n"
         "- Include the core character manifestation naturally in the landscape\n"
         "- Feel like a chapter in an ongoing story, not a standalone image\n"
-        "- Be hopeful without being dismissive of pain\n\n"
+        "- Be hopeful without being dismissive of pain\n"
+        "- If you expand, name the extra Thera-world concept in both narrative_text and image_prompt\n\n"
         "Return JSON only, no markdown:\n"
         f"{panel_tone_hold_hint}"
         '{"narrative_text": "2-3 sentence scene description the user reads", '
@@ -994,7 +1036,7 @@ async def compose_journey_narrative(
     _msgs = [{"role": "system", "content": sys_prompt},
              {"role": "user", "content": "Generate today's journey panel."}]
 
-    raw = await _llm_fallback(_msgs, max_tokens=400, temperature=0.7)
+    raw = await _llm_fallback(_msgs, max_tokens=720, temperature=0.7)
     if raw:
         m = re.search(r"\{.*\}", raw, re.DOTALL)
         if m:
@@ -1008,11 +1050,17 @@ async def compose_journey_narrative(
                 if frag and name_l and name_l not in result["image_prompt"].lower():
                     result["image_prompt"] += f", {frag}"
             result["image_prompt"] += ", no text, no words, no lettering, no calligraphy, no writing on image"
+            result["image_prompt"] = await _append_story_bible_visuals(
+                result["image_prompt"], arc=arc, archetype_hint=archetype_hint,
+            )
             result.setdefault("narrative_text", fallback["narrative_text"])
             result.setdefault("panel_tone", fallback["panel_tone"])
             return result
         else:
             logger.warning("SSE narrative: LLM returned non-JSON for %s. raw[:200]=%s", user_id, raw[:200])
+    fallback["image_prompt"] = await _append_story_bible_visuals(
+        fallback["image_prompt"], arc=arc, archetype_hint=archetype_hint,
+    )
     return fallback
 
 
