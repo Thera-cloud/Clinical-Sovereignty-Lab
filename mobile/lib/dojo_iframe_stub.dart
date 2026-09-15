@@ -14,6 +14,11 @@ void launchDojoUrl(String url) {
   // No-op on non-web
 }
 
+/// Stub — mobile uses url_launcher for FaceTime.
+void launchFaceTimeUrl(String url) {
+  // No-op on non-web
+}
+
 /// Stub - no-op on non-web platforms (no iframes to manage)
 void setDojoIframePointerEvents(bool enabled) {
   // No-op on non-web

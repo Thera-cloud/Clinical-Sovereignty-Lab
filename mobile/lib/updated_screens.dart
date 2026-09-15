@@ -14350,15 +14350,26 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         t.startsWith('facetime-audio:')) {
       return t;
     }
-    if (t.contains('@')) return 'facetime:${Uri.encodeComponent(t)}';
-    final digits = t.replaceAll(RegExp(r'[^\d+]'), '');
-    if (digits.length < 7) return null;
-    return 'facetime:$digits';
+    if (t.contains('@')) return 'facetime://${Uri.encodeComponent(t)}';
+    var digits = t.replaceAll(RegExp(r'[^\d+]'), '');
+    if (digits.startsWith('+')) {
+      digits = '+${digits.substring(1).replaceAll('+', '')}';
+    } else {
+      digits = digits.replaceAll('+', '');
+      if (RegExp(r'^\d{10}$').hasMatch(digits)) {
+        digits = '+1$digits';
+      } else if (RegExp(r'^1\d{10}$').hasMatch(digits)) {
+        digits = '+$digits';
+      }
+    }
+    final bare = digits.replaceAll('+', '');
+    if (bare.length < 7) return null;
+    return 'facetime://$digits';
   }
 
   Future<void> _launchFaceTimeUrl(String url) async {
     if (kIsWeb) {
-      launchDojoUrl(url);
+      launchFaceTimeUrl(url);
       return;
     }
     try {
@@ -14430,28 +14441,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               backgroundColor: const Color(0xFF4ECDC4),
               foregroundColor: Colors.black,
             ),
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () {
+              final url = _faceTimeUrl(destCtrl.text);
+              if (url == null) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content:
+                        Text('Enter a phone, Apple ID, or FaceTime Link.'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+              }
+              _launchFaceTimeUrl(url);
+              Navigator.pop(ctx, true);
+            },
             child: const Text('Open FaceTime'),
           ),
         ],
       ),
     );
-    final dest = destCtrl.text;
     destCtrl.dispose();
     if (opened != true) return;
-    final url = _faceTimeUrl(dest);
-    if (url == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Enter a phone, Apple ID, or FaceTime Link.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-      return;
-    }
-    await _launchFaceTimeUrl(url);
   }
 
   void _showMeetingLinkDialog(String url) {

@@ -27,6 +27,17 @@ void launchDojoUrl(String url) {
   html.window.open(url, '_blank');
 }
 
+/// FaceTime / tel-style schemes. Must run inside the click handler.
+/// window.open after an async dialog pop is treated as a popup and dropped.
+void launchFaceTimeUrl(String url) {
+  final a = html.AnchorElement()
+    ..href = url
+    ..style.display = 'none';
+  html.document.body?.append(a);
+  a.click();
+  a.remove();
+}
+
 void _postAuthToDojoIframe() {
   final iframe = _dojoIframe;
   final token = (_pendingAuthToken ?? '').trim();
