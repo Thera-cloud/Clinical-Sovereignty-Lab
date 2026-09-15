@@ -18,6 +18,47 @@ from typing import Dict, Any, List, Optional
 
 from app.services.session_schedule_link import annotate_calendar_item, annotate_calendar_schedule
 
+
+def calendar_zoom_fields(row: Dict[str, Any]) -> Dict[str, str]:
+    """Prefer coaching_sessions Zoom columns; session_data host URL is often empty."""
+    sd = row.get("session_data")
+    if isinstance(sd, str):
+        try:
+            sd = json.loads(sd) if sd.strip() else {}
+        except Exception:
+            sd = {}
+    if not isinstance(sd, dict):
+        sd = {}
+
+    def _first(*vals: Any) -> str:
+        for v in vals:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return ""
+
+    return {
+        "zoom_link": _first(row.get("zoom_link"), sd.get("zoom_link")),
+        "zoom_host_url": _first(row.get("zoom_host_url"), sd.get("zoom_host_url")),
+        "zoom_meeting_id": _first(row.get("zoom_meeting_id"), sd.get("zoom_meeting_id")),
+    }
+
+
+def overlay_calendar_zoom(schedule: List[Any], sid: str, zoom: Dict[str, str]) -> None:
+    if not sid:
+        return
+    for s in schedule:
+        if not isinstance(s, dict):
+            continue
+        if (s.get("session_id") or s.get("id") or "") != sid:
+            continue
+        for k in ("zoom_link", "zoom_host_url", "zoom_meeting_id"):
+            if not str(s.get(k) or "").strip() and zoom.get(k):
+                s[k] = zoom[k]
+        return
+
 # ==============================================================================
 # NEW DATA STRUCTURES
 # ==============================================================================
@@ -288,7 +329,7 @@ class CoachNexusV2:
                     SELECT session_id, coach_id, client_id, client_name,
                            session_type, status,
                            scheduled_start, scheduled_end,
-                           zoom_link, zoom_meeting_id, notes,
+                           zoom_link, zoom_host_url, zoom_meeting_id, notes,
                            session_data
                     FROM coaching_sessions
                     WHERE coach_id = $1
@@ -324,7 +365,11 @@ class CoachNexusV2:
         for r in rows or []:
             row = dict(r)
             sid = (row.get("session_id") or "").strip()
-            if not sid or sid in existing_ids:
+            zoom = calendar_zoom_fields(row)
+            if sid and sid in existing_ids:
+                overlay_calendar_zoom(base.get("schedule") or [], sid, zoom)
+                continue
+            if not sid:
                 continue
             st_dt = row.get("scheduled_start")
             en_dt = row.get("scheduled_end")
@@ -366,9 +411,9 @@ class CoachNexusV2:
                 "session_type": row.get("session_type") or "COACH",
                 "duration_minutes": dur_min,
                 "platform": "Zoom",
-                "zoom_link": row.get("zoom_link") or "",
-                "zoom_host_url": _sd(row, "zoom_host_url", ""),
-                "zoom_meeting_id": row.get("zoom_meeting_id") or "",
+                "zoom_link": zoom["zoom_link"],
+                "zoom_host_url": zoom["zoom_host_url"],
+                "zoom_meeting_id": zoom["zoom_meeting_id"],
                 "status": row.get("status") or "scheduled",
                 "notes": row.get("notes") or "",
             })
@@ -387,7 +432,7 @@ class CoachNexusV2:
                     SELECT session_id, coach_id, client_id, client_name,
                            session_type, status,
                            scheduled_start, scheduled_end,
-                           zoom_link, zoom_meeting_id, notes,
+                           zoom_link, zoom_host_url, zoom_meeting_id, notes,
                            session_data
                     FROM coaching_sessions
                     WHERE coach_id = $1
@@ -416,12 +461,8 @@ class CoachNexusV2:
                     if en.tzinfo is None:
                         en = en.replace(tzinfo=datetime.timezone.utc)
                     dur_min = max(1, int((en - st).total_seconds() / 60))
-                sd = row.get("session_data") or {}
-                if isinstance(sd, str):
-                    try:
-                        sd = json.loads(sd)
-                    except Exception:
-                        sd = {}
+                hidden = dict(row)
+                zoom = calendar_zoom_fields(hidden)
                 base["schedule"].append({
                     "id": sid,
                     "session_id": sid,
@@ -436,9 +477,9 @@ class CoachNexusV2:
                     "session_type": row.get("session_type") or "COACH",
                     "duration_minutes": dur_min,
                     "platform": "Zoom",
-                    "zoom_link": row.get("zoom_link") or "",
-                    "zoom_host_url": sd.get("zoom_host_url", ""),
-                    "zoom_meeting_id": row.get("zoom_meeting_id") or "",
+                    "zoom_link": zoom["zoom_link"],
+                    "zoom_host_url": zoom["zoom_host_url"],
+                    "zoom_meeting_id": zoom["zoom_meeting_id"],
                     "status": row.get("status") or "completed",
                     "notes": row.get("notes") or "",
                     "schedule_link_hidden": True,

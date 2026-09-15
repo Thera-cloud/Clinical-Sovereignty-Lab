@@ -27,6 +27,19 @@ void launchDojoUrl(String url) {
   html.window.open(url, '_blank');
 }
 
+/// https Zoom / external links inside a user click. window.open is popup-blocked
+/// on Flutter web the same way FaceTime was.
+void launchExternalUrl(String url) {
+  final a = html.AnchorElement()
+    ..href = url
+    ..target = '_blank'
+    ..rel = 'noopener noreferrer'
+    ..style.display = 'none';
+  html.document.body?.append(a);
+  a.click();
+  a.remove();
+}
+
 /// FaceTime / tel-style schemes. Must run inside the click handler.
 /// window.open after an async dialog pop is treated as a popup and dropped.
 void launchFaceTimeUrl(String url) {

@@ -14,6 +14,11 @@ void launchDojoUrl(String url) {
   // No-op on non-web
 }
 
+/// Stub — mobile uses url_launcher for Zoom / https.
+void launchExternalUrl(String url) {
+  // No-op on non-web
+}
+
 /// Stub — mobile uses url_launcher for FaceTime.
 void launchFaceTimeUrl(String url) {
   // No-op on non-web

@@ -7143,6 +7143,46 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }
   }
 
+  void _upsertScheduleFromApiSession(Map session) {
+    final sid = (session['session_id'] ?? session['id'] ?? '').toString();
+    if (sid.isEmpty || !mounted) return;
+    DateTime? st;
+    try {
+      final raw = (session['scheduled_start'] ?? '').toString();
+      if (raw.isNotEmpty) st = DateTime.parse(raw).toLocal();
+    } catch (_) {}
+    final item = <String, dynamic>{
+      ...Map<String, dynamic>.from(session),
+      'id': sid,
+      'session_id': sid,
+      'date': st != null
+          ? '${st.year.toString().padLeft(4, '0')}-'
+              '${st.month.toString().padLeft(2, '0')}-'
+              '${st.day.toString().padLeft(2, '0')}'
+          : (session['date'] ?? ''),
+      'time': st != null
+          ? '${st.hour.toString().padLeft(2, '0')}:'
+              '${st.minute.toString().padLeft(2, '0')}'
+          : (session['time'] ?? ''),
+      'status': (session['status'] ?? 'scheduled').toString(),
+      'platform': session['platform'] ?? 'Zoom',
+    };
+    final next = List<dynamic>.from(_schedule);
+    final i = next.indexWhere((raw) {
+      if (raw is! Map) return false;
+      return (raw['session_id'] ?? raw['id'] ?? '').toString() == sid;
+    });
+    if (i >= 0) {
+      next[i] = {...Map<String, dynamic>.from(next[i] as Map), ...item};
+    } else {
+      next.add(item);
+    }
+    setState(() {
+      _schedule = next;
+      _hydratePendingFromSchedule();
+    });
+  }
+
   Future<void> _scheduleSessionViaApi({
     required String clientId,
     required String clientName,
@@ -7184,6 +7224,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       final decoded = jsonDecode(resp.body);
       final zoomError =
           (decoded is Map) ? (decoded["zoom_error"]?.toString() ?? "") : "";
+      if (decoded is Map && decoded["session"] is Map) {
+        _upsertScheduleFromApiSession(
+            Map<String, dynamic>.from(decoded["session"] as Map));
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -14298,7 +14342,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     // On web, use the dart:html window.open directly (via conditional import)
     // This avoids url_launcher plugin issues on Flutter web
     if (kIsWeb) {
-      launchDojoUrl(urlToLaunch); // Uses html.window.open under the hood
+      launchExternalUrl(urlToLaunch);
       return;
     }
 
