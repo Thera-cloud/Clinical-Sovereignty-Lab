@@ -165,6 +165,20 @@ class TestLongitudinalTrends:
         assert result["status"] == "no_data"
 
     @pytest.mark.asyncio
+    async def test_with_data_matches_coach_insights_keys(self, fake_pool, fake_conn):
+        rows = [make_metric_row(c_emo=0.3 + i * 0.04, days_ago=70 - i * 7) for i in range(8)]
+        fake_conn._fetch_results = rows
+        fake_conn._fetchval_result = "Alice"
+        gen = make_generator(fake_pool)
+        result = await gen._longitudinal_trends([uuid4()], 84)
+        assert result["report_type"] == "longitudinal_trends"
+        assert "summary" in result
+        assert result["summary"]["total_measurements"] == 8
+        assert result["summary"]["trend"] in ("improving", "declining", "stable")
+        assert isinstance(result.get("weekly_averages"), list)
+        assert result["weekly_averages"] == result["weekly_c_emo"]
+
+    @pytest.mark.asyncio
     async def test_enforces_minimum_12_weeks(self, fake_pool, fake_conn):
         fake_conn._fetch_results = []
         fake_conn._fetchval_result = "Alice"

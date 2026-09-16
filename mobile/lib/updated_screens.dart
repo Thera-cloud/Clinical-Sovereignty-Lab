@@ -10589,8 +10589,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       return;
     }
 
-    final summary = result['summary'];
-    final weeklyAverages = result['weekly_averages'] as List<dynamic>? ?? [];
+    final summary = result['summary'] is Map
+        ? Map<String, dynamic>.from(result['summary'] as Map)
+        : (result['statistics'] is Map
+            ? Map<String, dynamic>.from(result['statistics'] as Map)
+            : null);
+    final weeklyAverages = (result['weekly_averages'] is List)
+        ? result['weekly_averages'] as List<dynamic>
+        : (result['weekly_c_emo'] is List
+            ? result['weekly_c_emo'] as List<dynamic>
+            : <dynamic>[]);
     final userName = result['user_name']?.toString() ?? 'Unknown';
     final periodDays = result['period_days']?.toString() ?? '84';
     final generatedAt = result['generated_at']?.toString() ?? '';
@@ -15776,56 +15784,187 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     return (h * 0.38).clamp(300.0, 440.0);
   }
 
+  int _insightsAsInt(dynamic v) {
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? 0;
+  }
+
+  String _insightsClientRisk(Map m) {
+    final metrics = (m['metrics'] is Map)
+        ? Map<String, dynamic>.from(m['metrics'])
+        : <String, dynamic>{};
+    final ns = (m['nevedal_state'] is Map)
+        ? Map<String, dynamic>.from(m['nevedal_state'])
+        : <String, dynamic>{};
+    return (metrics['risk_level'] ??
+            ns['risk_level'] ??
+            m['risk_level'] ??
+            'LOW')
+        .toString()
+        .toUpperCase();
+  }
+
+  bool _insightsClientIsHighRisk(Map m) {
+    final r = _insightsClientRisk(m);
+    return r == 'HIGH' ||
+        r == 'CRITICAL' ||
+        r == 'RED' ||
+        r == 'P0' ||
+        r == 'P1';
+  }
+
+  int _insightsBreakthroughsFor(Map m) {
+    final metrics = (m['metrics'] is Map)
+        ? Map<String, dynamic>.from(m['metrics'])
+        : <String, dynamic>{};
+    final ns = (m['nevedal_state'] is Map)
+        ? Map<String, dynamic>.from(m['nevedal_state'])
+        : <String, dynamic>{};
+    int listLen(dynamic v) => v is List ? v.length : 0;
+    final vals = <int>[
+      _insightsAsInt(m['cee_count']),
+      _insightsAsInt(m['breakthrough_count']),
+      _insightsAsInt(metrics['cee_count']),
+      _insightsAsInt(metrics['breakthrough_count']),
+      _insightsAsInt(ns['cee_count']),
+      _insightsAsInt(ns['breakthrough_count']),
+      listLen(m['cee_experiences']),
+      listLen(metrics['cee_experiences']),
+      listLen(ns['cee_experiences']),
+    ];
+    return vals.reduce((a, b) => a > b ? a : b);
+  }
+
+  bool _insightsSessionIsLocalToday(Map s) {
+    final now = DateTime.now();
+    final ymd =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final dateKey = (s['date'] ?? '').toString().trim();
+    if (dateKey.length >= 10 && dateKey.substring(0, 10) == ymd) return true;
+    for (final key in const [
+      'scheduled_start',
+      'start',
+      'session_date',
+      'scheduled_end'
+    ]) {
+      final raw = (s[key] ?? '').toString().trim();
+      if (raw.isEmpty) continue;
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) continue;
+      final local = dt.toLocal();
+      if (local.year == now.year &&
+          local.month == now.month &&
+          local.day == now.day) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<Map<String, dynamic>> _insightsTodaySessions() {
+    final out = <Map<String, dynamic>>[];
+    for (final s in _schedule) {
+      if (s is! Map) continue;
+      final m = Map<String, dynamic>.from(s);
+      if (_insightsSessionIsLocalToday(m)) out.add(m);
+    }
+    return out;
+  }
+
+  void _showInsightsMetricSheet({
+    required String title,
+    required List<Widget> children,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text(title, style: const TextStyle(color: Color(0xFFC9A962))),
+        content: SizedBox(
+          width: 420,
+          child: children.isEmpty
+              ? Text('None yet.', style: TextStyle(color: Colors.grey[400]))
+              : ListView(shrinkWrap: true, children: children),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close',
+                style: TextStyle(color: Color(0xFFC9A962))),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInsightsStatsStrip() {
-    final highRisk = _clients.where((c) {
-      if (c is! Map) return false;
-      final m = Map<String, dynamic>.from(c as Map);
-      final risk = (m['risk_level'] ??
-              (m['metrics'] is Map ? m['metrics']['risk_level'] : null) ??
-              (m['nevedal_state'] is Map
-                  ? m['nevedal_state']['risk_level']
-                  : null) ??
-              '')
-          .toString()
-          .toUpperCase();
-      return risk == 'HIGH' || risk == 'CRITICAL' || risk == 'ELEVATED';
-    }).length;
+    final highRisk =
+        _clients.where((c) => c is Map && _insightsClientIsHighRisk(Map<String, dynamic>.from(c))).length;
     final breakthroughs = _clients.fold<int>(0, (sum, c) {
       if (c is! Map) return sum;
-      final m = Map<String, dynamic>.from(c as Map);
-      final n = m['breakthrough_count'] ??
-          (m['metrics'] is Map ? m['metrics']['breakthrough_count'] : null) ??
-          (m['nevedal_state'] is Map
-              ? m['nevedal_state']['breakthrough_count']
-              : null) ??
-          0;
-      return sum + (n is num ? n.toInt() : int.tryParse('$n') ?? 0);
+      return sum + _insightsBreakthroughsFor(Map<String, dynamic>.from(c));
     });
-    final today = DateTime.now();
-    final sessionsToday = _schedule.where((s) {
-      if (s is! Map) return false;
-      final raw = (s['scheduled_start'] ??
-              s['start'] ??
-              s['date'] ??
-              s['session_date'] ??
-              '')
-          .toString();
-      if (raw.isEmpty) return false;
-      final dt = DateTime.tryParse(raw);
-      if (dt == null) return false;
-      return dt.year == today.year &&
-          dt.month == today.month &&
-          dt.day == today.day;
-    }).length;
+    final todaySessions = _insightsTodaySessions();
     final cards = [
       _buildStatCard("Total Clients", _clients.length.toString(), Icons.people,
-          const Color(0xFF4361EE)),
+          const Color(0xFF4361EE), onTap: () {
+        setState(() => _clientFilterMode = 'ALL');
+        _tabController.animateTo(0);
+      }),
       _buildStatCard(
-          "High Risk", highRisk.toString(), Icons.warning, const Color(0xFFFF9F1C)),
-      _buildStatCard("Sessions Today", sessionsToday.toString(),
-          Icons.calendar_today, const Color(0xFF00F5D4)),
+          "High Risk", highRisk.toString(), Icons.warning, const Color(0xFFFF9F1C),
+          onTap: () {
+        setState(() => _clientFilterMode = 'HIGH_RISK');
+        _tabController.animateTo(0);
+      }),
+      _buildStatCard("Sessions Today", todaySessions.length.toString(),
+          Icons.calendar_today, const Color(0xFF00F5D4), onTap: () {
+        _showInsightsMetricSheet(
+          title: 'Sessions today',
+          children: todaySessions
+              .map((s) => ListTile(
+                    dense: true,
+                    title: Text(
+                      (s['client_name'] ?? s['consultation_name'] ?? 'Session')
+                          .toString(),
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    subtitle: Text(
+                      '${(s['date'] ?? '').toString()} ${(s['time'] ?? '').toString()}',
+                      style: TextStyle(color: Colors.grey[400], fontSize: 11),
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _tabController.animateTo(1);
+                    },
+                  ))
+              .toList(),
+        );
+      }),
       _buildStatCard(
-          "Breakthroughs", breakthroughs.toString(), Icons.star, const Color(0xFFFFD700)),
+          "Breakthroughs", breakthroughs.toString(), Icons.star, const Color(0xFFFFD700),
+          onTap: () {
+        final rows = <Widget>[];
+        for (final c in _clients) {
+          if (c is! Map) continue;
+          final m = Map<String, dynamic>.from(c);
+          final n = _insightsBreakthroughsFor(m);
+          if (n <= 0) continue;
+          rows.add(ListTile(
+            dense: true,
+            title: Text(_clientNameFromMap(m),
+                style: const TextStyle(color: Colors.white)),
+            subtitle: Text('$n CEE${n == 1 ? '' : 's'}',
+                style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+            onTap: () {
+              Navigator.of(context).pop();
+              final id = _clientIdFromMap(m);
+              if (id.isNotEmpty) _setFocusedClient(id);
+            },
+          ));
+        }
+        _showInsightsMetricSheet(title: 'Breakthroughs (CEEs)', children: rows);
+      }),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -16383,6 +16522,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               _buildFilterChip('Coach-Only', 'COACH_ONLY'),
               const SizedBox(width: 6),
               _buildFilterChip('Company', 'COMPANY'),
+              const SizedBox(width: 6),
+              _buildFilterChip('High Risk', 'HIGH_RISK'),
             ],
           ),
         ),
@@ -16438,6 +16579,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           break;
         case 'COMPANY':
           if (companyId.isEmpty) continue;
+          break;
+        case 'HIGH_RISK':
+          if (!_insightsClientIsHighRisk(m)) continue;
           break;
         case 'ALL':
         default:
@@ -22473,8 +22617,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildStatCard(
-      String label, String value, IconData icon, Color color) {
-    return Container(
+      String label, String value, IconData icon, Color color,
+      {VoidCallback? onTap}) {
+    final card = Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
@@ -22495,6 +22640,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
           Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 11)),
         ],
+      ),
+    );
+    if (onTap == null) return card;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: card,
       ),
     );
   }

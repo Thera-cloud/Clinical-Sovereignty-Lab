@@ -20481,6 +20481,8 @@ async def handle_client(websocket, path=None):
                             "engagement": ns.get("engagement"),
                             "anxiety_level": ns.get("anxiety_level"),
                             "stress_level": ns.get("stress_level"),
+                            "cee_count": len(ns.get("cee_experiences") or []) if isinstance(ns.get("cee_experiences"), list) else 0,  # QUANTUM-CRYSTAL-ARCH
+                            "breakthrough_count": int(ns.get("breakthrough_count") or 0),  # QUANTUM-CRYSTAL-ARCH
                         }
 
                         _rec_consent = p.get("recording_consent") or {}
@@ -20574,6 +20576,54 @@ async def handle_client(websocket, path=None):
                                 })
                         except Exception:
                             pass
+
+                    # QUANTUM-CRYSTAL-ARCH: Insights Breakthroughs = PG CEE windows + vault CEEs
+                    try:
+                        if db_pool and clients:
+                            _ids = list({
+                                str(c.get(k) or "").strip()
+                                for c in clients if isinstance(c, dict)
+                                for k in ("hardware_id", "id", "username")
+                                if str(c.get(k) or "").strip()
+                            })
+                            _pg = {}
+                            if _ids:
+                                async with db_pool.acquire() as _cn:
+                                    for _r in await _cn.fetch(
+                                        """
+                                        SELECT u.hardware_id, u.username,
+                                               COUNT(*) FILTER (WHERE m.cee_window IS TRUE)::int AS n
+                                        FROM users u
+                                        LEFT JOIN nevedal_metrics m ON m.user_id = u.id
+                                        WHERE u.hardware_id = ANY($1::text[])
+                                           OR u.username = ANY($1::text[])
+                                        GROUP BY u.hardware_id, u.username
+                                        """,
+                                        _ids,
+                                    ):
+                                        _n = int(_r["n"] or 0)
+                                        if _r["hardware_id"]:
+                                            _pg[str(_r["hardware_id"])] = _n
+                                        if _r["username"]:
+                                            _pg[str(_r["username"])] = _n
+                            for _c in clients:
+                                if not isinstance(_c, dict):
+                                    continue
+                                _mets = _c["metrics"] if isinstance(_c.get("metrics"), dict) else {}
+                                _n = max(
+                                    int(_mets.get("cee_count") or 0),
+                                    int(_mets.get("breakthrough_count") or 0),
+                                    int(_pg.get(str(_c.get("hardware_id") or ""), 0)),
+                                    int(_pg.get(str(_c.get("id") or ""), 0)),
+                                    int(_pg.get(str(_c.get("username") or ""), 0)),
+                                )
+                                _mets["cee_count"] = _n
+                                _mets["breakthrough_count"] = _n
+                                _c["metrics"] = _mets
+                                _c["cee_count"] = _n
+                                _c["breakthrough_count"] = _n
+                    except Exception as _cee_e:
+                        print(f">>> [COACH CLIENTS] CEE enrich skip: {_cee_e}")
                     
                     await websocket.send(json.dumps({"type": "coach_clients", "clients": clients}))
             

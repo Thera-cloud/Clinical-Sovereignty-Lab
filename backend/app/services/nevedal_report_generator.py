@@ -283,21 +283,36 @@ class NevedalReportGenerator:
         cee_rows = [r for r in rows if r["cee_window"]]
         cee_weekly = self._group_by_week(cee_rows, "cee_duration_seconds", agg="count")
 
+        trend = (
+            "improving"
+            if slope > 0.0001
+            else ("declining" if slope < -0.0001 else "stable")
+        )
+        stats = {
+            "total_measurements": n,
+            "mean_c_emo": round(sum(c_emo_values) / n, 4),
+            "std_dev": round(
+                math.sqrt(
+                    sum((v - sum(c_emo_values) / n) ** 2 for v in c_emo_values)
+                    / max(n - 1, 1)
+                ),
+                4,
+            ),
+            "slope_per_measurement": round(slope, 6),
+            "r_squared": round(r_squared, 4),
+            "total_cees": len(cee_rows),
+            "trend": trend,
+        }
         return {
             "report_type": "longitudinal_trends",
             "user_id": str(user_id),
             "user_name": name,
             "period_days": days,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "statistics": {
-                "total_measurements": n,
-                "mean_c_emo": round(sum(c_emo_values) / n, 4),
-                "std_dev": round(math.sqrt(sum((v - sum(c_emo_values) / n) ** 2 for v in c_emo_values) / max(n - 1, 1)), 4),
-                "slope_per_measurement": round(slope, 6),
-                "r_squared": round(r_squared, 4),
-                "total_cees": len(cee_rows),
-            },
+            "statistics": stats,
+            "summary": stats,
             "weekly_c_emo": weekly,
+            "weekly_averages": weekly,
             "weekly_cee_count": cee_weekly,
         }
 
