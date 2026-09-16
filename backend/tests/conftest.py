@@ -184,11 +184,26 @@ class FakeConnection:
         self._fetch_results = []
         self._fetchrow_result = None
         self._fetchval_result = None
+        self._fetch_by_marker = {}
+        self._fetchrow_by_marker = {}
+
+    def _match_marker(self, query, table):
+        q = (query or "").lower()
+        for marker, value in table.items():
+            if marker.lower() in q:
+                return True, value
+        return False, None
 
     async def fetch(self, query, *args):
+        hit, value = self._match_marker(query, self._fetch_by_marker)
+        if hit:
+            return value
         return self._fetch_results
 
     async def fetchrow(self, query, *args):
+        hit, value = self._match_marker(query, self._fetchrow_by_marker)
+        if hit:
+            return value
         return self._fetchrow_result
 
     async def fetchval(self, query, *args):

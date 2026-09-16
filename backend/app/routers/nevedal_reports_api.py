@@ -124,7 +124,10 @@ async def list_report_types():
             {
                 "id": "individual_coherence",
                 "name": "Individual Coherence Report",
-                "description": "Single user C_emo trends, CEE events, biometric summary",
+                "description": (
+                    "Nevedal platform packet: C_emo level, range, CEE density. "
+                    "Not industry symptom or treatment-plan change."
+                ),
                 "required_ids": ["user_id"],
             },
             {
@@ -141,8 +144,13 @@ async def list_report_types():
             },
             {
                 "id": "longitudinal_trends",
-                "name": "Longitudinal Trends (12-week)",
-                "description": "C_emo trend with statistical analysis over 12+ weeks",
+                "name": "Longitudinal Trends (Review Board Investigation)",
+                "description": (
+                    "Industry packet for a mental health board: treatment-plan growth, "
+                    "anxiety/depression, dissatisfaction, dissociation, shame, blaming, "
+                    "cycle detections, transgenerational/PMB, Little Nate tactics and review. "
+                    "Not C_emo / CEE."
+                ),
                 "required_ids": ["user_id"],
             },
             {

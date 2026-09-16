@@ -10430,11 +10430,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     items: const [
                       DropdownMenuItem(
                           value: "individual_coherence",
-                          child: Text("Individual Coherence",
+                          child: Text("Nevedal — platform C_emo / CEE",
                               style: TextStyle(color: Colors.white))),
                       DropdownMenuItem(
                           value: "longitudinal_trends",
-                          child: Text("Longitudinal Trends",
+                          child: Text(
+                              "Longitudinal — industry (symptoms, cycles, LN review)",
                               style: TextStyle(color: Colors.white))),
                     ],
                     onChanged: (v) =>
@@ -10616,6 +10617,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }
 
     if (result['status'] == 'no_data') {
+      final isLongEmpty =
+          result['report_type']?.toString() == 'longitudinal_trends';
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -10625,10 +10628,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   color: Color(0xFFC9A962),
                   fontFamily: 'Cormorant Garamond',
                   fontSize: 16)),
-          content: const Text(
-            'No coherence measurements found for this client in the selected period. '
-            'Data is recorded during live sessions with the Nevedal engine active.',
-            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+          content: Text(
+            isLongEmpty
+                ? 'No industry Review Board sources yet for this client '
+                    '(client metrics, conversation language, cycles, treatment plans, '
+                    'or Little Nate tactic/prediction rows).'
+                : 'No Nevedal C_emo measurements found for this client in the selected period. '
+                    'Platform metrics are recorded during live sessions with the Nevedal engine active.',
+            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
           ),
           actions: [
             TextButton(
@@ -10646,17 +10653,45 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         : (result['statistics'] is Map
             ? Map<String, dynamic>.from(result['statistics'] as Map)
             : null);
-    final weeklyAverages = (result['weekly_averages'] is List)
-        ? result['weekly_averages'] as List<dynamic>
-        : (result['weekly_c_emo'] is List
-            ? result['weekly_c_emo'] as List<dynamic>
-            : <dynamic>[]);
+    final instrument = result['instrument'] is Map
+        ? Map<String, dynamic>.from(result['instrument'] as Map)
+        : <String, dynamic>{};
+    final rbi = result['rbi'] is Map
+        ? Map<String, dynamic>.from(result['rbi'] as Map)
+        : <String, dynamic>{};
+    final insight = result['nate_scientific_insight'] is Map
+        ? Map<String, dynamic>.from(result['nate_scientific_insight'] as Map)
+        : <String, dynamic>{};
+    final isLongitudinal =
+        result['report_type']?.toString() == 'longitudinal_trends';
+    final weeklyAverages = isLongitudinal
+        ? ((result['industry_series'] is List)
+            ? result['industry_series'] as List<dynamic>
+            : (result['weekly_averages'] is List)
+                ? result['weekly_averages'] as List<dynamic>
+                : <dynamic>[])
+        : ((result['weekly_levels'] is List)
+            ? result['weekly_levels'] as List<dynamic>
+            : (result['weekly_averages'] is List)
+                ? result['weekly_averages'] as List<dynamic>
+                : <dynamic>[]);
+    final cycleRows = (result['cycle_detections'] is List)
+        ? result['cycle_detections'] as List<dynamic>
+        : <dynamic>[];
+    final tacticMap = result['nate_tactics'] is Map
+        ? Map<String, dynamic>.from(result['nate_tactics'] as Map)
+        : <String, dynamic>{};
+    final tgMap = result['transgenerational'] is Map
+        ? Map<String, dynamic>.from(result['transgenerational'] as Map)
+        : <String, dynamic>{};
     final userName = result['user_name']?.toString() ?? 'Unknown';
     final periodDays = result['period_days']?.toString() ?? '84';
     final generatedAt = result['generated_at']?.toString() ?? '';
     final reportType =
         result['report_type']?.toString().replaceAll('_', ' ').toUpperCase() ??
             'REPORT';
+    final metricRows = _nevedalCoachMetricRows(
+        result['report_type']?.toString() ?? '', summary);
 
     showDialog(
       context: context,
@@ -10695,41 +10730,56 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       style:
                           const TextStyle(color: Colors.white38, fontSize: 11)),
                 const SizedBox(height: 14),
-                if (summary != null && summary is Map) ...[
-                  const Text('SUMMARY',
+                if (instrument.isNotEmpty) ...[
+                  Text(
+                    (instrument['name'] ?? reportType).toString(),
+                    style: const TextStyle(
+                        color: Color(0xFF9D4EDD),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    (instrument['question'] ?? '').toString(),
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 13, height: 1.4),
+                  ),
+                  if ((instrument['does_not_measure'] is List) &&
+                      (instrument['does_not_measure'] as List).isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Does not measure: ${(instrument['does_not_measure'] as List).join('; ')}',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11, height: 1.35),
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                ],
+                if (metricRows.isNotEmpty) ...[
+                  const Text('QUANTITATIVE',
                       style: TextStyle(
                           color: Color(0xFF4ECDC4),
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1.2)),
                   const SizedBox(height: 8),
-                  ...((summary as Map<String, dynamic>).entries.map((e) {
-                    final label = e.key
-                        .toString()
-                        .replaceAll('_', ' ')
-                        .replaceFirst(e.key[0], e.key[0].toUpperCase());
-                    final value = e.value;
-                    Color valueColor = Colors.white;
-                    if (e.key == 'trend') {
-                      valueColor = value == 'improving'
-                          ? const Color(0xFF22C55E)
-                          : value == 'declining'
-                              ? const Color(0xFFEF4444)
-                              : const Color(0xFFC9A962);
-                    }
+                  ...metricRows.map((row) {
+                    final valueColor = row['alert'] == 'up'
+                        ? const Color(0xFF22C55E)
+                        : row['alert'] == 'down'
+                            ? const Color(0xFFEF4444)
+                            : Colors.white;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Flexible(
-                              child: Text(label,
+                              child: Text(row['label'] ?? '',
                                   style: const TextStyle(
                                       color: Colors.white54, fontSize: 13))),
-                          Text(
-                              value is double
-                                  ? value.toStringAsFixed(4)
-                                  : value.toString(),
+                          Text(row['value'] ?? '',
                               style: TextStyle(
                                   color: valueColor,
                                   fontSize: 13,
@@ -10737,12 +10787,71 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         ],
                       ),
                     );
-                  })),
+                  }),
+                ],
+                if ((insight['narrative'] ?? '').toString().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text('LITTLE NATE — SCIENTIFIC INSIGHT',
+                      style: TextStyle(
+                          color: Color(0xFF4ECDC4),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 8),
+                  Text(
+                    insight['narrative'].toString(),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13, height: 1.45),
+                  ),
+                ],
+                if (rbi.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text('RBI — REVIEW BOARD INVESTIGATION',
+                      style: TextStyle(
+                          color: Color(0xFFC9A962),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 8),
+                  if ((rbi['audience'] ?? '').toString().isNotEmpty)
+                    Text(
+                      'Audience: ${rbi['audience']}',
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12, height: 1.4),
+                    ),
+                  if (rbi['reliability'] is Map)
+                    Text(
+                      'Evidence grade: ${(rbi['reliability'] as Map)['label'] ?? ''} — ${(rbi['reliability'] as Map)['basis'] ?? ''}',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12, height: 1.4),
+                    ),
+                  if ((rbi['inference'] ?? '').toString().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('May infer: ${rbi['inference']}',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12, height: 1.4)),
+                    ),
+                  if ((rbi['do_not_infer'] ?? '').toString().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('Do not infer: ${rbi['do_not_infer']}',
+                          style: const TextStyle(
+                              color: Color(0xFFE8D5A3),
+                              fontSize: 12,
+                              height: 1.4)),
+                    ),
                 ],
                 if (weeklyAverages.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  const Text('WEEKLY TREND',
-                      style: TextStyle(
+                  Text(
+                      (instrument['series_label'] ??
+                              (isLongitudinal
+                                  ? 'WEEKLY TRAJECTORY'
+                                  : 'WEEKLY LEVELS'))
+                          .toString()
+                          .toUpperCase(),
+                      style: const TextStyle(
                           color: Color(0xFF4ECDC4),
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -10784,6 +10893,60 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     );
                   }),
                 ],
+                if (isLongitudinal && cycleRows.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  const Text('CYCLE DETECTION — LN OBSERVED',
+                      style: TextStyle(
+                          color: Color(0xFF4ECDC4),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 6),
+                  ...cycleRows.take(8).map((w) {
+                    if (w is! Map) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(
+                        '${w['label'] ?? w['domain']}: ${w['period_days']}d  '
+                        'conf ${w['confidence']}',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 12),
+                      ),
+                    );
+                  }),
+                ],
+                if (isLongitudinal && tgMap.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  const Text('TRANSGENERATIONAL / PMB',
+                      style: TextStyle(
+                          color: Color(0xFF4ECDC4),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 6),
+                  Text(
+                    'legacy_depth=${tgMap['legacy_depth']}  '
+                    'readiness=${tgMap['reconsolidation_readiness']}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+                if (isLongitudinal && tacticMap.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  const Text('LITTLE NATE TACTICS + REVIEW',
+                      style: TextStyle(
+                          color: Color(0xFF4ECDC4),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 6),
+                  Text(
+                    'observed=${(tacticMap['observed'] is List) ? (tacticMap['observed'] as List).join(', ') : '—'}  '
+                    'dominant=${tacticMap['dominant'] ?? '—'}  '
+                    'accuracy=${tacticMap['accuracy'] ?? 'unscored'}',
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 12, height: 1.4),
+                  ),
+                ],
               ],
             ),
           ),
@@ -10795,14 +10958,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               final srcId =
                   (result['_source_hardware_id'] ?? '').toString();
               if (srcId.isNotEmpty) _setFocusedClient(srcId);
-              final reportSummary = summary is Map
-                  ? (summary as Map)
-                      .entries
-                      .map((e) => '${e.key}: ${e.value}')
-                      .join(', ')
-                  : 'Report generated';
+              final question = (instrument['question'] ?? '').toString();
+              final narrative = (insight['narrative'] ?? '').toString();
+              final complement = (insight['complement'] ?? '').toString();
               _sendInsightsChat(
-                  'I just generated a ${reportType.toLowerCase()} report for $userName. Summary: $reportSummary. What insights can you share about this?');
+                  'Stay inside the ${reportType.toLowerCase()} instrument for $userName. '
+                  'This is a Review Board Investigation packet. Question: $question. '
+                  '${narrative.isNotEmpty ? narrative : 'Use the RBI block already in context.'} '
+                  '$complement '
+                  '${isLongitudinal ? 'Review Little Nate observed tactics and how LN is doing. ' : ''}'
+                  'Give a separate coach analysis — quantitative then qualitative — '
+                  'and do not restate the complementary report as if it were this one.');
             },
             child: const Text('DISCUSS WITH NATE',
                 style: TextStyle(color: Color(0xFF4ECDC4))),
@@ -10814,6 +10980,125 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         ],
       ),
     );
+  }
+
+  List<Map<String, String>> _nevedalCoachMetricRows(
+      String reportType, Map<String, dynamic>? summary) {
+    if (summary == null) return const [];
+    String fmt(dynamic v, {int d = 4}) {
+      if (v is num) return v.toStringAsFixed(d);
+      return v?.toString() ?? '—';
+    }
+
+    String alertFor(dynamic v) {
+      final s = v?.toString() ?? '';
+      if (s == 'improving' || s == 'strong' || s == 'coherent') return 'up';
+      if (s == 'declining' || s == 'concerning' || s == 'insufficient') {
+        return 'down';
+      }
+      return '';
+    }
+
+    if (reportType == 'longitudinal_trends') {
+      return [
+        {
+          'label': 'Board direction',
+          'value': (summary['overall_clinical_direction'] ?? summary['trend'] ?? '—')
+              .toString(),
+          'alert': alertFor(summary['overall_clinical_direction'] ?? summary['trend']),
+        },
+        {'label': 'Evidence sources', 'value': fmt(summary['evidence_sources'], d: 0)},
+        {
+          'label': 'Anxiety (snapshot / language)',
+          'value':
+              '${fmt(summary['anxiety_level'])} / ${summary['anxiety_direction'] ?? '—'}',
+          'alert': alertFor(summary['anxiety_direction']),
+        },
+        {
+          'label': 'Depression (snapshot / language)',
+          'value':
+              '${fmt(summary['depression_indicators'])} / ${summary['depression_direction'] ?? '—'}',
+          'alert': alertFor(summary['depression_direction']),
+        },
+        {
+          'label': 'Dissatisfaction',
+          'value': (summary['dissatisfaction_direction'] ?? '—').toString(),
+          'alert': alertFor(summary['dissatisfaction_direction']),
+        },
+        {
+          'label': 'Dissociation',
+          'value': (summary['dissociation_direction'] ?? '—').toString(),
+          'alert': alertFor(summary['dissociation_direction']),
+        },
+        {
+          'label': 'Shame (index / language)',
+          'value':
+              '${fmt(summary['shame_index'])} / ${summary['shame_direction'] ?? '—'}',
+          'alert': alertFor(summary['shame_direction']),
+        },
+        {
+          'label': 'Blaming circumstances',
+          'value': (summary['blaming_direction'] ?? '—').toString(),
+          'alert': alertFor(summary['blaming_direction']),
+        },
+        {
+          'label': 'Treatment plans / habits',
+          'value':
+              '${fmt(summary['treatment_plan_records'], d: 0)} / ${fmt(summary['active_habits'], d: 0)}',
+        },
+        {
+          'label': 'Homework completion',
+          'value': fmt(summary['homework_completion_rate']),
+        },
+        {
+          'label': 'Cycles observed / forecasts',
+          'value':
+              '${fmt(summary['cycle_count'], d: 0)} / ${fmt(summary['cycle_prediction_count'], d: 0)}',
+        },
+        {
+          'label': 'LN accuracy / tactic',
+          'value':
+              '${summary['nate_accuracy'] ?? 'unscored'} / ${summary['nate_dominant_tactic'] ?? '—'}',
+        },
+      ];
+    }
+    if (reportType == 'individual_coherence') {
+      return [
+        {
+          'label': 'Measurements',
+          'value': fmt(summary['total_measurements'], d: 0)
+        },
+        {'label': 'Mean C_emo (level)', 'value': fmt(summary['avg_c_emo'])},
+        {
+          'label': 'Range',
+          'value': '${fmt(summary['min_c_emo'])} – ${fmt(summary['max_c_emo'])}',
+        },
+        {'label': 'Amplitude', 'value': fmt(summary['amplitude'])},
+        {
+          'label': 'Position in range',
+          'value': summary['position_in_range'] is num
+              ? '${((summary['position_in_range'] as num) * 100).toStringAsFixed(0)}%'
+              : '—',
+        },
+        {'label': 'CEE events', 'value': fmt(summary['cee_events'], d: 0)},
+        {'label': 'CEE / 10k samples', 'value': fmt(summary['cee_per_10k'])},
+        {
+          'label': 'Recent shift (half-window)',
+          'value': (summary['recent_shift'] ?? summary['trend'] ?? '—').toString(),
+          'alert': alertFor(summary['recent_shift'] ?? summary['trend']),
+        },
+        {
+          'label': 'Recent shift Δ',
+          'value': fmt(summary['recent_shift_delta'] ?? summary['trend_change']),
+        },
+      ];
+    }
+    return summary.entries
+        .map((e) => {
+              'label': e.key.replaceAll('_', ' '),
+              'value': e.value.toString(),
+            })
+        .toList();
   }
 
   String _zoomInsightText(dynamic raw) {

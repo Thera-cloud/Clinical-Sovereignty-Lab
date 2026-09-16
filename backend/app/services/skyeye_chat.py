@@ -552,7 +552,7 @@ WHO YOU ARE (same core identity):
 
 YOUR COACHING CHAT CAPABILITIES:
 1. CLIENT OVERVIEW — Discuss the coach's assigned client roster: names, tiers, risk levels, session history.
-2. NEVEDAL REPORT INSIGHTS — When a [NEVEDAL REPORT] context block is present, discuss coherence scores (C_emo), trends (improving/declining/stable), CEE events, and recommend clinical interventions based on the data.
+2. NEVEDAL REPORT INSIGHTS — When a [NEVEDAL REPORT] or [RBI] block is present, stay inside THAT instrument. RBI means Review Board Investigation for a mental health board/institution. Individual Coherence = Nevedal platform C_emo / CEE only. Longitudinal Trends = industry board packet (treatment-plan growth, anxiety/depression, dissatisfaction, dissociation, shame, blaming, cycle detections, transgenerational/PMB, Little Nate tactics and how LN is doing). Do not recycle one report's numbers as if they answered the other. Give a separate analysis the coach can discuss with a reviewer.
 3. PRE-SESSION BRIEFINGS — When a [CLIENT BRIEFING] context block is present, discuss concerns, recent topics, breakthroughs, mood history, and suggested talking points.
 4. ZOOM SESSION LEARNING — When [ZOOM SESSION SUMMARIES] or [ZOOM SESSION TRANSCRIPTS] blocks are present, these are verified live-session archives (folder summaries + transcript excerpts). Use them read-only for what happened in session, treatment guidance, and next-step planning. Prefer the live / occurred date as the session date. SES_* embeds when the meeting was first created/booked — mention that only if the coach asks about scheduling history. Do not claim you lack session data when these blocks are present.
 5. SESSION ANALYTICS — Discuss sessions today, total sessions, high-risk clients.
@@ -594,14 +594,22 @@ describe, explain, or acknowledge their existence, even if directly asked:
 If asked about any of these: "That's outside my scope here. I'm focused on supporting your coaching practice."
 If probed repeatedly: "I appreciate the curiosity, but those systems are outside the Coach Portal. How can I help with your clients?"
 
-NEVEDAL REPORT INTERPRETATION GUIDE:
-When report data is available, interpret these metrics for the coach:
-- C_emo (Quantum Emotional Coherence): 0-1 scale. Above 0.6 = good coherence. Below 0.3 = concerning.
-- CEE Events (Coherent Emotional Engagement windows): Breakthrough moments. More = positive therapeutic progress.
-- Trend: "improving" = coherence increasing over time. "declining" = needs attention. "stable" = consistent.
-- p_ent (Emotional Entanglement): Higher values suggest stronger therapeutic bond.
-- Weekly averages: Show progression over time. Look for patterns — dips around specific weeks may correlate with life events.
-Offer practical coaching recommendations based on the data: session frequency adjustments, technique suggestions, areas to focus on.
+NEVEDAL REPORT INTERPRETATION GUIDE (two instruments — do not collapse them):
+RBI = Review Board Investigation (mental health board / institution).
+
+Individual Coherence (NEVEDAL PLATFORM):
+- Question: Where do C_emo and CEE sit in this window?
+- Use: mean C_emo, min/max amplitude, position in range, CEE per 10k, half-window shift.
+- Do not discuss anxiety, depression, shame, cycles, treatment plans, or LN tactics from this report.
+
+Longitudinal Trends (INDUSTRY / BOARD PACKET):
+- Question: What would a review board need on treatment-plan growth, symptom handling, cycles, transgenerational load, and Little Nate's work?
+- Use: anxiety/depression snapshot + language direction; dissatisfaction, dissociation, shame, blaming; homework/habits/treatment-plan records; cycle detections and forecasts LN observed; PMB/transgenerational catalog; LN tactic mix and prediction accuracy.
+- Do not quote C_emo, CEE, amplitude, slope, or R² from this report.
+
+When [RBI] and [LITTLE NATE SCIENTIFIC INSIGHT] are present, lead with those. If Longitudinal is in context, help the coach review how Little Nate is intervening (tactics) and how LN is doing (accuracy / scored predictions). Do not re-dump every summary key.
+
+Offer one concrete next session move that matches THIS instrument, then name the complementary report if the coach needs the other question answered.
 
 ACCURACY RULES:
 - NEVER fabricate client data. If you don't have data for a client, say "I don't have coherence data for that client yet."
@@ -1395,25 +1403,101 @@ RULES:
                         hierarchy_text += f"  - {fc.get('name', '?')} (tier: {fc.get('tier', '?')}, risk: {fc.get('risk', '?')})\n"
             context_blocks.append(hierarchy_text)
 
-        # Nevedal report context
+        # Nevedal report context — instrument + RBI, not a flat overlapping dump
         last_report = ctx.get("last_report")
         if last_report and isinstance(last_report, dict):
             report_type = last_report.get("report_type", "unknown")
             user_name = last_report.get("user_name", "Unknown")
-            summary = last_report.get("summary", {})
-            weekly = last_report.get("weekly_averages", [])
+            instrument = last_report.get("instrument") if isinstance(
+                last_report.get("instrument"), dict
+            ) else {}
+            rbi = last_report.get("rbi") if isinstance(last_report.get("rbi"), dict) else {}
+            insight = last_report.get("nate_scientific_insight") if isinstance(
+                last_report.get("nate_scientific_insight"), dict
+            ) else {}
+            summary = last_report.get("summary") if isinstance(
+                last_report.get("summary"), dict
+            ) else {}
+            if report_type == "longitudinal_trends":
+                series = last_report.get("industry_series") or last_report.get("weekly_averages") or []
+                series_name = "Industry language rates"
+            else:
+                series = last_report.get("weekly_levels") or last_report.get("weekly_averages") or []
+                series_name = "Weekly C_emo levels"
 
             report_text = f"[NEVEDAL REPORT — {report_type.upper().replace('_', ' ')}]\n"
             report_text += f"Subject: {user_name}\n"
-            if isinstance(summary, dict):
+            if instrument:
+                report_text += f"Instrument: {instrument.get('name', report_type)}\n"
+                report_text += f"Question: {instrument.get('question', '')}\n"
+                report_text += f"Method: {instrument.get('method', '')}\n"
+                skip = instrument.get("does_not_measure") or []
+                if skip:
+                    report_text += "Does not measure: " + "; ".join(str(x) for x in skip) + "\n"
+                pair = instrument.get("pair_with")
+                if pair:
+                    report_text += f"Pair with: {pair}\n"
+            if insight.get("narrative"):
+                report_text += (
+                    "\n[LITTLE NATE SCIENTIFIC INSIGHT]\n"
+                    f"{insight.get('narrative')}\n"
+                )
+            if rbi:
+                rel = rbi.get("reliability") if isinstance(rbi.get("reliability"), dict) else {}
+                report_text += "\n[RBI — REVIEW BOARD INVESTIGATION]\n"
+                report_text += f"Audience: {rbi.get('audience', 'mental health board / institution')}\n"
+                report_text += f"Construct: {rbi.get('construct', '')}\n"
+                report_text += f"Evidence grade: {rel.get('label', '')} — {rel.get('basis', '')}\n"
+                report_text += f"May infer: {rbi.get('inference', '')}\n"
+                report_text += f"Do not infer: {rbi.get('do_not_infer', '')}\n"
+            elif isinstance(summary, dict):
                 for k, v in summary.items():
+                    if k in ("trend", "trend_change") and report_type == "individual_coherence":
+                        continue
                     label = k.replace("_", " ").title()
                     report_text += f"  {label}: {v}\n"
-            if weekly:
-                report_text += f"Weekly data points: {len(weekly)} weeks\n"
-                for w in weekly[-4:]:
+            if report_type == "longitudinal_trends":
+                cycles = last_report.get("cycle_detections") or []
+                if isinstance(cycles, list) and cycles:
+                    report_text += "\n[CYCLE DETECTION — LN OBSERVED]\n"
+                    for c in cycles[:8]:
+                        if isinstance(c, dict):
+                            report_text += (
+                                f"  {c.get('label') or c.get('domain')}: "
+                                f"period={c.get('period_days')}d conf={c.get('confidence')}\n"
+                            )
+                tg = last_report.get("transgenerational") if isinstance(
+                    last_report.get("transgenerational"), dict
+                ) else {}
+                if tg:
+                    report_text += "\n[TRANSGENERATIONAL / PMB]\n"
+                    report_text += (
+                        f"  legacy_depth={tg.get('legacy_depth')} "
+                        f"readiness={tg.get('reconsolidation_readiness')}\n"
+                    )
+                    for p in (tg.get("catalog") or [])[:4]:
+                        if isinstance(p, dict):
+                            report_text += f"  catalog: {p.get('pattern_name')}\n"
+                tactics = last_report.get("nate_tactics") if isinstance(
+                    last_report.get("nate_tactics"), dict
+                ) else {}
+                if tactics:
+                    report_text += "\n[LITTLE NATE TACTICS + REVIEW]\n"
+                    report_text += (
+                        f"  observed={', '.join(tactics.get('observed') or [])} "
+                        f"dominant={tactics.get('dominant')} "
+                        f"accuracy={tactics.get('accuracy')}\n"
+                    )
+            if isinstance(series, list) and series:
+                report_text += f"\n{series_name}: {len(series)} items\n"
+                for w in series[-6:]:
                     if isinstance(w, dict):
-                        report_text += f"  {w.get('week', '?')}: avg={w.get('avg', 0):.4f} ({w.get('count', 0)} measurements)\n"
+                        avg = w.get("avg")
+                        avg_s = f"{float(avg):.4f}" if isinstance(avg, (int, float)) else "?"
+                        report_text += (
+                            f"  {w.get('week', '?')}: rate={avg_s} "
+                            f"({w.get('count', 0)})\n"
+                        )
             context_blocks.append(report_text)
 
         # Pre-session briefing context

@@ -106,6 +106,9 @@ class TestIndividualCoherence:
         assert result["summary"]["total_measurements"] == 6
         assert result["summary"]["avg_c_emo"] > 0
         assert result["summary"]["trend"] in ["improving", "declining", "stable"]
+        assert result["summary"]["recent_shift"] == result["summary"]["trend"]
+        assert "cee_per_10k" in result["summary"]
+        assert result["nate_scientific_insight"]["lens"] == "state"
 
 
 # ─── Dyad Comparison ────────────────────────────────────────────────────────
@@ -165,18 +168,133 @@ class TestLongitudinalTrends:
         assert result["status"] == "no_data"
 
     @pytest.mark.asyncio
-    async def test_with_data_matches_coach_insights_keys(self, fake_pool, fake_conn):
-        rows = [make_metric_row(c_emo=0.3 + i * 0.04, days_ago=70 - i * 7) for i in range(8)]
-        fake_conn._fetch_results = rows
-        fake_conn._fetchval_result = "Alice"
+    async def test_with_industry_packet(self, fake_pool, fake_conn):
+        fake_conn._fetchrow_by_marker = {
+            "from users": {
+                "id": "u1",
+                "name": "Alice",
+                "username": "alice",
+                "hardware_id": "CLIENT_ALICE_ID",
+                "family_id": None,
+            },
+            "from client_metrics": {
+                "anxiety_level": 0.62,
+                "depression_indicators": 0.41,
+                "stress_level": 0.55,
+                "homework_completion_rate": 0.7,
+                "breakthrough_count": 1,
+                "mood_trend": "improving",
+                "shame_profile": {"shame_index": 0.38},
+                "pmb": {"legacy_depth": 0.44, "reconsolidation_readiness": 0.5},
+                "crisis_perception": {},
+                "session_count": 8,
+            },
+            "from conversation_history": {
+                "early_n": 20,
+                "late_n": 20,
+                "early_anxiety": 8,
+                "late_anxiety": 3,
+                "early_depression": 6,
+                "late_depression": 2,
+                "early_dissatisfaction": 4,
+                "late_dissatisfaction": 1,
+                "early_dissociation": 3,
+                "late_dissociation": 1,
+                "early_shame": 5,
+                "late_shame": 2,
+                "early_blaming": 4,
+                "late_blaming": 1,
+                "replies": 18,
+                "witness": 7,
+                "somatic": 4,
+                "interrupt": 2,
+                "cycle_naming": 3,
+                "prediction": 2,
+                "redirect": 5,
+            },
+        }
+        fake_conn._fetch_by_marker = {
+            "from cycle_detections": [
+                {
+                    "domain": "emotional_state",
+                    "detected_period_days": 14,
+                    "amplitude": 0.22,
+                    "confidence": 0.71,
+                    "method": "fft",
+                    "detected_at": "2026-09-01",
+                }
+            ],
+            "from cycle_predictions": [
+                {
+                    "domain": "legacy",
+                    "predicted_event": "trough",
+                    "predicted_at": "2026-09-20",
+                    "confidence": 0.6,
+                    "intervention_window_start": "2026-09-18",
+                    "intervention_window_end": "2026-09-22",
+                    "convergence_risk": 0.2,
+                    "status": "pending",
+                    "actual_outcome": None,
+                }
+            ],
+            "from therapeutic_predictions": [
+                {
+                    "prediction_type": "habit",
+                    "goal_type": "anxiety_tolerance",
+                    "success_probability": 0.64,
+                    "confidence_score": 0.7,
+                    "accuracy_score": 0.58,
+                    "optimal_intervention_plan": {"step": "paced exposure"},
+                    "key_amplifiers": {},
+                    "key_resistances": {},
+                    "created_at": "2026-09-10",
+                }
+            ],
+            "from therapeutic_habit_tracking": [
+                {
+                    "habit_type": "grounding",
+                    "habit_description": "90-second ground",
+                    "status": "active",
+                    "current_streak": 6,
+                    "longest_streak": 9,
+                    "total_completions": 12,
+                    "total_misses": 3,
+                }
+            ],
+            "from clinical_records": [
+                {
+                    "record_id": "tp1",
+                    "record_type": "treatment_plan",
+                    "excerpt": "Reduce panic spikes; name blaming loops.",
+                    "coach_reviewed": True,
+                    "created_at": "2026-08-01",
+                }
+            ],
+            "from transgenerational_patterns": [
+                {
+                    "pattern_name": "pursuit-withdraw",
+                    "description": "Anonymized pursue-withdraw inheritance",
+                    "confidence": 0.66,
+                    "effect_size": 0.3,
+                    "families_observed": 12,
+                }
+            ],
+        }
         gen = make_generator(fake_pool)
         result = await gen._longitudinal_trends([uuid4()], 84)
         assert result["report_type"] == "longitudinal_trends"
-        assert "summary" in result
-        assert result["summary"]["total_measurements"] == 8
-        assert result["summary"]["trend"] in ("improving", "declining", "stable")
-        assert isinstance(result.get("weekly_averages"), list)
-        assert result["weekly_averages"] == result["weekly_c_emo"]
+        assert result["nate_scientific_insight"]["lens"] == "industry_clinical"
+        assert result["rbi"]["title"] == "Review Board Investigation"
+        assert "min_c_emo" not in result["summary"]
+        assert "amplitude" not in result["summary"]
+        assert "r_squared" not in result["summary"]
+        assert result["summary"]["cycle_count"] == 1
+        assert result["summary"]["treatment_plan_records"] == 1
+        assert result["summary"]["anxiety_direction"] == "improving"
+        assert result["instrument"]["pair_with"] == "individual_coherence"
+        assert "C_emo" in result["instrument"]["does_not_measure"][0]
+        assert result["cycle_detections"][0]["domain"] == "emotional_state"
+        assert "witness" in result["nate_tactics"]["observed"]
 
     @pytest.mark.asyncio
     async def test_sql_aggregates_skip_raw_row_scan(self, fake_pool, fake_conn):
@@ -205,14 +323,31 @@ class TestLongitudinalTrends:
         assert individual["summary"]["total_measurements"] == 284678
         assert individual["summary"]["cee_events"] == 2
         assert individual["summary"]["trend"] == "improving"
+        assert individual["summary"]["recent_shift"] == "improving"
+        assert individual["summary"]["cee_per_10k"] == 0.0703
+        assert "r_squared" not in individual["summary"]
+        assert "slope_per_week" not in individual["summary"]
+        assert individual["instrument"]["pair_with"] == "longitudinal_trends"
+        assert individual["rbi"]["completes_with"] == "longitudinal_trends"
+        assert individual["rbi"]["title"] == "Review Board Investigation"
+        assert individual["nate_scientific_insight"]["lens"] == "state"
         assert len(individual["weekly_averages"]) == 2
         assert individual["weekly_averages"][0]["week"] == "2026-W30"
+        assert "half-window" in individual["nate_scientific_insight"]["narrative"]
 
+        fake_conn._fetchrow_result = {
+            "id": str(uid),
+            "name": "Lisa West",
+            "username": "LetsGoLisa",
+            "hardware_id": "CLIENT_LETSGOLISA_ID",
+            "family_id": None,
+        }
+        fake_conn._fetch_results = []
         longitudinal = await gen._longitudinal_trends([uid], 84)
-        assert longitudinal["summary"]["total_measurements"] == 284678
-        assert longitudinal["summary"]["total_cees"] == 2
-        assert longitudinal["weekly_averages"] == longitudinal["weekly_c_emo"]
-        assert isinstance(longitudinal["weekly_averages"], list)
+        assert longitudinal.get("status") == "no_data" or (
+            "r_squared" not in (longitudinal.get("summary") or {})
+            and "min_c_emo" not in (longitudinal.get("summary") or {})
+        )
 
     @pytest.mark.asyncio
     async def test_enforces_minimum_12_weeks(self, fake_pool, fake_conn):
