@@ -179,6 +179,42 @@ class TestLongitudinalTrends:
         assert result["weekly_averages"] == result["weekly_c_emo"]
 
     @pytest.mark.asyncio
+    async def test_sql_aggregates_skip_raw_row_scan(self, fake_pool, fake_conn):
+        """Coach Insights path: weekly buckets + one summary row, not 100k raw metrics."""
+        fake_conn._fetchval_result = "Lisa West"
+        fake_conn._fetchrow_result = {
+            "name": "Lisa West",
+            "role": "CLIENT",
+            "family_id": None,
+            "n": 284678,
+            "avg_c_emo": 0.41,
+            "max_c_emo": 0.88,
+            "min_c_emo": 0.11,
+            "cee_events": 2,
+            "first_half_avg": 0.35,
+            "second_half_avg": 0.47,
+            "std_dev": 0.08,
+        }
+        fake_conn._fetch_results = [
+            {"week": "2026-W30", "avg": 0.32, "count": 1000},
+            {"week": "2026-W31", "avg": 0.48, "count": 2000},
+        ]
+        uid = uuid4()
+        gen = make_generator(fake_pool)
+        individual = await gen._individual_coherence([uid], 84)
+        assert individual["summary"]["total_measurements"] == 284678
+        assert individual["summary"]["cee_events"] == 2
+        assert individual["summary"]["trend"] == "improving"
+        assert len(individual["weekly_averages"]) == 2
+        assert individual["weekly_averages"][0]["week"] == "2026-W30"
+
+        longitudinal = await gen._longitudinal_trends([uid], 84)
+        assert longitudinal["summary"]["total_measurements"] == 284678
+        assert longitudinal["summary"]["total_cees"] == 2
+        assert longitudinal["weekly_averages"] == longitudinal["weekly_c_emo"]
+        assert isinstance(longitudinal["weekly_averages"], list)
+
+    @pytest.mark.asyncio
     async def test_enforces_minimum_12_weeks(self, fake_pool, fake_conn):
         fake_conn._fetch_results = []
         fake_conn._fetchval_result = "Alice"

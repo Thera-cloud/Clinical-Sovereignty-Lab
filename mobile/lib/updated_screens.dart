@@ -10451,18 +10451,38 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       style: TextStyle(color: Colors.white70, fontSize: 12)),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
-                    value: targetClientId,
+                    value: () {
+                      final ids = <String>{};
+                      for (final c in _clients) {
+                        if (c is! Map) continue;
+                        final id = _clientIdFromMap(
+                            Map<String, dynamic>.from(c));
+                        if (id.isNotEmpty) ids.add(id);
+                      }
+                      if (targetClientId != null &&
+                          ids.contains(targetClientId)) {
+                        return targetClientId;
+                      }
+                      return null;
+                    }(),
                     dropdownColor: const Color(0xFF111118),
                     hint: const Text("Select client...",
                         style: TextStyle(color: Colors.white38)),
-                    items: _clients.map<DropdownMenuItem<String>>((c) {
-                      final id = (c['hardware_id'] ?? c['id'] ?? '').toString();
-                      final name = (c['name'] ?? id).toString();
-                      return DropdownMenuItem(
-                          value: id,
-                          child: Text(name,
-                              style: const TextStyle(color: Colors.white)));
-                    }).toList(),
+                    items: () {
+                      final seen = <String>{};
+                      final items = <DropdownMenuItem<String>>[];
+                      for (final c in _clients) {
+                        if (c is! Map) continue;
+                        final m = Map<String, dynamic>.from(c);
+                        final id = _clientIdFromMap(m);
+                        if (id.isEmpty || !seen.add(id)) continue;
+                        items.add(DropdownMenuItem(
+                            value: id,
+                            child: Text(_clientNameFromMap(m),
+                                style: const TextStyle(color: Colors.white))));
+                      }
+                      return items;
+                    }(),
                     onChanged: (v) => setLocal(() => targetClientId = v),
                     decoration: InputDecoration(
                       filled: true,
@@ -10522,10 +10542,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           );
                           setLocal(() => generating = false);
                           if (resp.statusCode == 200) {
-                            final result = jsonDecode(resp.body);
-                            if (result is Map) {
-                              result['_source_hardware_id'] = targetClientId;
+                            final decoded = jsonDecode(resp.body);
+                            if (decoded is! Map) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text("Report failed: invalid response"),
+                                    backgroundColor: Colors.red),
+                              );
+                              return;
                             }
+                            final result = Map<String, dynamic>.from(decoded);
+                            result['_source_hardware_id'] = targetClientId;
                             if (targetClientId != null &&
                                 targetClientId!.isNotEmpty) {
                               _focusedClientId = targetClientId!;
@@ -10562,6 +10589,31 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   void _showNevedalReportResult(Map<String, dynamic> result) {
     setState(() => _lastNevedalReport = result);
+
+    if (result['error'] != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: const Text('REPORT ERROR',
+              style: TextStyle(
+                  color: Color(0xFFC9A962),
+                  fontFamily: 'Cormorant Garamond',
+                  fontSize: 16)),
+          content: Text(
+            result['error'].toString(),
+            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK',
+                    style: TextStyle(color: Color(0xFFC9A962)))),
+          ],
+        ),
+      );
+      return;
+    }
 
     if (result['status'] == 'no_data') {
       showDialog(
@@ -14696,7 +14748,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _insightsChatController.clear();
     _scrollInsightsChat();
     try {
-      final token = widget.currentUserProfile['token'] ?? '';
+      final token = (_authToken ??
+              widget.currentUserProfile['token'] ??
+              '')
+          .toString();
       _captureInsightsSubjectsFromMessage(message);
       final contextPayload = _buildCoachNateContextPayload(messageHint: message);
       final resolvedId = (contextPayload['client_id'] ?? '').toString();
@@ -14714,6 +14769,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         });
       }
 
+      if (token.isEmpty) {
+        setState(() {
+          _insightsChatMessages.add({
+            'role': 'assistant',
+            'content': 'Sign in required to chat with Little Nate.',
+          });
+        });
+        if (mounted) setState(() => _insightsChatLoading = false);
+        return;
+      }
       final uri = Uri.parse('$_apiBaseUrl/api/coach/nate-chat');
       final resp = await http.post(
         uri,
@@ -15839,8 +15904,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final now = DateTime.now();
     final ymd =
         '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    final dateKey = (s['date'] ?? '').toString().trim();
-    if (dateKey.length >= 10 && dateKey.substring(0, 10) == ymd) return true;
     for (final key in const [
       'scheduled_start',
       'start',
@@ -15858,7 +15921,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         return true;
       }
     }
-    return false;
+    final dateKey = (s['date'] ?? '').toString().trim();
+    return dateKey.length >= 10 && dateKey.substring(0, 10) == ymd;
   }
 
   List<Map<String, dynamic>> _insightsTodaySessions() {
@@ -16180,8 +16244,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       textAlign: TextAlign.center,
                     ),
                   ),
-                  RiskBadge(
-                      riskLevel: (metrics['risk_level'] ?? 'LOW').toString()),
+                  RiskBadge(riskLevel: _insightsClientRisk(client)),
                 ],
               ),
             ),

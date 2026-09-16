@@ -61,43 +61,35 @@ class NevedalReportGenerator:
             return {"error": "user_id required"}
 
         async with self.db_pool.acquire() as conn:
-            # Fetch metrics over the period
-            rows = await conn.fetch(
-                """SELECT c_emo, p_ent, cee_window, cee_duration_seconds,
-                          biometrics, recorded_at
-                   FROM nevedal_metrics
-                   WHERE user_id = $1 AND recorded_at > NOW() - ($2 || ' days')::interval
-                   ORDER BY recorded_at""",
-                user_id, str(days),
-            )
-
-            # User info
             user = await conn.fetchrow(
                 "SELECT name, role, family_id FROM users WHERE id = $1", user_id
             )
+            weekly_or_raw = await conn.fetch(
+                self._WEEKLY_C_EMO_SQL, user_id, int(days),
+            )
+            stats = None
+            if not self._looks_like_raw_metric_rows(weekly_or_raw):
+                stats = await conn.fetchrow(
+                    self._METRICS_SUMMARY_SQL, user_id, int(days),
+                )
 
-        if not rows:
-            return {"report_type": "individual_coherence", "user_id": str(user_id),
-                    "status": "no_data", "period_days": days}
+        if self._looks_like_raw_metric_rows(weekly_or_raw):
+            return self._individual_from_raw_rows(
+                user_id, days, user, weekly_or_raw,
+            )
 
-        c_emo_values = [float(r["c_emo"] or 0) for r in rows]
-        cee_count = sum(1 for r in rows if r["cee_window"])
+        n = int((stats or {}).get("n") or 0)
+        if n <= 0:
+            return {
+                "report_type": "individual_coherence",
+                "user_id": str(user_id),
+                "status": "no_data",
+                "period_days": days,
+            }
 
-        avg_c_emo = sum(c_emo_values) / len(c_emo_values)
-        max_c_emo = max(c_emo_values)
-        min_c_emo = min(c_emo_values)
-
-        # Trend: compare first half to second half
-        mid = len(c_emo_values) // 2
-        first_half_avg = sum(c_emo_values[:mid]) / max(mid, 1)
-        second_half_avg = sum(c_emo_values[mid:]) / max(len(c_emo_values) - mid, 1)
-        trend_direction = "improving" if second_half_avg > first_half_avg + 0.02 else (
-            "declining" if second_half_avg < first_half_avg - 0.02 else "stable"
-        )
-
-        # Weekly averages for charting
-        weekly = self._group_by_week(rows, "c_emo")
-
+        first_half = self._num((stats or {}).get("first_half_avg"))
+        second_half = self._num((stats or {}).get("second_half_avg"))
+        trend_direction = self._trend_label(first_half, second_half)
         return {
             "report_type": "individual_coherence",
             "user_id": str(user_id),
@@ -105,15 +97,15 @@ class NevedalReportGenerator:
             "period_days": days,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": {
-                "total_measurements": len(rows),
-                "avg_c_emo": round(avg_c_emo, 4),
-                "max_c_emo": round(max_c_emo, 4),
-                "min_c_emo": round(min_c_emo, 4),
-                "cee_events": cee_count,
+                "total_measurements": n,
+                "avg_c_emo": round(self._num((stats or {}).get("avg_c_emo")), 4),
+                "max_c_emo": round(self._num((stats or {}).get("max_c_emo")), 4),
+                "min_c_emo": round(self._num((stats or {}).get("min_c_emo")), 4),
+                "cee_events": int((stats or {}).get("cee_events") or 0),
                 "trend": trend_direction,
-                "trend_change": round(second_half_avg - first_half_avg, 4),
+                "trend_change": round(second_half - first_half, 4),
             },
-            "weekly_averages": weekly,
+            "weekly_averages": self._records_to_weekly(weekly_or_raw),
         }
 
     # ─── 2. Dyad Comparison Report ───────────────────────────────────────
@@ -251,38 +243,31 @@ class NevedalReportGenerator:
         days = max(days, 84)  # Minimum 12 weeks
 
         async with self.db_pool.acquire() as conn:
-            rows = await conn.fetch(
-                """SELECT c_emo, cee_window, cee_duration_seconds, recorded_at
-                   FROM nevedal_metrics
-                   WHERE user_id = $1 AND recorded_at > NOW() - ($2 || ' days')::interval
-                   ORDER BY recorded_at""",
-                user_id, str(days),
-            )
             name = await conn.fetchval("SELECT name FROM users WHERE id = $1", user_id)
+            weekly_or_raw = await conn.fetch(
+                self._WEEKLY_C_EMO_SQL, user_id, int(days),
+            )
+            stats_row = None
+            cee_weekly_rows = []
+            if not self._looks_like_raw_metric_rows(weekly_or_raw):
+                stats_row = await conn.fetchrow(
+                    self._METRICS_SUMMARY_SQL, user_id, int(days),
+                )
+                cee_weekly_rows = await conn.fetch(
+                    self._WEEKLY_CEE_SQL, user_id, int(days),
+                )
 
-        if not rows:
+        if self._looks_like_raw_metric_rows(weekly_or_raw):
+            return self._longitudinal_from_raw_rows(
+                user_id, days, name, weekly_or_raw,
+            )
+
+        n = int((stats_row or {}).get("n") or 0)
+        if n <= 0:
             return {"report_type": "longitudinal_trends", "status": "no_data"}
 
-        weekly = self._group_by_week(rows, "c_emo")
-        c_emo_values = [float(r["c_emo"] or 0) for r in rows]
-
-        # Linear regression (simple)
-        n = len(c_emo_values)
-        if n >= 2:
-            x_mean = (n - 1) / 2
-            y_mean = sum(c_emo_values) / n
-            num = sum((i - x_mean) * (c_emo_values[i] - y_mean) for i in range(n))
-            den = sum((i - x_mean) ** 2 for i in range(n))
-            slope = num / den if den != 0 else 0
-            r_squared = (num ** 2) / (den * sum((y - y_mean) ** 2 for y in c_emo_values)) if den != 0 and sum((y - y_mean) ** 2 for y in c_emo_values) != 0 else 0
-        else:
-            slope = 0
-            r_squared = 0
-
-        # CEE frequency by week
-        cee_rows = [r for r in rows if r["cee_window"]]
-        cee_weekly = self._group_by_week(cee_rows, "cee_duration_seconds", agg="count")
-
+        weekly = self._records_to_weekly(weekly_or_raw)
+        slope, r_squared = self._regression([self._num(w.get("avg")) for w in weekly])
         trend = (
             "improving"
             if slope > 0.0001
@@ -290,17 +275,11 @@ class NevedalReportGenerator:
         )
         stats = {
             "total_measurements": n,
-            "mean_c_emo": round(sum(c_emo_values) / n, 4),
-            "std_dev": round(
-                math.sqrt(
-                    sum((v - sum(c_emo_values) / n) ** 2 for v in c_emo_values)
-                    / max(n - 1, 1)
-                ),
-                4,
-            ),
+            "mean_c_emo": round(self._num((stats_row or {}).get("avg_c_emo")), 4),
+            "std_dev": round(self._num((stats_row or {}).get("std_dev")), 4),
             "slope_per_measurement": round(slope, 6),
             "r_squared": round(r_squared, 4),
-            "total_cees": len(cee_rows),
+            "total_cees": int((stats_row or {}).get("cee_events") or 0),
             "trend": trend,
         }
         return {
@@ -313,7 +292,7 @@ class NevedalReportGenerator:
             "summary": stats,
             "weekly_c_emo": weekly,
             "weekly_averages": weekly,
-            "weekly_cee_count": cee_weekly,
+            "weekly_cee_count": self._records_to_weekly_counts(cee_weekly_rows),
         }
 
     # ─── 5. Coach Efficacy Analysis ──────────────────────────────────────
@@ -402,6 +381,189 @@ class NevedalReportGenerator:
         }
 
     # ─── Helpers ─────────────────────────────────────────────────────────
+
+    _METRICS_SUMMARY_SQL = """
+        SELECT COUNT(*)::int AS n,
+               COALESCE(AVG(c_emo), 0) AS avg_c_emo,
+               COALESCE(MAX(c_emo), 0) AS max_c_emo,
+               COALESCE(MIN(c_emo), 0) AS min_c_emo,
+               COUNT(*) FILTER (WHERE cee_window IS TRUE)::int AS cee_events,
+               AVG(c_emo) FILTER (
+                   WHERE recorded_at < NOW() - make_interval(days => $2 / 2)
+               ) AS first_half_avg,
+               AVG(c_emo) FILTER (
+                   WHERE recorded_at >= NOW() - make_interval(days => $2 / 2)
+               ) AS second_half_avg,
+               COALESCE(STDDEV_SAMP(c_emo), 0) AS std_dev
+        FROM nevedal_metrics
+        WHERE user_id = $1
+          AND recorded_at > NOW() - make_interval(days => $2)
+    """
+
+    _WEEKLY_C_EMO_SQL = """
+        SELECT to_char(date_trunc('week', recorded_at), 'IYYY-"W"IW') AS week,
+               ROUND(AVG(c_emo)::numeric, 4) AS avg,
+               COUNT(*)::int AS count
+        FROM nevedal_metrics
+        WHERE user_id = $1
+          AND recorded_at > NOW() - make_interval(days => $2)
+        GROUP BY 1
+        ORDER BY 1
+    """
+
+    _WEEKLY_CEE_SQL = """
+        SELECT to_char(date_trunc('week', recorded_at), 'IYYY-"W"IW') AS week,
+               COUNT(*)::int AS count
+        FROM nevedal_metrics
+        WHERE user_id = $1
+          AND cee_window IS TRUE
+          AND recorded_at > NOW() - make_interval(days => $2)
+        GROUP BY 1
+        ORDER BY 1
+    """
+
+    @staticmethod
+    def _num(v: Any, default: float = 0.0) -> float:
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _trend_label(first_half: float, second_half: float, eps: float = 0.02) -> str:
+        if second_half > first_half + eps:
+            return "improving"
+        if second_half < first_half - eps:
+            return "declining"
+        return "stable"
+
+    @staticmethod
+    def _looks_like_raw_metric_row(row: Any) -> bool:
+        try:
+            keys = set(row.keys()) if hasattr(row, "keys") else set()
+        except Exception:
+            return False
+        return "recorded_at" in keys and "c_emo" in keys
+
+    @classmethod
+    def _looks_like_raw_metric_rows(cls, rows: Any) -> bool:
+        return bool(rows) and cls._looks_like_raw_metric_row(rows[0])
+
+    def _individual_from_raw_rows(
+        self, user_id, days: int, user, rows: List,
+    ) -> Dict[str, Any]:
+        if not rows:
+            return {
+                "report_type": "individual_coherence",
+                "user_id": str(user_id),
+                "status": "no_data",
+                "period_days": days,
+            }
+        c_emo_values = [self._num(r["c_emo"]) for r in rows]
+        cee_count = sum(1 for r in rows if r["cee_window"])
+        avg_c_emo = sum(c_emo_values) / len(c_emo_values)
+        mid = len(c_emo_values) // 2
+        first_half_avg = sum(c_emo_values[:mid]) / max(mid, 1)
+        second_half_avg = sum(c_emo_values[mid:]) / max(len(c_emo_values) - mid, 1)
+        return {
+            "report_type": "individual_coherence",
+            "user_id": str(user_id),
+            "user_name": user["name"] if user else None,
+            "period_days": days,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "summary": {
+                "total_measurements": len(rows),
+                "avg_c_emo": round(avg_c_emo, 4),
+                "max_c_emo": round(max(c_emo_values), 4),
+                "min_c_emo": round(min(c_emo_values), 4),
+                "cee_events": cee_count,
+                "trend": self._trend_label(first_half_avg, second_half_avg),
+                "trend_change": round(second_half_avg - first_half_avg, 4),
+            },
+            "weekly_averages": self._group_by_week(rows, "c_emo"),
+        }
+
+    def _longitudinal_from_raw_rows(
+        self, user_id, days: int, name, rows: List,
+    ) -> Dict[str, Any]:
+        if not rows:
+            return {"report_type": "longitudinal_trends", "status": "no_data"}
+        weekly = self._group_by_week(rows, "c_emo")
+        c_emo_values = [self._num(r["c_emo"]) for r in rows]
+        n = len(c_emo_values)
+        slope, r_squared = self._regression(c_emo_values)
+        cee_rows = [r for r in rows if r["cee_window"]]
+        cee_weekly = self._group_by_week(cee_rows, "cee_duration_seconds", agg="count")
+        trend = (
+            "improving"
+            if slope > 0.0001
+            else ("declining" if slope < -0.0001 else "stable")
+        )
+        mean = sum(c_emo_values) / n
+        stats = {
+            "total_measurements": n,
+            "mean_c_emo": round(mean, 4),
+            "std_dev": round(
+                math.sqrt(
+                    sum((v - mean) ** 2 for v in c_emo_values) / max(n - 1, 1)
+                ),
+                4,
+            ),
+            "slope_per_measurement": round(slope, 6),
+            "r_squared": round(r_squared, 4),
+            "total_cees": len(cee_rows),
+            "trend": trend,
+        }
+        return {
+            "report_type": "longitudinal_trends",
+            "user_id": str(user_id),
+            "user_name": name,
+            "period_days": days,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "statistics": stats,
+            "summary": stats,
+            "weekly_c_emo": weekly,
+            "weekly_averages": weekly,
+            "weekly_cee_count": cee_weekly,
+        }
+
+    @staticmethod
+    def _regression(values: List[float]) -> tuple:
+        n = len(values)
+        if n < 2:
+            return 0.0, 0.0
+        x_mean = (n - 1) / 2
+        y_mean = sum(values) / n
+        num = sum((i - x_mean) * (values[i] - y_mean) for i in range(n))
+        den = sum((i - x_mean) ** 2 for i in range(n))
+        ss_y = sum((y - y_mean) ** 2 for y in values)
+        slope = num / den if den != 0 else 0.0
+        r_squared = (num ** 2) / (den * ss_y) if den != 0 and ss_y != 0 else 0.0
+        return slope, r_squared
+
+    def _records_to_weekly(self, rows: List) -> List[Dict[str, Any]]:
+        if self._looks_like_raw_metric_rows(rows):
+            return self._group_by_week(rows, "c_emo")
+        result = []
+        for r in rows or []:
+            result.append({
+                "week": str(r["week"]),
+                "avg": round(self._num(r["avg"] if "avg" in r.keys() else 0), 4),
+                "count": int(r["count"] or 0),
+            })
+        return result
+
+    @staticmethod
+    def _records_to_weekly_counts(rows: List) -> List[Dict[str, Any]]:
+        result = []
+        for r in rows or []:
+            result.append({
+                "week": str(r["week"]),
+                "count": int(r["count"] or 0),
+            })
+        return result
 
     @staticmethod
     def _group_by_week(
