@@ -15905,6 +15905,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       return sum + _insightsBreakthroughsFor(Map<String, dynamic>.from(c));
     });
     final todaySessions = _insightsTodaySessions();
+    final sessionsToday = todaySessions.length;
     final cards = [
       _buildStatCard("Total Clients", _clients.length.toString(), Icons.people,
           const Color(0xFF4361EE), onTap: () {
@@ -15917,7 +15918,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         setState(() => _clientFilterMode = 'HIGH_RISK');
         _tabController.animateTo(0);
       }),
-      _buildStatCard("Sessions Today", todaySessions.length.toString(),
+      _buildStatCard("Sessions Today", sessionsToday.toString(),
           Icons.calendar_today, const Color(0xFF00F5D4), onTap: () {
         _showInsightsMetricSheet(
           title: 'Sessions today',
