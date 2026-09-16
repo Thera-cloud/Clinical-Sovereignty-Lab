@@ -2462,15 +2462,18 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: _Design.bgCard,
         title: const Text('Download My Data', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
-        content: const Text(
-          'This will export all your personal data including:\n\n'
-          '• Profile information\n'
-          '• Session summaries\n'
-          '• Coherence metrics\n'
-          '• Wisdom extractions\n'
-          '• Community attendance records\n'
-          '• Billing history\n\n'
-          'The export will be downloaded as a JSON file.',
+        content: Text(
+          isNativeIOS
+              ? 'This will export your profile, conversation and session history, '
+                  'community records, and billing history as a JSON file.'
+              : 'This will export all your personal data including:\n\n'
+                  '• Profile information\n'
+                  '• Session summaries\n'
+                  '• Coherence metrics\n'
+                  '• Wisdom extractions\n'
+                  '• Community attendance records\n'
+                  '• Billing history\n\n'
+                  'The export will be downloaded as a JSON file.',
           style: TextStyle(color: Colors.white70, fontSize: 14),
         ),
         actions: [
@@ -3281,17 +3284,20 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           // --- Your Tools ---
           _sectionHeader('YOUR TOOLS', Icons.dashboard),
           _settingsCard([
-            _actionRow(Icons.quiz, 'Assessments', 'Take a quiz or self-assessment', () {
+              if (!isNativeIOS)
+                _actionRow(Icons.quiz, 'Assessments', 'Take a quiz or self-assessment', () {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => QuizScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.insights, 'Insight Reports', 'View your wellness insight trends', () {
+              if (!isNativeIOS)
+                _actionRow(Icons.insights, 'Insight Reports', 'View your wellness insight trends', () {
               Navigator.push(context, MaterialPageRoute(
                 builder: (_) => NevedalReportsScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.auto_awesome, 'Weekly Brief', 'Your personalized wellness check-in', () {
+              if (!isNativeIOS)
+                _actionRow(Icons.auto_awesome, 'Weekly Brief', 'Your personalized wellness check-in', () {
               _showWeeklyBrief();
             }),
             _actionRow(Icons.history, 'Memory Search', 'Search past conversations with Nate', () {
@@ -3299,7 +3305,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => SecureSearchScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Saved to your record. Nate uses section 1 plus your self-reported history; address and emergency contacts stay coach-only.', () {
+              if (!isNativeIOS)
+                _actionRow(Icons.assignment_outlined, 'Personal Intake', 'Saved to your record. Nate uses section 1 plus your self-reported history; address and emergency contacts stay coach-only.', () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => IntakeFormScreen(profile: _profile)),
@@ -3505,7 +3512,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
                 child: Text(
-                  'This app is a wellness and coaching companion. It does not diagnose, treat, cure, or prevent any condition, and it is not a medical device.',
+                  'This app is a wellness and coaching companion, not a medical device. It does not diagnose, treat, cure, or prevent any condition. Seek a doctor’s advice in addition to using this app and before making medical decisions.',
                   style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
                 ),
               ),
@@ -4014,8 +4021,8 @@ class _ChangePlanSheet extends StatelessWidget {
                 'Full AI companion — voice & text',
                 '50,000 tokens/month',
                 '\$50 off every coaching session',
-                'Voice tone insights & check-in trends',
-                'Session history & wellness trends',
+                if (!isNativeIOS) 'Voice tone insights & check-in trends',
+                if (!isNativeIOS) 'Session history & wellness trends',
                 'Push notifications & reminders',
               ],
               color: _Design.cyan,
@@ -5206,14 +5213,17 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: _Design.bgCard,
         title: const Text('Download My Data', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
-        content: const Text(
-          'This will export all your personal data including:\n\n'
-          '• Profile information\n'
-          '• Session summaries & coaching records\n'
-          '• Coherence metrics\n'
-          '• Wisdom extractions\n'
-          '• Billing history\n\n'
-          'The export will be downloaded as a JSON file.',
+        content: Text(
+          isNativeIOS
+              ? 'This will export your profile, conversation and coaching records, '
+                  'and billing history as a JSON file.'
+              : 'This will export all your personal data including:\n\n'
+                  '• Profile information\n'
+                  '• Session summaries & coaching records\n'
+                  '• Coherence metrics\n'
+                  '• Wisdom extractions\n'
+                  '• Billing history\n\n'
+                  'The export will be downloaded as a JSON file.',
           style: TextStyle(color: Colors.white70, fontSize: 14),
         ),
         actions: [
@@ -5804,11 +5814,12 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
                 builder: (_) => NightSchoolScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.psychology_alt, 'AI Modes', 'Tri-Corder, Archivist, Guardian, Supervisor, Editor', () {
-              Navigator.push(context, MaterialPageRoute(
-                builder: (_) => AIModesSelectorScreen(sessionId: 'coach_session', profile: _profile),
-              ));
-            }),
+            if (!isNativeIOS)
+              _actionRow(Icons.psychology_alt, 'AI Modes', 'Tri-Corder, Archivist, Guardian, Supervisor, Editor', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => AIModesSelectorScreen(sessionId: 'coach_session', profile: _profile),
+                ));
+              }),
           ]),
           const SizedBox(height: 20),
 
@@ -5892,7 +5903,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
                 child: Text(
-                  'This app is a wellness and coaching companion. It does not diagnose, treat, cure, or prevent any condition, and it is not a medical device.',
+                  'This app is a wellness and coaching companion, not a medical device. It does not diagnose, treat, cure, or prevent any condition. Seek a doctor’s advice in addition to using this app and before making medical decisions.',
                   style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
                 ),
               ),
@@ -6277,80 +6288,111 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
   // --- Static FAQ data ---
   List<Map<String, String>> get _faqs {
     if (widget.role == 'CLIENT') {
-      return const [
+      final faqs = const [
         {
           'q': 'How do I start a conversation with Little Nate?',
-          'a': 'From the main screen, simply type your message in the text box at the bottom and tap send. You can also tap the microphone icon to speak. Nate will respond with text (and voice if enabled).',
+          'a':
+              'From the main screen, simply type your message in the text box at the bottom and tap send. You can also tap the microphone icon to speak. Nate will respond with text (and voice if enabled).',
         },
         {
           'q': 'What voice commands can I use?',
-          'a': '"send message" / "send it" — sends your draft\n"clear message" — clears the draft\n"delete last sentence" / "delete last word" — edits your draft\n"read it back" — reads your current draft aloud\n"replace [text] with [text]" — inline replacement',
+          'a':
+              '"send message" / "send it" — sends your draft\n"clear message" — clears the draft\n"delete last sentence" / "delete last word" — edits your draft\n"read it back" — reads your current draft aloud\n"replace [text] with [text]" — inline replacement',
         },
         {
           'q': 'What do the metrics (Text Sent., GAP, Quantum) mean?',
-          'a': 'Text Sent. (v1) is a lexicon-based text-sentiment score from positive/negative word lists in chat — it is NOT the Nevedal Formula C_emo. GAP measures growth potential. Quantum reflects processing-depth heuristics. Tap the metrics bar for a full breakdown including mood history and session stats.',
+          'a':
+              'Text Sent. (v1) is a lexicon-based text-sentiment score from positive/negative word lists in chat — it is NOT the Nevedal Formula C_emo. GAP measures growth potential. Quantum reflects processing-depth heuristics. Tap the metrics bar for a full breakdown including mood history and session stats.',
         },
         {
           'q': 'How do I enable Avatar Mode?',
-          'a': 'Avatar Mode is available for Sovereign Circle members. On the main screen, look for the Avatar toggle in the top-right area. When enabled, a 3D avatar of Nate will respond with facial expressions that match the conversation.',
+          'a':
+              'Avatar Mode is available for Sovereign Circle members. On the main screen, look for the Avatar toggle in the top-right area. When enabled, a 3D avatar of Nate will respond with facial expressions that match the conversation.',
         },
         {
           'q': 'What is Family Sanctuary and how do I use it?',
-          'a': 'Family Sanctuary lets Sovereign Circle members invite family members to shared sessions. Tap the Family Sanctuary button on your main screen. The Head of Household can invite a spouse (free), first dependent (free), and additional members (\$75/month each).',
+          'a':
+              'Family Sanctuary lets Sovereign Circle members invite family members to shared sessions. Tap the Family Sanctuary button on your main screen. The Head of Household can invite a spouse (free), first dependent (free), and additional members (\$75/month each).',
         },
         {
           'q': 'What are the subscription tiers?',
-          'a': 'Threshold (Trial) — Basic access to Little Nate\nInner Chamber (\$49/month) — Full AI companion with voice and text\nSovereign Circle (\$149/month) — Everything plus Avatar Mode, Family Sanctuary, and priority support',
+          'a':
+              'Threshold (Trial) — Basic access to Little Nate\nInner Chamber (\$49/month) — Full AI companion with voice and text\nSovereign Circle (\$149/month) — Everything plus Avatar Mode, Family Sanctuary, and priority support',
         },
         {
           'q': 'How do I invite a friend?',
-          'a': 'Go to Settings > Share > "Invite a Friend." This opens your phone\'s native share sheet with a pre-written message introducing Little Nate and a download link.',
+          'a':
+              'Go to Settings > Share > "Invite a Friend." This opens your phone\'s native share sheet with a pre-written message introducing Little Nate and a download link.',
         },
         {
           'q': 'How do I delete my account?',
-          'a': 'Go to Settings > Account > "Delete My Account." Type DELETE to confirm. Your data is held for 30 days — if you sign back in during that window, your account is restored. After 30 days, all data is permanently purged.',
+          'a':
+              'Go to Settings > Account > "Delete My Account." Type DELETE to confirm. Your data is held for 30 days — if you sign back in during that window, your account is restored. After 30 days, all data is permanently purged.',
         },
         {
           'q': 'How do I update my profile or preferences?',
-          'a': 'Go to Settings > Profile and tap "Edit" to change your email, phone, emergency contact, or timezone. Under Preferences, toggle notifications and voice mode. All changes save instantly.',
+          'a':
+              'Go to Settings > Profile and tap "Edit" to change your email, phone, emergency contact, or timezone. Under Preferences, toggle notifications and voice mode. All changes save instantly.',
         },
         {
           'q': 'What happens during a crisis alert?',
-          'a': 'If Nate detects signs of crisis, the system activates crisis protocol. You will see emergency contact information: call 988 (Suicide & Crisis Lifeline) or 911. Nate is NOT an emergency service — always reach out to professional help in a crisis.',
+          'a':
+              'If Nate detects signs of crisis, the system activates crisis protocol. You will see emergency contact information: call 988 (Suicide & Crisis Lifeline) or 911. Nate is NOT an emergency service — always reach out to professional help in a crisis.',
         },
         {
           'q': 'What is Tri-Corder mode?',
-          'a': 'Tri-Corder is a deep emotional reflection of your patterns — a reflection tool for your inner world. It examines your insight data, mood history, and behavioral markers to give you a detailed picture of where you are right now. Tap the mode picker icon (brain icon) in the chat bar to activate it.',
+          'a':
+              'Tri-Corder is a deep emotional reflection of your patterns — a reflection tool for your inner world. It examines your insight data, mood history, and behavioral markers to give you a detailed picture of where you are right now. Tap the mode picker icon (brain icon) in the chat bar to activate it.',
         },
         {
           'q': 'What is Archivist mode?',
-          'a': 'Archivist mode weaves your growth journey into a narrative, spotting themes, patterns, and turning points you might miss on your own. It draws from your full conversation history with Nate to tell the story of your growth. Activate it from the mode picker in the chat bar.',
+          'a':
+              'Archivist mode weaves your growth journey into a narrative, spotting themes, patterns, and turning points you might miss on your own. It draws from your full conversation history with Nate to tell the story of your growth. Activate it from the mode picker in the chat bar.',
         },
         {
           'q': 'What is Guardian mode?',
-          'a': 'Guardian mode activates protective monitoring. Nate watches for risk indicators, emotional distress patterns, and safety concerns. It is designed to keep you safe by gently flagging when something feels off. You can turn it on from the mode picker icon in the chat bar.',
+          'a':
+              'Guardian mode activates protective monitoring. Nate watches for risk indicators, emotional distress patterns, and safety concerns. It is designed to keep you safe by gently flagging when something feels off. You can turn it on from the mode picker icon in the chat bar.',
         },
         {
           'q': 'What is Supervisor mode?',
-          'a': 'Supervisor mode reviews your progress with quality oversight — like having a wise mentor looking over your journey. It evaluates growth, identifies areas of strength, and suggests next steps. Activate it from the mode picker in the chat bar.',
+          'a':
+              'Supervisor mode reviews your progress with quality oversight — like having a wise mentor looking over your journey. It evaluates growth, identifies areas of strength, and suggests next steps. Activate it from the mode picker in the chat bar.',
         },
         {
           'q': 'How do I switch between Little Nate modes?',
-          'a': 'Tap the brain/mode icon in the chat input bar (next to the microphone and send buttons). A picker will appear showing all available modes: Tri-Corder, Archivist, Guardian, Supervisor, and Editor. Tap one to activate it. Nate will let you know when the mode is active and when it deactivates.',
+          'a':
+              'Tap the brain/mode icon in the chat input bar (next to the microphone and send buttons). A picker will appear showing all available modes: Tri-Corder, Archivist, Guardian, Supervisor, and Editor. Tap one to activate it. Nate will let you know when the mode is active and when it deactivates.',
         },
         {
           'q': 'How do I read my stats and coherence reports?',
-          'a': 'Your metrics bar shows Text Sent. (v1) — a lexicon-based chat sentiment score (not formula C_emo) — plus GAP and Quantum heuristics. For detailed trends, go to Settings > Your Tools > Insight Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
+          'a':
+              'Your metrics bar shows Text Sent. (v1) — a lexicon-based chat sentiment score (not formula C_emo) — plus GAP and Quantum heuristics. For detailed trends, go to Settings > Your Tools > Insight Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
         },
         {
           'q': 'What is the Sovereign Vault?',
-          'a': 'The Vault is your secure storage space (Inner Chamber and above). You can upload documents, images, and files that Nate can reference in conversations. Tap the paperclip icon in the chat bar to upload files, browse your vault, or import conversations from other AI platforms using Transfer Crystal.',
+          'a':
+              'The Vault is your secure storage space (Inner Chamber and above). You can upload documents, images, and files that Nate can reference in conversations. Tap the paperclip icon in the chat bar to upload files, browse your vault, or import conversations from other AI platforms using Transfer Crystal.',
         },
         {
           'q': 'What is Night School?',
-          'a': 'Night School is how Little Nate learns and grows. Your anonymized interactions help train Nate to be a better companion for everyone. No personal information is used — only patterns and insights. You can learn more in Settings > About.',
+          'a':
+              'Night School is how Little Nate learns and grows. Your anonymized interactions help train Nate to be a better companion for everyone. No personal information is used — only patterns and insights. You can learn more in Settings > About.',
         },
       ];
+      if (!isNativeIOS) return faqs;
+      const hiddenTopics = <String>[
+        'metrics',
+        'tri-corder',
+        'guardian mode',
+        'supervisor mode',
+        'little nate modes',
+        'stats and coherence reports',
+      ];
+      return faqs.where((faq) {
+        final question = faq['q']!.toLowerCase();
+        return !hiddenTopics.any(question.contains);
+      }).toList(growable: false);
     } else {
       return const [
         {
@@ -6747,13 +6789,17 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('1. PRIVATE MEMBERSHIP ASSOCIATION (1st AMENDMENT)',
               'You acknowledge that Sovereign Sanctuary operates as a Private Membership Association under the protections of the First Amendment to the United States Constitution. All interactions within this platform — between you and Little Nate (the AI companion), between you and your assigned coach, and between family members in the Family Sanctuary — are private exercises of speech and association.'),
             _section('2. AI IDENTITY AND LICENSING DISCLOSURE (CA AB 489)',
-              'This app is a wellness and personal-growth tool, not a medical device. "Little Nate" is an artificial intelligence system. Little Nate is NOT a human being, NOT a licensed therapist, NOT a licensed psychologist, and NOT a licensed medical professional of any kind. Neither the AI nor the Sovereign Sanctuary application holds a medical license, therapy license, or counseling credential in any jurisdiction. Little Nate is designed to provide emotional support, self-awareness tools, and coaching companionship — NOT medical advice, clinical diagnoses, treatment plans, or prescriptions. Content is for informational and self-reflection purposes only. Not intended to diagnose, treat, cure, or prevent any condition. If you are in crisis, call 988 or go to the nearest emergency room.'),
+              'This app is a wellness and personal-growth tool, not a medical device. "Little Nate" is an artificial intelligence system. Little Nate is NOT a human being, NOT a licensed therapist, NOT a licensed psychologist, and NOT a licensed medical professional of any kind. Neither the AI nor the Sovereign Sanctuary application holds a medical license, therapy license, or counseling credential in any jurisdiction. Little Nate is designed to provide emotional support, self-awareness tools, and coaching companionship — NOT medical advice, clinical diagnoses, treatment plans, or prescriptions. Content is for informational and self-reflection purposes only. Not intended to diagnose, treat, cure, or prevent any condition. Seek a doctor\'s advice in addition to using this app and before making medical decisions. If you are in crisis, call 988 or go to the nearest emergency room.'),
             _section('3. AUTOMATED PROFILING CONSENT',
-              'This platform utilizes "Automated Profiling" as defined under various state data protection laws. The core function of Sovereign Sanctuary is the continuous analysis of your emotional state through text analysis, voice biometrics, and (where applicable) facial geometry. By proceeding, you explicitly and voluntarily WAIVE any state-level rights to "opt-out" of automated profiling.'),
+              isNativeIOS
+                ? 'On native iOS, conversation text is processed to generate AI wellness responses and safety support. Voice-biometric analysis, facial-geometry analysis, emotional-score dashboards, diagnoses, and medical measurements are not provided in the iOS app.'
+                : 'This platform utilizes "Automated Profiling" as defined under various state data protection laws. The core function of Sovereign Sanctuary is the continuous analysis of your emotional state through text analysis, voice biometrics, and (where applicable) facial geometry. By proceeding, you explicitly and voluntarily WAIVE any state-level rights to "opt-out" of automated profiling.'),
             _section('4. AGE VERIFICATION AND FAMILY ACCOUNTS (CA SB 243)',
               'You affirm that you are at least eighteen (18) years of age. Minors (persons under 18) are strictly prohibited from creating primary accounts. Parents or legal guardians may create a family account and add minors as dependents under the Family Sanctuary feature.'),
             _section('5. TEXAS TRAIGA DISCLOSURE',
-              'Pursuant to Texas law: This practitioner uses Generative Artificial Intelligence in the formulation of guidance plans, session summaries, coaching briefs, emotional coherence assessments, and all analytical outputs.'),
+              isNativeIOS
+                ? 'Pursuant to Texas law: this app uses Generative Artificial Intelligence to produce conversational wellness and coaching responses. Those responses are not medical advice, diagnosis, or treatment.'
+                : 'Pursuant to Texas law: This practitioner uses Generative Artificial Intelligence in the formulation of guidance plans, session summaries, coaching briefs, emotional coherence assessments, and all analytical outputs.'),
             _section('6. CRISIS PROTOCOL',
               'STOP. If you are in crisis, experiencing suicidal ideation, or in immediate danger:\n\n• Call 988 (Suicide & Crisis Lifeline) — available 24/7\n• Call 911 for immediate emergencies\n• Go to your nearest Emergency Room\n\nSovereign Sanctuary is NOT an emergency service.', highlight: true),
             _section('7. ZERO TOLERANCE POLICY',
@@ -6761,7 +6807,9 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('8. PLATFORM IMMUNITY',
               'Sovereign Sanctuary is a Technology Provider, NOT a clinic. Coaches are Independent Practitioners. For claims arising from live coaching sessions, you look solely to the individual Coach.'),
             _section('9. INTELLECTUAL PROPERTY AND PROPRIETARY TECHNOLOGY',
-              'The platform incorporates proprietary algorithms subject to pending US provisional patent applications, including: the Nevedal Formula for Quantum Emotional Coherence, Voice Biometric Extraction, Predictability Model of Behavior, Family System Dynamics analysis, Night School AI training, and CEE Window detection. All algorithmic outputs are proprietary. You may not reproduce, reverse-engineer, or create derivative works from any algorithmic output.'),
+              isNativeIOS
+                ? 'The platform incorporates proprietary AI conversation and personal-growth technology subject to pending US provisional patent applications. No proprietary output presented in the native iOS app is a medical measurement or diagnostic result. You may not reproduce, reverse-engineer, or create derivative works from proprietary technology.'
+                : 'The platform incorporates proprietary algorithms subject to pending US provisional patent applications, including: the Nevedal Formula for Quantum Emotional Coherence, Voice Biometric Extraction, Predictability Model of Behavior, Family System Dynamics analysis, Night School AI training, and CEE Window detection. All algorithmic outputs are proprietary. You may not reproduce, reverse-engineer, or create derivative works from any algorithmic output.'),
             _section('10. ACCEPTABLE USE POLICY',
               'You agree to use Sovereign Sanctuary solely for its intended purpose: personal emotional growth, coaching support, and family wellness.'),
             _section('11. SERVICE AVAILABILITY',
@@ -6770,15 +6818,21 @@ class _LegalAgreementScreen extends StatelessWidget {
             const SizedBox(height: 16),
             _partHeader('PART II — PRIVACY POLICY'),
             _section('12. DATA WE COLLECT',
-              'Account information (name, email, phone, DOB), voice biometric data (pitch, energy, speech rate, pause ratio), facial geometry data (Sovereign Circle only, processed real-time, not stored as raw video), text and conversation data, emotional and analytical data (C_emo scores, CEE events, crisis assessments, PMB profiles), and technical/usage data.'),
+              isNativeIOS
+                ? 'The native iOS app collects account information (name, email, phone, DOB), text and conversation data, voice transcriptions when you use speech input, and technical/usage data. It does not collect voice-biometric measurements or facial-geometry measurements.'
+                : 'Account information (name, email, phone, DOB), voice biometric data (pitch, energy, speech rate, pause ratio), facial geometry data (Sovereign Circle only, processed real-time, not stored as raw video), text and conversation data, emotional and analytical data (C_emo scores, CEE events, crisis assessments, PMB profiles), and technical/usage data.'),
             _section('13. HOW WE PROCESS YOUR DATA',
               'Your conversation text and voice transcriptions are processed by third-party AI services (including xAI/Grok and Microsoft Azure OpenAI, and other configured inference providers). Message content is sent as you type or speak it — including any names, emails, phone numbers, or other identifiers you include. Message content is NOT scrubbed of personal identifiers before AI processing on the primary chat path. Providers operate under enterprise terms that prohibit use of your data to train their general models. Payments processed via Stripe. Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts are stored in our database under hosting-provider disk encryption; they are not wrapped with application-layer AES-256 per message.'),
             _section('14. DATA RETENTION',
               'Active accounts: retained for duration of membership. Deleted accounts: held 30 days then permanently purged. Anonymized aggregate data may be retained indefinitely for research.'),
             _section('15. DATA SHARING',
-              'Your data is NEVER sold. Shared with: (a) xAI (Grok) and Microsoft Azure OpenAI — your conversation text and voice audio for AI-powered wellness responses, under enterprise agreements that prohibit use for model training; (b) your assigned Coach (session summaries); (c) Head of Household (aggregate family metrics, not individual content); (d) law enforcement (only when legally compelled).'),
+              isNativeIOS
+                ? 'Your data is NEVER sold. Shared with: (a) configured enterprise AI providers — your conversation text and voice transcription for AI-powered wellness responses under terms that prohibit use for general-model training; (b) your assigned Coach, where applicable; (c) law enforcement only when legally compelled.'
+                : 'Your data is NEVER sold. Shared with: (a) xAI (Grok) and Microsoft Azure OpenAI — your conversation text and voice audio for AI-powered wellness responses, under enterprise agreements that prohibit use for model training; (b) your assigned Coach (session summaries); (c) Head of Household (aggregate family metrics, not individual content); (d) law enforcement (only when legally compelled).'),
             _section('16. YOUR PRIVACY RIGHTS',
-              'California (CCPA/CPRA): right to know, delete, opt out of sale. Illinois (BIPA): biometric consent provided herein. Texas (CUBI): biometric notification provided. Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island: access, correct, delete, port data. Right to Delete via Settings. Right to Data Export returns available profile, session summaries, and metrics JSON (not a guaranteed full conversation-transcript dump); contact support for additional records as needed.'),
+              isNativeIOS
+                ? 'California (CCPA/CPRA): right to know, delete, and opt out of sale. Virginia, Colorado, Connecticut, Indiana, Kentucky, and Rhode Island: access, correct, delete, and port data. Right to Delete and Right to Data Export are available in Settings; contact support for additional records as needed.'
+                : 'California (CCPA/CPRA): right to know, delete, opt out of sale. Illinois (BIPA): biometric consent provided herein. Texas (CUBI): biometric notification provided. Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island: access, correct, delete, port data. Right to Delete via Settings. Right to Data Export returns available profile, session summaries, and metrics JSON (not a guaranteed full conversation-transcript dump); contact support for additional records as needed.'),
             _section('17. CHILDREN\'S PRIVACY (COPPA)',
               'We do not knowingly collect information from children under 13. Children 13-17 may only access via parent/guardian family account.'),
 
@@ -6787,7 +6841,9 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('18. NATURE OF THE SERVICE',
               'The platform is NOT a licensed mental health provider. Little Nate is NOT a therapist. Coaches are independent practitioners. No doctor-patient or therapist-client privilege applies to AI interactions.'),
             _section('19. INFORMED CONSENT FOR EXPERIMENTAL METHODOLOGY',
-              'The Nevedal Quantum Emotional Coherence framework is a research model and proprietary analytical methodology. It is NOT a clinically validated diagnostic tool. Terms like "quantum" and "coherence" are metaphorical frameworks for organizing biometric data. Chat-path "Text Sent. (v1)" scores are lexicon-based word-list estimates, not Nevedal Formula C_emo and not clinical measurements. Formula C_emo is only computed when biometric inputs are supplied on instrumented live paths.'),
+              isNativeIOS
+                ? 'Native iOS provides conversational wellness and self-reflection tools only. It does not present experimental biometric scores, emotional-coherence measurements, diagnoses, or treatment recommendations.'
+                : 'The Nevedal Quantum Emotional Coherence framework is a research model and proprietary analytical methodology. It is NOT a clinically validated diagnostic tool. Terms like "quantum" and "coherence" are metaphorical frameworks for organizing biometric data. Chat-path "Text Sent. (v1)" scores are lexicon-based word-list estimates, not Nevedal Formula C_emo and not clinical measurements. Formula C_emo is only computed when biometric inputs are supplied on instrumented live paths.'),
             _section('20. ASSUMPTION OF EMOTIONAL RISK',
               'Emotional exploration carries inherent risk. Deep self-reflection, trauma processing, and confrontation of emotional patterns may cause temporary distress. You voluntarily assume this risk.'),
             _section('21. COACH RELATIONSHIP BOUNDARIES',
@@ -6796,7 +6852,9 @@ class _LegalAgreementScreen extends StatelessWidget {
             const SizedBox(height: 16),
             _partHeader('PART IV — PATENT AND PROPRIETARY TECHNOLOGY NOTICE'),
             _section('22. PATENT PENDING TECHNOLOGY',
-              'Technology covered by provisional patent applications includes: The Nevedal Formula (C_emo calculation), multi-modal biometric extraction, real-time emotional coherence scoring, CEE Window detection, crisis perception modeling, reactivity signature classification, family system dynamics, ventriloquism detection, Night School AI learning, and Judge Nate adversarial testing.'),
+              isNativeIOS
+                ? 'Technology used by the native iOS experience includes patent-pending AI conversation, personal-growth, family-support, and coaching systems. Patent-pending status is not a claim of medical clearance or clinical validation.'
+                : 'Technology covered by provisional patent applications includes: The Nevedal Formula (C_emo calculation), multi-modal biometric extraction, real-time emotional coherence scoring, CEE Window detection, crisis perception modeling, reactivity signature classification, family system dynamics, ventriloquism detection, Night School AI learning, and Judge Nate adversarial testing.'),
             _section('23. RESTRICTIONS',
               'Unauthorized use, reproduction, or reverse-engineering of patented technology may result in civil and criminal penalties.'),
             _section('24. RESEARCH PARTICIPATION',

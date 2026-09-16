@@ -569,10 +569,10 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                     color: _D.cyan,
                     features: [
                       '50,000 AI tokens/month',
-                      'Voice tone insights & check-in trends',
+                      if (!isNativeIOS) 'Voice tone insights & check-in trends',
                       'Family Sanctuary access',
                       '1 GB Legacy Vault storage',
-                      'Session history & wellness trends',
+                      if (!isNativeIOS) 'Session history & wellness trends',
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -629,7 +629,8 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                   const SizedBox(height: 12),
                   const Text(
                     'Sovereign Sanctuary is a wellness and coaching companion. '
-                    'It does not diagnose, treat, or replace professional care.',
+                    'It does not diagnose, treat, or replace professional care. '
+                    'Seek a doctor’s advice before making medical decisions.',
                     style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.4),
                     textAlign: TextAlign.center,
                   ),
@@ -797,11 +798,11 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
   }
 
   Widget _buildComparisonTable() {
-    const features = [
+    final features = [
       'AI Tokens/mo',
       'AI Minutes',
       'Voice + Text',
-      'Voice tone insights',
+      if (!isNativeIOS) 'Voice tone insights',
       'Family Sanctuary',
       'Me-2-Me',
       'Legacy Vault',

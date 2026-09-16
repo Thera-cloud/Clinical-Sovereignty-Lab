@@ -52,6 +52,10 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
   @override
   void initState() {
     super.initState();
+    if (_isNativeIOS) {
+      _loading = false;
+      return;
+    }
     _loadReport();
   }
 
@@ -133,6 +137,25 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isNativeIOS) {
+      return Scaffold(
+        backgroundColor: _Design.bgVoid,
+        appBar: AppBar(
+          backgroundColor: _Design.bgChamber,
+          iconTheme: const IconThemeData(color: _Design.gold),
+          title: const Text('Reports',
+              style: TextStyle(color: _Design.textPrimary)),
+        ),
+        body: const SafeArea(
+          child: Center(
+            child: Text(
+              'This feature is not available on iOS.',
+              style: TextStyle(color: _Design.textSecondary),
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: _Design.bgVoid,
       appBar: AppBar(
@@ -902,7 +925,8 @@ class _MultiLinePainter extends CustomPainter {
   void _drawLine(Canvas canvas, List<double> vals, Color color,
       double left, double top, double width, double height, int maxPoints) {
     if (vals.length < 2) return;
-    final paint = Paint()..color = color..strokeWidth = 2..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
+    final paint = Paint()..color = color..strokeWidth = 2
+      ..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
     final path = Path();
     for (var i = 0; i < vals.length; i++) {
       final x = left + (i / (maxPoints - 1)) * width;

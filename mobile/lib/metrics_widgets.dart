@@ -1,7 +1,7 @@
 // =============================================================================
 // LITTLE NATE - METRICS VIEW COMPONENTS
 // Version: 1.0 | January 23, 2026
-// 
+//
 // Reusable widgets for displaying Nevedal metrics, mood history, and risk levels.
 // Import into main.dart and use across Client, Coach, and Admin screens.
 // =============================================================================
@@ -154,6 +154,7 @@ class NevedalMetricsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_isNativeIOS) return const SizedBox.shrink();
     final double gaugeSize = compact ? 70.0 : 90.0;
     
     return Container(
@@ -329,6 +330,7 @@ class MoodHistoryChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_isNativeIOS) return const SizedBox.shrink();
     if (moodHistory.isEmpty) {
       return Container(
         height: height,
@@ -512,6 +514,7 @@ class MoodIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_isNativeIOS) return const SizedBox.shrink();
     final moodData = _getMoodData(mood);
     
     return Container(
@@ -607,6 +610,7 @@ class RiskBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_isNativeIOS) return const SizedBox.shrink();
     final data = _getRiskData(riskLevel);
     
     return Container(
@@ -1102,6 +1106,19 @@ class _MetricsScreenState extends State<MetricsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isNativeIOS) {
+      return const Scaffold(
+        backgroundColor: SovereignColors.background,
+        body: SafeArea(
+          child: Center(
+            child: Text(
+              'This feature is not available on iOS.',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: SovereignColors.background,
       appBar: AppBar(

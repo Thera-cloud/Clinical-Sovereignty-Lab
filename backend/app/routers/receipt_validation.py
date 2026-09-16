@@ -97,7 +97,9 @@ async def _post_apple_verify(client: httpx.AsyncClient, url: str, payload: Dict[
 async def verify_apple_receipt(body: AppleReceiptRequest, request: Request,
                                current_user: Dict = Depends(get_current_user)):
     """Validate an Apple StoreKit receipt and activate the subscription."""
-    auth_uid = current_user.get("user_id", current_user.get("username", ""))
+    # Bridge-token profiles may carry hardware_id in user_id. Purchases are
+    # submitted and persisted by canonical username.
+    auth_uid = current_user.get("username") or current_user.get("user_id", "")
     if body.user_id and body.user_id != auth_uid:
         logger.warning("Apple receipt user_id mismatch: body=%s auth=%s", body.user_id, auth_uid)
         raise HTTPException(status_code=403, detail="user_id does not match authenticated user")
@@ -105,12 +107,19 @@ async def verify_apple_receipt(body: AppleReceiptRequest, request: Request,
 
     import os
     shared_secret = os.getenv("APPLE_SHARED_SECRET", "")
+    if body.product_id in PRODUCT_TO_PLAN and not shared_secret:
+        logger.error("Apple subscription verification unavailable: APPLE_SHARED_SECRET is missing")
+        raise HTTPException(
+            status_code=503,
+            detail="Apple subscription verification is temporarily unavailable",
+        )
 
     payload = {
         "receipt-data": body.receipt_data,
-        "password": shared_secret,
         "exclude-old-transactions": True,
     }
+    if shared_secret:
+        payload["password"] = shared_secret
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         data = await _post_apple_verify(client, APPLE_PRODUCTION_URL, payload)
@@ -161,7 +170,7 @@ async def verify_apple_receipt(body: AppleReceiptRequest, request: Request,
 async def verify_google_receipt(body: GoogleReceiptRequest, request: Request,
                                 current_user: Dict = Depends(get_current_user)):
     """Validate a Google Play Billing purchase and activate the subscription."""
-    auth_uid = current_user.get("user_id", current_user.get("username", ""))
+    auth_uid = current_user.get("username") or current_user.get("user_id", "")
     if body.user_id and body.user_id != auth_uid:
         logger.warning("Google receipt user_id mismatch: body=%s auth=%s", body.user_id, auth_uid)
         raise HTTPException(status_code=403, detail="user_id does not match authenticated user")

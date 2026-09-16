@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:http/http.dart' as http;
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
 import 'package:logger/logger.dart';
 
 import '../config/app_config.dart';
@@ -15,10 +16,14 @@ class IapService {
   static final IapService instance = IapService._();
 
   final _logger = Logger();
-  final InAppPurchase _iap = InAppPurchase.instance;
+  InAppPurchase? _iapClient;
+  Future<void>? _initializing;
+  InAppPurchase get _iap => _iapClient!;
 
   StreamSubscription<List<PurchaseDetails>>? _sub;
   final Map<String, ProductDetails> _products = {};
+  final Map<String, PurchaseDetails> _deferredPurchases = {};
+  Future<void> _purchaseEventChain = Future<void>.value();
   Completer<PurchaseStatusResult>? _pending;
   String? _pendingProductId;
   String? _userId;
@@ -51,16 +56,48 @@ class IapService {
 
   Future<void> initialize() async {
     if (!isNativeIOS || _ready) return;
+    final activeInitialization = _initializing;
+    if (activeInitialization != null) {
+      await activeInitialization;
+      return;
+    }
+    final initialization = _initializeStoreKit();
+    _initializing = initialization;
+    try {
+      await initialization;
+    } finally {
+      if (!_ready) _initializing = null;
+    }
+  }
+
+  Future<void> _initializeStoreKit() async {
+    // The backend validates App Store receipts with verifyReceipt, which
+    // requires the base64 app receipt exposed by StoreKit 1. This must finish
+    // before InAppPurchase.instance registers the platform implementation.
+    await InAppPurchaseStoreKitPlatform.enableStoreKit1();
+    _iapClient ??= InAppPurchase.instance;
     final available = await _iap.isAvailable();
     if (!available) {
       _logger.w('IapService: StoreKit unavailable');
       return;
     }
     _sub ??= _iap.purchaseStream.listen(
-      _onPurchases,
+      (purchases) {
+        // StoreKit can replay unfinished transactions at launch. Process every
+        // batch serially so verification and completePurchase never race.
+        _purchaseEventChain = _purchaseEventChain
+            .then((_) => _onPurchases(purchases))
+            .catchError((Object e, StackTrace st) {
+        _logger.e('IapService: purchase processing failed',
+              error: e, stackTrace: st);
+          _failPending('The App Store purchase could not be finalized. '
+              'Please tap Restore Purchases and try again.');
+        });
+      },
       onError: (Object e) {
         _logger.e('IapService: purchase stream error', error: e);
-        _failPending(e.toString());
+        _failPending('The App Store connection was interrupted. '
+            'Please tap Restore Purchases and try again.');
       },
     );
     await loadProducts();
@@ -83,6 +120,10 @@ class IapService {
     required String userId,
     required String authToken,
   }) async {
+    // Set auth before subscribing to StoreKit. StoreKit may immediately replay
+    // an unfinished transaction that must be verified and completed first.
+    _userId = userId;
+    _authToken = authToken;
     await initialize();
     if (!_ready) {
       return PurchaseStatusResult(
@@ -104,6 +145,10 @@ class IapService {
             'Use Restore Purchases if you already bought it.',
       );
     }
+    await _purchaseEventChain;
+    final recovered = await _retryDeferredPurchase(productId);
+    if (recovered != null) return recovered;
+
     if (_pending != null && !_pending!.isCompleted) {
       return PurchaseStatusResult(
         productId: productId,
@@ -112,10 +157,10 @@ class IapService {
       );
     }
 
-    _userId = userId;
-    _authToken = authToken;
     _pendingProductId = productId;
-    _pending = Completer<PurchaseStatusResult>();
+    final pending = Completer<PurchaseStatusResult>();
+    _pending = pending;
+    var recoveringDuplicate = false;
 
     final param = PurchaseParam(productDetails: details);
     final isSub = PaymentService.subscriptionIds.contains(productId);
@@ -131,19 +176,43 @@ class IapService {
         ));
       }
     } catch (e) {
-      return _completePending(PurchaseStatusResult(
+      if (_isDuplicateTransactionError(e)) {
+        recoveringDuplicate = true;
+        _logger.w('IapService: recovering unfinished $productId transaction');
+        try {
+          // This re-emits the existing StoreKit transaction through the
+          // purchase stream, where it is verified and completed.
+          await _iap.restorePurchases();
+        } catch (restoreError, st) {
+          _logger.e('IapService: duplicate recovery failed',
+              error: restoreError, stackTrace: st);
+          return _completePending(PurchaseStatusResult(
         productId: productId,
         status: PaymentStatus.error,
-        error: e.toString(),
-      ));
+        error: 'A previous purchase is still being finalized. '
+                'Please tap Restore Purchases, then try again.',
+          ));
+        }
+      } else {
+        return _completePending(PurchaseStatusResult(
+          productId: productId,
+          status: PaymentStatus.error,
+          error: _safePurchaseError(e),
+        ));
+      }
     }
 
-    return _pending!.future.timeout(
-      const Duration(minutes: 3),
+    return pending.future.timeout(
+      recoveringDuplicate
+          ? const Duration(seconds: 30)
+          : const Duration(minutes: 3),
       onTimeout: () => _completePending(PurchaseStatusResult(
         productId: productId,
         status: PaymentStatus.error,
-        error: 'Purchase timed out',
+        error: recoveringDuplicate
+            ? 'A previous purchase is still being finalized. '
+                'Please tap Restore Purchases, then try again.'
+            : 'Purchase timed out',
       )),
     );
   }
@@ -162,6 +231,13 @@ class IapService {
         error: 'In-App Purchase is unavailable on this device',
       );
     }
+    await _purchaseEventChain;
+    for (final productId in _deferredPurchases.keys.toList()) {
+      final recovered = await _retryDeferredPurchase(productId);
+      if (recovered != null && recovered.status != PaymentStatus.error) {
+        return recovered;
+      }
+    }
     if (_pending != null && !_pending!.isCompleted) {
       return PurchaseStatusResult(
         productId: 'restore',
@@ -170,17 +246,18 @@ class IapService {
       );
     }
     _pendingProductId = 'restore';
-    _pending = Completer<PurchaseStatusResult>();
+    final pending = Completer<PurchaseStatusResult>();
+    _pending = pending;
     try {
       await _iap.restorePurchases();
     } catch (e) {
       return _completePending(PurchaseStatusResult(
         productId: 'restore',
         status: PaymentStatus.error,
-        error: e.toString(),
+        error: _safePurchaseError(e),
       ));
     }
-    return _pending!.future.timeout(
+    return pending.future.timeout(
       const Duration(seconds: 25),
       onTimeout: () => _completePending(PurchaseStatusResult(
         productId: 'restore',
@@ -194,16 +271,17 @@ class IapService {
     for (final p in purchases) {
       if (p.status == PurchaseStatus.pending) continue;
       if (p.status == PurchaseStatus.canceled) {
-        _failPending('Purchase canceled', canceled: true);
+        _failPendingForProduct(p.productID, 'Purchase canceled', canceled: true);
         if (p.pendingCompletePurchase) {
-          await _iap.completePurchase(p);
+          await _finishPurchase(p);
         }
         continue;
       }
       if (p.status == PurchaseStatus.error) {
-        _failPending(p.error?.message ?? 'Purchase failed');
+        _failPendingForProduct(
+            p.productID, p.error?.message ?? 'Purchase failed');
         if (p.pendingCompletePurchase) {
-          await _iap.completePurchase(p);
+          await _finishPurchase(p);
         }
         continue;
       }
@@ -211,20 +289,83 @@ class IapService {
           p.status == PurchaseStatus.restored) {
         final verified = await _verifyApple(p);
         if (verified && p.pendingCompletePurchase) {
-          await _iap.completePurchase(p);
+          await _finishPurchase(p);
         }
         if (verified) {
-          _completePending(PurchaseStatusResult(
+          _deferredPurchases.remove(p.productID);
+          _completePendingForProduct(
+              p.productID,
+              PurchaseStatusResult(
             productId: p.productID,
             status: p.status == PurchaseStatus.restored
                 ? PaymentStatus.restored
                 : PaymentStatus.purchased,
           ));
         } else {
-          _failPending('Receipt verification failed');
+          // Finish failed subscription transactions so StoreKit cannot strand
+          // the product in a duplicate-purchase state. Active subscriptions
+          // remain recoverable through Restore Purchases. Consumables stay
+          // deferred until their entitlement can be safely credited.
+          if (PaymentService.subscriptionIds.contains(p.productID) &&
+              p.pendingCompletePurchase) {
+            await _finishPurchase(p);
+          } else {
+            _deferredPurchases[p.productID] = p;
+          }
+          _failPendingForProduct(
+            p.productID,
+            'Your purchase is pending verification. It has not been lost. '
+            'Please tap Restore Purchases to finish activation.',
+          );
         }
       }
     }
+  }
+
+  Future<PurchaseStatusResult?> _retryDeferredPurchase(String productId) async {
+    final purchase = _deferredPurchases[productId];
+    if (purchase == null) return null;
+    final verified = await _verifyApple(purchase);
+    if (!verified) {
+      return PurchaseStatusResult(
+        productId: productId,
+        status: PaymentStatus.error,
+        error: 'Your previous purchase is still pending verification. '
+            'Please tap Restore Purchases to finish activation.',
+      );
+    }
+    if (purchase.pendingCompletePurchase) {
+      await _finishPurchase(purchase);
+    }
+    _deferredPurchases.remove(productId);
+    return PurchaseStatusResult(
+      productId: productId,
+      status: purchase.status == PurchaseStatus.restored
+          ? PaymentStatus.restored
+          : PaymentStatus.purchased,
+    );
+  }
+
+  Future<void> _finishPurchase(PurchaseDetails purchase) async {
+    try {
+      await _iap.completePurchase(purchase);
+    } catch (e, st) {
+      _logger.e('IapService: completePurchase failed for ${purchase.productID}',
+          error: e, stackTrace: st);
+      rethrow;
+    }
+  }
+
+  bool _isDuplicateTransactionError(Object error) =>
+      error.toString().contains('storekit_duplicate_product_object') ||
+      error.toString().contains('pending transaction for the same product');
+
+  String _safePurchaseError(Object error) {
+    if (_isDuplicateTransactionError(error)) {
+      return 'A previous purchase is still being finalized. '
+          'Please tap Restore Purchases, then try again.';
+    }
+    return 'The App Store could not complete this purchase. Please try again.';
   }
 
   Future<bool> _verifyApple(PurchaseDetails p) async {
@@ -278,11 +419,25 @@ class IapService {
     return result;
   }
 
+  void _completePendingForProduct(
+      String productId, PurchaseStatusResult result) {
+    if (_pendingProductId == 'restore' || _pendingProductId == productId) {
+      _completePending(result);
+    }
+  }
+
   void _failPending(String message, {bool canceled = false}) {
     _completePending(PurchaseStatusResult(
       productId: _pendingProductId ?? '',
       status: canceled ? PaymentStatus.canceled : PaymentStatus.error,
       error: message,
     ));
+  }
+
+  void _failPendingForProduct(String productId, String message,
+      {bool canceled = false}) {
+    if (_pendingProductId == 'restore' || _pendingProductId == productId) {
+      _failPending(message, canceled: canceled);
+    }
   }
 }

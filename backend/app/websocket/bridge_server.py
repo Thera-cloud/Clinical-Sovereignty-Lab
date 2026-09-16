@@ -8995,6 +8995,11 @@ class AzureCortex:
 
     async def _process_interaction_impl(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None, depth_mode: Optional[str] = None):
         uid = profile.get("hardware_id", "UNKNOWN")
+        # QUANTUM-CRYSTAL-ARCH — feature-flagged native iOS wellness-only mode.
+        _ios_wellness_mode = (
+            os.getenv("ENABLE_IOS_WELLNESS_MODE", "true").lower() in ("1", "true", "yes")
+            and profile.get("_ios_wellness_mode") is True
+        )
         self._last_avatar_user_text[uid] = user_text  # SOVEREIGN-VOICE
         # QUANTUM-CRYSTAL-ARCH: scope all _send() emissions to the originating
         # context (e.g. "dojo" iframe). Without this filter, both parent and
@@ -10599,11 +10604,20 @@ class AzureCortex:
                         )
             except Exception as _ttc_pre_err:
                 print(f">>> [THERAPEUTIC-CTRL] pre-flight failed for {uid}: {_ttc_pre_err}")
+            # QUANTUM-CRYSTAL-ARCH — append after clinical enrichment so iOS policy wins.
+            if _ios_wellness_mode:
+                from app.services.ios_wellness_guard import IOS_WELLNESS_PROMPT
+                _ios_suffix = "\n\n---\n" + IOS_WELLNESS_PROMPT
+                _ios_base_cap = max(0, _SP_CAP - len(_ios_suffix))
+                system_prompt = system_prompt[:_ios_base_cap] + _ios_suffix
             if _sse_panel_ctx:
                 _len_cap = max(int(_len_cap or 0), 1500)  # QUANTUM-CRYSTAL-ARCH — protocol E room
             # QUANTUM-CRYSTAL-ARCH: buffer until audit unless stream-before-audit (Faster default).
             _stream_before_audit = bool(_stream_before_audit_fn(_depth))
             _buffer_for_therapeutic_audit = bool(_ttc_audit_meta) and not _stream_before_audit
+            # QUANTUM-CRYSTAL-ARCH — native iOS must never stream before final safety guard.
+            if _ios_wellness_mode:
+                _buffer_for_therapeutic_audit = True
             if _buffer_for_therapeutic_audit:
                 await self._send_nate_thinking(uid, client_context=_ctx, turn_id=_turn_id)
             full_response = ""
@@ -11031,6 +11045,26 @@ class AzureCortex:
                         ))
                     except Exception as _sd_err:
                         print(f">>> [STANCE] telemetry error (non-fatal): {_sd_err}")
+
+            # QUANTUM-CRYSTAL-ARCH — deterministic final iOS medical/crisis guard.
+            if _ios_wellness_mode and full_response.strip():
+                try:
+                    from app.services.ios_wellness_guard import enforce_ios_wellness_response
+                    _ios_guarded = enforce_ios_wellness_response(
+                        _qg_verbatim_user_text, full_response
+                    )
+                    if _ios_guarded != full_response:
+                        full_response = _ios_guarded
+                        _audit_rewrite_pending = True
+                        _already_streamed = False
+                except Exception as _ios_guard_err:
+                    print(f">>> [IOS-WELLNESS] fail-closed for {uid}: {_ios_guard_err}")
+                    full_response = (
+                        "I can support general wellness reflection, but I cannot "
+                        "provide medical conclusions or care instructions. Seek a "
+                        "doctor's advice before making medical decisions."
+                    )
+                    _already_streamed = False
 
             # SOVEREIGN-VOICE — emit completed provider text; C1 defers until after audit when buffering (any provider).
             _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
@@ -14844,6 +14878,10 @@ async def handle_client(websocket, path=None):
                         }))
                     else:
                         text = d.get("nate_query", d.get("text", ""))
+                        # QUANTUM-CRYSTAL-ARCH — isolate iOS marker from registry-backed profile.
+                        if d.get("client_platform") == "ios":
+                            current_profile = dict(current_profile)
+                            current_profile["_ios_wellness_mode"] = True
                         _depth_mode = d.get("depth_mode") or d.get("chat_depth") or "extra"  # QUANTUM-CRYSTAL-ARCH
                         # #region agent log
                         _dbg_ts = datetime.datetime.now().isoformat()

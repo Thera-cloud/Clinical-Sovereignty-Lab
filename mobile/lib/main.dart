@@ -193,10 +193,6 @@ void main() {
   // ── Home Screen Widget initialization ──
   NateWidgetService.initialize();
 
-  if (isNativeIOS) {
-    IapService.instance.initialize();
-  }
-
   // ── HIVE DEFENSE v4.3: Device Shield — run full security check on launch ──
   if (!kIsWeb) {
     DeviceShield.instance.runFullCheck().then((report) {
@@ -760,7 +756,9 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                 value: _termsAgreed,
                 onChanged: (v) => setState(() => _termsAgreed = v ?? false),
                 label: 'I have read and agree to the ',
-                linkText: 'Terms of Use & Therapeutic Waiver',
+                linkText: isNativeIOS
+                    ? 'Terms of Use & Wellness Notice'
+                    : 'Terms of Use & Therapeutic Waiver',
                 url: 'https://app.sovereignsanctuary.net/terms.html',
               ),
               const SizedBox(height: 10),
@@ -1207,7 +1205,7 @@ class HardwareIdentity {
           return jsonDecode(profileRaw);
         } else {
           debugLog("!!! [IDENTITY] Biometric Auth Failed or Cancelled.");
-          // Security Choice: Do we clear session on failed bio? 
+          // Security Choice: Do we clear session on failed bio?
           // For now, return null but keep session (user can retry).
           return null; 
         }
@@ -1601,8 +1599,12 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
               const SizedBox(height: 16),
               _consentBullet(Icons.chat_bubble_outline, "Your Messages",
                 "Text messages and voice transcriptions are sent to Microsoft Azure OpenAI to generate Little Nate's responses."),
-              _consentBullet(Icons.mic_outlined, "Voice Biometrics",
+              if (!isNativeIOS)
+                _consentBullet(Icons.mic_outlined, "Voice Biometrics",
                 "Voice features (pitch, energy, speech rate, pause ratio) are analyzed locally and sent to our secure server for emotional coherence scoring."),
+              if (isNativeIOS)
+                _consentBullet(Icons.info_outline, "Important",
+                    "Little Nate provides self-reflection and coaching support, not medical advice, diagnosis, treatment, or clinical health measurements. Seek a doctor's advice in addition to using this app and before making medical decisions."),
               _consentBullet(Icons.lock_outline, "Data Protection",
                 "Data is encrypted in transit (TLS 1.2+). Selected credentials are encrypted at the application layer. Conversation transcripts are stored in our database under hosting-provider disk encryption — not as an application-layer AES-256 wrap of each message. AI providers process messages under their enterprise terms; your data is NOT used to train their general models."),
               _consentBullet(Icons.delete_outline, "Your Rights",
@@ -1739,7 +1741,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
       _bindSocketListeners();
       if (mounted) setState(() => _connectionStatus = "ONLINE (SECURE)");
       _addSystemMsg("Neural Link Established.");
-      if (!_nevedalReady) {
+      if (!isNativeIOS && !_nevedalReady) {
         _nevedalReady = true;
         _nevedal.initialize(
           socket: existingHub,
@@ -1865,7 +1867,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
         setState(() => _connectionStatus = "ONLINE (SECURE)");
         _addSystemMsg("Neural Link Established.");
 
-        if (_socket != null && !_nevedalReady) {
+        if (!isNativeIOS && _socket != null && !_nevedalReady) {
           _nevedalReady = true;
           final sessionId = data['session_id'] as String? ??
               'session_${DateTime.now().millisecondsSinceEpoch}';
@@ -1968,19 +1970,21 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
          final payload = data['payload'];
          if (payload != null) {
            _audio.processAudioChunk(payload);
-           try {
+          if (!isNativeIOS) {
+            try {
              final bytes = base64Decode(payload as String);
              _nevedal.processNateAudio(bytes);
            } catch (_) {}
          }
-         Future.delayed(const Duration(milliseconds: 200), () {
+        }
+        Future.delayed(const Duration(milliseconds: 200), () {
            if (mounted) setState(() => _isTalking = false);
          });
       }
-      else if (data['type'] == 'nevedal_state') {
+      else if (!isNativeIOS && data['type'] == 'nevedal_state') {
         _nevedal.handleServerUpdate(data['data'] ?? data);
       }
-      else if (data['type'] == 'metrics_update') {
+      else if (!isNativeIOS && data['type'] == 'metrics_update') {
         debugLog('>>> METRICS: Real-time update received');
         setState(() {
           final metrics = data['metrics'];
@@ -2126,6 +2130,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
       "type": "nate_query", 
       "nate_query": text,
       "modality": "General",
+      "client_platform": isNativeIOS ? "ios" : "other",
       "depth_mode": panelDepth ? "extra" : "faster",
     }));
 
@@ -6202,9 +6207,11 @@ void _syncSanctuaryState() {
               const Divider(color: Colors.white10, height: 24),
               const Text("Membership Tiers", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600, fontSize: 14)),
               const SizedBox(height: 8),
-              _costRow("Threshold (Trial)", "Free 14 days", "50K tokens, 300 AI min"),
-              _costRow("Inner Chamber", "\$49/mo", "Yearly: \$490 (17% savings)"),
-              _costRow("Sovereign Circle", "\$149/mo", "Yearly: \$1,490 (17% savings)"),
+              _costRow("Threshold (Trial)", "Free 7 days", "10K tokens, 30 AI min"),
+              _costRow("Inner Chamber", "\$49/mo",
+                  isNativeIOS ? "Monthly subscription" : "Yearly: \$490 (17% savings)"),
+              _costRow("Sovereign Circle", "\$149/mo",
+                  isNativeIOS ? "6-month option: \$749" : "Yearly: \$1,490 (17% savings)"),
               if (!isNativeIOS) ...[
                 const Divider(color: Colors.white10, height: 24),
                 const Text("Payment Methods", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600, fontSize: 14)),
@@ -8190,10 +8197,11 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                 ),
                 const SizedBox(height: 20),
 
-                _buildGateButton(
-                  "ADMINISTRATION", "System Control", Icons.security, const Color(0xFFFF006E),
-                  () => _showAdminGateDialog()
-                ),
+                if (!isNativeIOS)
+                  _buildGateButton(
+                    "ADMINISTRATION", "System Control", Icons.security, const Color(0xFFFF006E),
+                    () => _showAdminGateDialog()
+                  ),
               ]
               // =============================================================
               // DEV / LOCALHOST MODE — show all buttons (original behavior)
@@ -8211,10 +8219,11 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
                 ),
                 const SizedBox(height: 20),
 
-                _buildGateButton(
-                  "ADMIN ACCESS", "System Control", Icons.security, const Color(0xFFFF006E),
-                  () => _showLoginDialog("ADMIN")
-                ),
+                if (!isNativeIOS)
+                  _buildGateButton(
+                    "ADMIN ACCESS", "System Control", Icons.security, const Color(0xFFFF006E),
+                    () => _showLoginDialog("ADMIN")
+                  ),
               ],
 
               const SizedBox(height: 40),
@@ -9340,10 +9349,16 @@ class _SignUpWizardState extends State<SignUpWizard> {
             "THRESHOLD (Trial)",
             "TRIAL",
             "Free / 7 days",
-            "Explore Little Nate with limited AI conversations and basic tracking.",
+            isNativeIOS
+                ? "Explore Little Nate with limited AI conversations and self-reflection tools."
+                : "Explore Little Nate with limited AI conversations and basic tracking.",
             Icons.explore,
             Colors.blueAccent,
-            ["Limited AI conversations", "Basic emotional tracking", "7-day trial period"],
+            [
+              "Limited AI conversations",
+              isNativeIOS ? "Self-reflection tools" : "Basic emotional tracking",
+              "7-day trial period"
+            ],
           ),
           // Paid tiers hidden on native iOS — Apple Guideline 3.1.1 requires IAP.
           // Users register free and upgrade via In-App Purchase after login.
@@ -11025,17 +11040,20 @@ class SovereignCovenantDoc extends StatelessWidget {
           padding: const EdgeInsets.all(16), 
           decoration: BoxDecoration(border: Border.all(color: Colors.white24), color: Colors.white.withOpacity(0.05)),
           child: SingleChildScrollView(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _Header("1. PRIVATE MEMBERSHIP (1st AMENDMENT)"),
               Text("You acknowledge this is a Private Membership Association operating under the First Amendment. Interactions are private exercises of speech.", style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("2. AI IDENTITY & LICENSING (CA AB 489)"),
-              Text("This app is a wellness and personal-growth tool, not a medical device. DISCLOSURE: 'Little Nate' is an AI, NOT a human. Neither the AI nor the App holds a medical license. Do not form a 'reasonable belief' that you are interacting with a licensed healthcare professional.", style: TextStyle(color: Colors.white70)),
+              Text("This app is a wellness and personal-growth tool, not a medical device. DISCLOSURE: 'Little Nate' is an AI, NOT a human. Neither the AI nor the App holds a medical license. Little Nate does not provide medical advice, diagnosis, or treatment. Seek a doctor's advice in addition to using this app and before making medical decisions.", style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("3. AUTOMATED PROFILING CONSENT"),
-              Text("This system uses 'Automated Profiling'. By proceeding, you explicitly WAIVE any state-level rights (e.g., IN, KY, RI) to 'opt-out' of profiling, as it is the core function of this service.", style: TextStyle(color: Colors.white70)),
+              Text(isNativeIOS
+                ? "On native iOS, conversation text is processed to generate AI wellness responses and safety support. Biometric measurements, diagnoses, and treatment recommendations are not provided."
+                : "This system uses 'Automated Profiling'. By proceeding, you explicitly WAIVE any state-level rights (e.g., IN, KY, RI) to 'opt-out' of profiling, as it is the core function of this service.",
+                style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("4. AGE & FAMILY ACCOUNTS (CA SB 243)"),
@@ -11043,7 +11061,10 @@ class SovereignCovenantDoc extends StatelessWidget {
               SizedBox(height: 15),
               
               _Header("5. TEXAS 'TRAIGA' DISCLOSURE"),
-              Text("Pursuant to Texas law: This practitioner uses Generative AI in the formulation of guidance plans.", style: TextStyle(color: Colors.white70)),
+              Text(isNativeIOS
+                ? "Pursuant to Texas law: this app uses Generative AI to produce conversational wellness and coaching responses. Those responses are not medical advice, diagnosis, or treatment."
+                : "Pursuant to Texas law: This practitioner uses Generative AI in the formulation of guidance plans.",
+                style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("6. CRISIS PROTOCOL"),
@@ -11058,8 +11079,11 @@ class SovereignCovenantDoc extends StatelessWidget {
               Text("Sovereign Sanctuary is a Technology Provider, not a Clinic. Coaches are Independent Practitioners. You look solely to the Coach for claims arising from live sessions.", style: TextStyle(color: Colors.amber)),
               SizedBox(height: 15),
               
-              _Header("9. BIOMETRIC DATA & AI DATA SHARING"),
-              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. AI DATA SHARING: Your text messages and voice transcriptions are sent to third-party AI providers (including xAI/Grok and Microsoft Azure OpenAI, and other configured inference providers) to generate AI companion responses. Your data is NOT used to train their general models. See our Privacy Policy Section 13a for full details.\n3. DATA SENT: Conversation text and session context as you type or speak them — including any names, emails, phone numbers, or other identifiers you include in messages. Message content is NOT scrubbed of personal identifiers before AI processing on the primary chat path. Derived emotional metrics may also be included.\n4. DATA NOT SENT AS SEPARATE PROFILE FIELDS: Passwords and payment card numbers are not sent to AI providers. Raw audio/video streams are not sent except as transcribed text for voice features.\n5. ENCRYPTION: Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts are stored in our database; they are not wrapped with application-layer AES-256 per message.\n6. SOVEREIGNTY: You retain the 'Right to Delete.' You may revoke AI data consent at any time via Settings.", style: TextStyle(color: Colors.white70)),
+              _Header(isNativeIOS ? "9. AI DATA PROCESSING" : "9. BIOMETRIC DATA & AI DATA SHARING"),
+              Text(isNativeIOS
+                ? "Your text messages and voice transcriptions are sent to configured enterprise AI providers to generate wellness and coaching responses. The native iOS app does not collect or present voiceprint, facial-geometry, biometric, or emotional-score measurements. Passwords and payment card numbers are not sent to AI providers. Data is encrypted in transit, and you may revoke AI data consent or request deletion through Settings."
+                : "1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. AI DATA SHARING: Your text messages and voice transcriptions are sent to third-party AI providers (including xAI/Grok and Microsoft Azure OpenAI, and other configured inference providers) to generate AI companion responses. Your data is NOT used to train their general models. See our Privacy Policy Section 13a for full details.\n3. DATA SENT: Conversation text and session context as you type or speak them — including any names, emails, phone numbers, or other identifiers you include in messages. Message content is NOT scrubbed of personal identifiers before AI processing on the primary chat path. Derived emotional metrics may also be included.\n4. DATA NOT SENT AS SEPARATE PROFILE FIELDS: Passwords and payment card numbers are not sent to AI providers. Raw audio/video streams are not sent except as transcribed text for voice features.\n5. ENCRYPTION: Data is encrypted in transit (TLS 1.2+). Selected credentials use application-layer encryption. Conversation transcripts are stored in our database; they are not wrapped with application-layer AES-256 per message.\n6. SOVEREIGNTY: You retain the 'Right to Delete.' You may revoke AI data consent at any time via Settings.",
+                style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
               _Header("10. YOUR RECORDS ARE YOUR RESPONSIBILITY"),
@@ -11074,7 +11098,7 @@ class SovereignCovenantDoc extends StatelessWidget {
               Text("BINDING ARBITRATION: You agree that any disputes shall be resolved by binding individual arbitration. You explicitly WAIVE your right to a jury trial or to participate in any CLASS ACTION.", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
               SizedBox(height: 20),
               _Header("FULL LEGAL AGREEMENT"),
-              Text("This consent summary covers the key points. The complete Terms of Use, Privacy Policy, Therapeutic Setting Waiver, Patent & Proprietary Technology Notice, and Dispute Resolution agreement (v13.1_2026) is available in Settings > Legal & Privacy after you log in.", style: TextStyle(color: Colors.amber, fontSize: 12)),
+              Text("This consent summary covers the key points. The complete Terms of Use, Privacy Policy, Wellness Setting Waiver, Patent & Proprietary Technology Notice, and Dispute Resolution agreement (v13.1_2026) is available in Settings > Legal & Privacy after you log in.", style: TextStyle(color: Colors.amber, fontSize: 12)),
             ]),
           ),
         ),

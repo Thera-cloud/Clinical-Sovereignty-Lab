@@ -140,6 +140,7 @@ class _AiConsentScreenState extends State<AiConsentScreen> {
                     const Text(
                       'This app does not provide medical diagnoses, health measurements for clinical use, '
                       'or treatment advice. Content is for self-reflection and coaching support only. '
+                      'Seek a doctor\'s advice in addition to using this app and before making any medical decisions. '
                       'If you are in crisis, call 988 or go to the nearest emergency room.',
                       style: TextStyle(color: _D.textSecondary, fontSize: 13, height: 1.5),
                     ),

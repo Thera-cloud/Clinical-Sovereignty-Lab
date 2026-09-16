@@ -258,8 +258,28 @@ class _OnboardingTutorialScreenState extends State<OnboardingTutorialScreen>
     },
   ];
 
-  List<Map<String, String>> get _steps =>
-      widget.role == "COACH" ? _coachSteps : _clientSteps;
+  List<Map<String, String>> get _steps {
+    final steps = widget.role == "COACH" ? _coachSteps : _clientSteps;
+    if (!isNativeIOS) return steps;
+    return steps.where((step) {
+      final title = step["title"];
+      return title != "Your Metrics" &&
+          title != "Insights & Briefings" &&
+          title != "DOJO Tools" &&
+          title != "Classroom";
+    }).map((step) {
+      if (step["title"] == "Family Sanctuary") {
+        return {
+          ...step,
+          "speech":
+              "Bring your family into the Sanctuary for shared conversations and coaching support.",
+          "description":
+              "Shared conversations and coaching support for your family.",
+        };
+      }
+      return step;
+    }).toList(growable: false);
+  }
 
   @override
   void initState() {
@@ -1086,7 +1106,9 @@ class _OnboardingTutorialScreenState extends State<OnboardingTutorialScreen>
                       color: Colors.grey[300], fontSize: 13, height: 1.4),
                 ),
                 const SizedBox(height: 8),
-                _buildCheckItem("AI disclosure & biometric consent"),
+                _buildCheckItem(isNativeIOS
+                    ? "AI data processing consent"
+                    : "AI disclosure & biometric consent"),
                 _buildCheckItem("Hold harmless waiver"),
                 _buildCheckItem("Binding arbitration agreement"),
                 _buildCheckItem("Platform immunity acknowledgment"),
@@ -1681,8 +1703,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               const SizedBox(height: 16),
               _consentBullet(Icons.chat_bubble_outline, "Your Messages",
                   "Text messages and voice transcriptions are sent to Microsoft Azure OpenAI to generate Little Nate's responses."),
-              _consentBullet(Icons.mic_outlined, "Voice Biometrics",
+              if (!isNativeIOS)
+                _consentBullet(Icons.mic_outlined, "Voice Biometrics",
                   "Voice features (pitch, energy, speech rate, pause ratio) are analyzed locally and sent to our secure server for emotional coherence scoring."),
+              if (isNativeIOS)
+                _consentBullet(Icons.info_outline, "Important",
+                    "Little Nate provides self-reflection and coaching support, not medical advice, diagnosis, treatment, or clinical health measurements. Seek a doctor's advice in addition to using this app and before making medical decisions."),
               _consentBullet(Icons.lock_outline, "Data Protection",
                   "Data is encrypted in transit (TLS 1.2+). Selected credentials are encrypted at the application layer. Conversation transcripts are stored in our database under hosting-provider disk encryption — not as an application-layer AES-256 wrap of each message. AI providers process messages under their enterprise terms; your data is NOT used to train their general models."),
               _consentBullet(Icons.delete_outline, "Your Rights",
@@ -1848,7 +1874,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   String get _clientContext => kIsWeb ? 'client_web' : 'client_mobile';
 
   void _initNevedalOnce(WebSocketChannel sock, String sessionId) {
-    if (_nevedalReady) return;
+    if (isNativeIOS || _nevedalReady) return;
     _nevedalReady = true;
     _nevedal.initialize(
       socket: sock,
@@ -1869,8 +1895,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     if (mounted) setState(() => _connectionStatus = "ONLINE (SECURE)");
     _addSystemMsg("Neural Link Established.");
     _fetchEntryGreeting();
-    _updateMetricsFromProfile(widget.currentUserProfile ?? {});
+    if (!isNativeIOS) {
+      _updateMetricsFromProfile(widget.currentUserProfile ?? {});
     _requestMetrics();
+    }
     _wsSend(jsonEncode({"type": "get_pending_nudges"}));
     _checkSseIntake();
     _initNevedalOnce(
@@ -2426,16 +2454,20 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
         } else {
           _audio.processAudioChunk(data['payload']);
         }
-        try {
-          final bytes = base64Decode(data['payload'] as String);
-          _nevedal.processNateAudio(bytes);
-        } catch (_) {}
+        if (!isNativeIOS) {
+          try {
+            final bytes = base64Decode(data['payload'] as String);
+            _nevedal.processNateAudio(bytes);
+          } catch (_) {}
+        }
         _talkingTimer?.cancel();
         _talkingTimer = Timer(const Duration(milliseconds: 500), () {
           if (mounted) setState(() => _isTalking = false);
         });
       } else if (data['type'] == 'nevedal_state') {
-        _nevedal.handleServerUpdate(data['data'] ?? data);
+        if (!isNativeIOS) {
+          _nevedal.handleServerUpdate(data['data'] ?? data);
+        }
       } else if (data['type'] == 'login_failed' ||
           data['type'] == 'login_failure') {
         final msg =
@@ -3271,6 +3303,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   void _updateMetricsFromProfile(Map<String, dynamic> profile) {
+    if (isNativeIOS) return;
     setState(() {
       _metrics = {
         'C_emo': profile['C_emo'] ?? 0.5,
@@ -3301,6 +3334,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   void _requestMetrics() {
+    if (isNativeIOS) return;
     _wsSend(jsonEncode({"type": "get_metrics"})); // FIX-H
   }
 
@@ -4578,6 +4612,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       "type": "nate_query",
       "nate_query": text,
       "modality": "General",
+      "client_platform": isNativeIOS ? "ios" : "other",
       "depth_mode": panelDepth ? 'extra' : _chatDepthMode,
     }));
 
@@ -4779,6 +4814,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   void _showMetricsSheet() {
+    if (isNativeIOS) return;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0A0A0F),
@@ -5414,7 +5450,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                         },
                         tooltip: "Family Sanctuary",
                       ),
-                      IconButton(
+                      if (!isNativeIOS)
+                        IconButton(
                         icon: Icon(
                           _activeAiMode != null
                               ? Icons.psychology
@@ -5453,7 +5490,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                             ),
                           ],
                         ),
-                      IconButton(
+                      if (!isNativeIOS)
+                        IconButton(
                         icon: const Icon(Icons.analytics,
                             color: Colors.cyanAccent),
                         onPressed: _showMetricsSheet,
@@ -5569,7 +5607,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       body: Column(
         children: [
           // Quick metrics bar at top
-          if (_metrics.isNotEmpty)
+          if (!isNativeIOS && _metrics.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               color: Colors.black.withOpacity(0.7),
@@ -6687,9 +6725,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _requestFinancials();
     _loadConnectStatus();
     _requestDojoSubscriptions();
-    // Classroom: Fetch sessions and progress for the Classroom tab
-    _requestClassroomSessions();
-    _requestClassroomProgress();
+    if (!isNativeIOS) {
+      // Classroom: Fetch sessions and progress for the Classroom tab.
+      _requestClassroomSessions();
+      _requestClassroomProgress();
+    }
     _loadAssistantMetrics();
   }
 
@@ -10188,6 +10228,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   // ── AI Mode Trigger (Coach) ──
   void _showCoachAiModePicker(String clientId) {
+    final subjectName = _clientNameForId(clientId);
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0A0A0A),
@@ -10195,15 +10236,27 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'AI INTELLIGENCE MODES',
-                style: TextStyle(
-                    color: Color(0xFFC9A962),
-                    fontFamily: 'Cormorant Garamond',
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  const Text(
+                    'AI INTELLIGENCE MODES',
+                    style: TextStyle(
+                        color: Color(0xFFC9A962),
+                        fontFamily: 'Cormorant Garamond',
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold),
+                  ),
+                  if (subjectName.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      subjectName,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 13),
+                    ),
+                  ],
+                ],
               ),
             ),
             ListTile(
@@ -10263,12 +10316,83 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     );
   }
 
-  void _activateCoachAiMode(String mode, String clientId) {
-    _socket?.sink.add(jsonEncode({
-      "type": "ai_mode_activate",
-      "mode": mode,
-      "session_id": clientId,
-    }));
+  String _resolveInsightsActionClientId() {
+    final focused = _resolveFocusedClientId();
+    if (focused.isNotEmpty) return focused;
+    for (final c in _clients) {
+      if (c is! Map) continue;
+      final id = _clientIdFromMap(Map<String, dynamic>.from(c));
+      if (id.isNotEmpty) return id;
+    }
+    return '';
+  }
+
+  String _clientNameForId(String clientId) {
+    if (clientId.isEmpty) return '';
+    for (final c in _clients) {
+      if (c is! Map) continue;
+      final m = Map<String, dynamic>.from(c);
+      if (_clientIdFromMap(m) == clientId) return _clientNameFromMap(m);
+    }
+    return '';
+  }
+
+  String _coachAiModeLabel(String mode) {
+    switch (mode) {
+      case 'tri_corder':
+        return 'Tri-Corder';
+      case 'archivist':
+        return 'Archivist';
+      case 'guardian':
+        return 'Guardian';
+      case 'supervisor':
+        return 'Supervisor';
+      default:
+        return mode;
+    }
+  }
+
+  String _coachAiModePrompt(String mode, String clientName) {
+    final who = clientName.isNotEmpty ? clientName : 'this client';
+    switch (mode) {
+      case 'tri_corder':
+        return 'Tri-Corder on $who: deep emotional reflection of their patterns. Use metrics, risk, mood, and briefing data. Be specific. If data is thin, say what is missing.';
+      case 'archivist':
+        return 'Archivist on $who: narrative synthesis of their growth journey — chapters, turning points, unfinished work. Do not invent sessions.';
+      case 'guardian':
+        return 'Guardian on $who: protective monitoring. List risk indicators, safety flags, and what I should watch this week. Do not invent crises.';
+      case 'supervisor':
+        return 'Supervisor on $who: quality oversight. Recommend techniques and name one thing to stop doing with this client.';
+      default:
+        return 'Analyze $who.';
+    }
+  }
+
+  Future<void> _activateCoachAiMode(String mode, String clientId) async {
+    if (clientId.isNotEmpty) _setFocusedClient(clientId);
+    final name = _clientNameForId(clientId);
+    final label = _coachAiModeLabel(mode);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Running $label for ${name.isNotEmpty ? name : "client"}…'),
+          backgroundColor: const Color(0xFF9D4EDD),
+        ),
+      );
+    }
+    await _sendInsightsChat(_coachAiModePrompt(mode, name));
+    if (!mounted) return;
+    for (var i = _insightsChatMessages.length - 1; i >= 0; i--) {
+      final msg = _insightsChatMessages[i];
+      if (msg['role'] == 'assistant') {
+        _showAiModeOutputDialog({
+          'mode': label,
+          'output': msg['content'] ?? '',
+        });
+        return;
+      }
+    }
   }
 
   // ── Nevedal Report Generator (Coach) ──
@@ -10739,7 +10863,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   ],
                 ),
               ),
-              RiskBadge(riskLevel: metrics['risk_level'] ?? 'LOW', large: true),
+              if (!isNativeIOS)
+                RiskBadge(riskLevel: metrics['risk_level'] ?? 'LOW', large: true),
             ],
           ),
 
@@ -10751,7 +10876,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           //   hidden           → coach not authorized → no pill
           //   enroll_available → coach OK, client not enrolled → muted pill (tap → enroll UI)
           //   active           → enrolled → emphasized pill (tap → profile)
-          Row(
+          if (!isNativeIOS) ...[
+            Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
@@ -10767,6 +10893,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
 
           const SizedBox(height: 10),
+          ],
           Wrap(
             alignment: WrapAlignment.end,
             spacing: 8,
@@ -10774,14 +10901,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             children: [
               _buildCallClientButton(brief),
               _buildMessageClientButton(brief),
-              _buildIntakeButton(brief),
+              if (!isNativeIOS) _buildIntakeButton(brief),
             ],
           ),
 
           const SizedBox(height: 24),
 
           // Nevedal metrics
-          NevedalMetricsGrid(metrics: metrics),
+          if (!isNativeIOS) NevedalMetricsGrid(metrics: metrics),
 
           // Growth-phase coaching layer (phase badge, override, goals,
           // practices, live-session guidance). Empty until /api/thrive loads.
@@ -10795,13 +10922,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             Text(
               "CLINICAL DIRECTORY: $_clinicalDirectoryPlanCount care-plan templates available — Nate can suggest when the client asks for a care/treatment plan.",
               style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
-            ),
-          ],
-          if (isNativeIOS) ...[
-            const SizedBox(height: 16),
-            const Text(
-              "Care-plan and clinical-directory tools stay on the coach web portal (coach.sovereignsanctuary.net).",
-              style: TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
             ),
           ],
           if (!isNativeIOS && _clientSkillPlans.isNotEmpty) ...[
@@ -10935,7 +11055,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   ))),
             const SizedBox(height: 24),
           ],
-          if ((brief['fcodes_active'] is List &&
+          if ((!isNativeIOS &&
+                  brief['fcodes_active'] is List &&
                   (brief['fcodes_active'] as List).isNotEmpty) ||
               _zoomInsightText(brief['zoom_ai_insight']).isNotEmpty) ...[
             Text(isNativeIOS ? "SESSION NOTES" : "CLINICAL SIGNALS",
@@ -15743,6 +15864,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildInsightsTab() {
+    if (isNativeIOS) {
+      return const Center(
+        child: Text(
+          'This feature is not available on iOS.',
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
     final chatHeight = _insightsChatPanelHeight(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -15763,7 +15892,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         const BorderSide(color: Color(0xFF9D4EDD), width: 0.5),
                   ),
                   onPressed: () {
-                    final clientId = _resolveFocusedClientId();
+                    final clientId = _resolveInsightsActionClientId();
                     if (clientId.isNotEmpty) {
                       _showCoachAiModePicker(clientId);
                     } else {
@@ -15924,6 +16053,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildBriefingsTab() {
+    if (isNativeIOS) {
+      return const Center(
+        child: Text(
+          'Coach briefings are available on the coach web portal.',
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
     if (_clients.isEmpty) {
       return _buildEmptyStateTab(
         icon: Icons.folder,
@@ -17304,14 +17441,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                     RiskBadge(riskLevel: risk),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  "Text Sent.(v1): ${_fmt01(cEmo)}   GAP: ${_fmt01(gap)}   Quantum: ${_fmt01(quantum)}",
-                  style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 11,
-                      fontFamily: 'Courier'),
-                ),
+                if (!isNativeIOS) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    "Text Sent.(v1): ${_fmt01(cEmo)}   GAP: ${_fmt01(gap)}   Quantum: ${_fmt01(quantum)}",
+                    style: TextStyle(
+                        color: Colors.grey[400],
+                        fontSize: 11,
+                        fontFamily: 'Courier'),
+                  ),
+                ],
               ],
             ),
           ),
@@ -17324,29 +17463,31 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ),
             child: const Text("View Brief"),
           ),
-          const SizedBox(width: 8),
-          // QUANTUM-CRYSTAL-ARCH — Tier 2 coach PGSD UI
-          OutlinedButton(
-            onPressed: id.isEmpty
-                ? null
-                : () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => CoachPgsdScreen(
-                          profile: widget.currentUserProfile,
-                          clientId: id,
-                          clientName: name,
+          if (!isNativeIOS) ...[
+            const SizedBox(width: 8),
+            // QUANTUM-CRYSTAL-ARCH — Tier 2 coach PGSD UI
+            OutlinedButton(
+              onPressed: id.isEmpty
+                  ? null
+                  : () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CoachPgsdScreen(
+                            profile: widget.currentUserProfile,
+                            clientId: id,
+                            clientName: name,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Color(0xFF4ECDC4)),
-              foregroundColor: const Color(0xFF4ECDC4),
+                      );
+                    },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFF4ECDC4)),
+                foregroundColor: const Color(0xFF4ECDC4),
+              ),
+              child: const Text("PGSD"),
             ),
-            child: const Text("PGSD"),
-          ),
+          ],
         ],
       ),
     ),
@@ -18096,6 +18237,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   final ScrollController _sessionAssistantChatScroll = ScrollController();
 
   void _openSessionAssistant(String clientId, String sessionId) {
+    if (isNativeIOS) return;
     final msg = json.encode({
       "type": "session_assistant_open",
       "client_id": clientId,
@@ -18111,6 +18253,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   void _handleSessionAssistantData(Map<String, dynamic> data) {
+    if (isNativeIOS) return;
     setState(() {
       _sessionAssistantData = data;
     });
@@ -18391,6 +18534,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildSessionAssistantOverlay() {
+    if (isNativeIOS) return const SizedBox.shrink();
     if (!_sessionAssistantOpen || _sessionAssistantData == null)
       return const SizedBox.shrink();
     final d = _sessionAssistantData!;
@@ -19058,6 +19202,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildDojoTab() {
+    if (isNativeIOS) {
+      return const Center(
+        child: Text(
+          'Training simulations are available on the coach web portal.',
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
     // =========================================================================
     // HYBRID DOJO - Night School Dojo page
     // - Mobile: Embedded WebView showing night_school_dojo.html
@@ -19681,6 +19833,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   // ===========================================================================
 
   Widget _buildClassroomTab() {
+    if (isNativeIOS) {
+      return const Center(
+        child: Text(
+          'Classroom analysis is available on the coach web portal.',
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
     return RefreshIndicator(
       onRefresh: () async {
         _requestClassroomSessions();

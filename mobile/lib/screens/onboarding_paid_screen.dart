@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:convert';
 import '../config/app_config.dart';
-import '../main.dart' show ClientScheduleScreen;
+import '../main.dart' show ClientScheduleScreen, isNativeIOS;
 import '../updated_screens.dart' show NeuralInterfaceV2;
 
 // =============================================================================
@@ -290,7 +290,9 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Text(
-            'Store conversations, uploads, reports, and memories. Everything organized automatically.',
+            isNativeIOS
+                ? 'Store conversations, uploads, notes, and memories. Everything organized automatically.'
+                : 'Store conversations, uploads, reports, and memories. Everything organized automatically.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _textSecondary,
@@ -431,7 +433,7 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
         _ChartAnimation(),
         const SizedBox(height: 32),
         Text(
-          'Insight Intelligence',
+          isNativeIOS ? 'Personal Reflection' : 'Insight Intelligence',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: _gold,
@@ -444,7 +446,9 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Text(
-            'Nevedal Reports map your emotional patterns with quantum precision. Foresight Forecasts predict future emotional trajectories.',
+            isNativeIOS
+                ? 'Review conversation highlights and personal-growth reflections without medical measurements, diagnoses, or treatment recommendations.'
+                : 'Nevedal Reports map your emotional patterns with quantum precision. Foresight Forecasts predict future emotional trajectories.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _textSecondary,
@@ -456,7 +460,7 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
         ),
         const SizedBox(height: 16),
         Text(
-          '$reports, $forecasts',
+          isNativeIOS ? 'Wellness and coaching support only' : '$reports, $forecasts',
           style: TextStyle(color: _purple, fontFamily: 'DM Sans', fontSize: 14),
         ),
       ],
@@ -483,7 +487,9 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
           ),
           const SizedBox(height: 20),
           Text(
-            'Pattern Engine, Me2Me Avatar, Archivist Chapters, Legacy Letters, Voice-Over-Image, Realtime Voice with Nate, and unlimited everything.',
+            isNativeIOS
+                ? 'Me2Me Avatar, Archivist Chapters, Legacy Letters, Voice-Over-Image, realtime voice with Nate, expanded family access, and priority support.'
+                : 'Pattern Engine, Me2Me Avatar, Archivist Chapters, Legacy Letters, Voice-Over-Image, Realtime Voice with Nate, and unlimited everything.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _textSecondary,

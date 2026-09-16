@@ -3,7 +3,7 @@ description: Sovereign Sanctuary — AI Wellness Companion
 
 publish_to: 'none'
 
-version: 1.0.2+15
+version: 1.0.2+16
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -59,6 +59,8 @@ dependencies:
 
   # In-App Purchase (StoreKit / Play Billing)
   in_app_purchase: ^3.2.0
+  # Direct dependency: selects StoreKit 1 receipts for legacy verifyReceipt.
+  in_app_purchase_storekit: ^0.4.11
 
   # URL Launcher (for opening external links)
   url_launcher: ^6.2.2
