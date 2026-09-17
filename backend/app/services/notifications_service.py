@@ -436,6 +436,77 @@ TEMPLATES = {
 </html>
 """
     },
+
+    "coaching_rescheduled": {
+        "subject": "Session moved — new time with {{ coach_name }}",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Georgia', serif; background: #050505; color: #F5F5F5; margin: 0; padding: 40px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .logo { font-size: 32px; color: #C9A962; letter-spacing: 4px; }
+        .content { background: #111111; border: 1px solid #1A1A1A; padding: 40px; border-radius: 4px; }
+        h1 { font-weight: 300; font-size: 28px; color: #F5F5F5; margin-bottom: 20px; }
+        p { color: #9A9A9A; line-height: 1.8; margin-bottom: 20px; }
+        .session-card { background: #0A0A0A; border: 1px solid #1A1A1A; padding: 24px; margin: 24px 0; }
+        .session-detail { display: flex; justify-content: space-between; margin-bottom: 12px; }
+        .label { color: #5A5A5A; font-size: 12px; letter-spacing: 1px; }
+        .value { color: #F5F5F5; }
+        .old { color: #8B7355; text-decoration: line-through; }
+        .cta { display: inline-block; background: #4ECDC4; color: #050505; text-decoration: none; padding: 14px 32px; font-size: 14px; letter-spacing: 1px; margin-top: 20px; }
+        .cta-cal { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 12px 20px; font-size: 13px; letter-spacing: 1px; margin: 8px 8px 0 0; }
+        .footer { text-align: center; margin-top: 40px; color: #5A5A5A; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">SANCTUARY</div>
+        </div>
+        <div class="content">
+            <h1>Your session was rescheduled.</h1>
+            <p>The prior appointment is cancelled. Reminders now follow the new time below.</p>
+            <div class="session-card">
+                <div class="session-detail">
+                    <span class="label">Previous</span>
+                    <span class="value old">{{ old_when }}</span>
+                </div>
+                <div class="session-detail">
+                    <span class="label">New date</span>
+                    <span class="value">{{ new_date }}</span>
+                </div>
+                <div class="session-detail">
+                    <span class="label">New time</span>
+                    <span class="value">{{ new_time }} ({{ timezone }})</span>
+                </div>
+                <div class="session-detail">
+                    <span class="label">Coach</span>
+                    <span class="value">{{ coach_name }}</span>
+                </div>
+            </div>
+            {% if join_url %}
+            <a href="{{ join_url }}" class="cta">Join Zoom</a>
+            {% else %}
+            <p>Your coach will share the meeting link before the session.</p>
+            {% endif %}
+            {% if google_cal_url or outlook_cal_url or ics_url %}
+            <p style="margin-top:24px;color:#9A9A9A;">Replace the old calendar event with this one.</p>
+            {% if google_cal_url %}<a href="{{ google_cal_url }}" class="cta-cal">Add to Google Calendar</a>{% endif %}
+            {% if outlook_cal_url %}<a href="{{ outlook_cal_url }}" class="cta-cal">Add to Outlook</a>{% endif %}
+            {% if ics_url %}<a href="{{ ics_url }}" class="cta-cal">Apple Calendar / ICS</a>{% endif %}
+            {% endif %}
+        </div>
+        <div class="footer">
+            <p>Prior reminder emails for the old time will not be sent.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+    },
     
     # -------------------------------------------------------------------------
     # COACHING SESSION REMINDER (24h)
@@ -1021,6 +1092,32 @@ class EmailService:
             **extra,
         }
         return await self.send_email(to_email, "coaching_confirmation", ctx, ics_bytes=ics)
+
+    async def send_coaching_rescheduled(
+        self, to_email: str,
+        old_when: str, new_date: str, new_time: str, timezone: str,
+        coach_name: str, join_url: str,
+        session_id: str = "",
+        scheduled_start=None,
+        scheduled_end=None,
+        client_id: str = "",
+    ) -> bool:
+        extra, ics = self._calendar_fields(
+            join_url=join_url,
+            session_id=session_id,
+            scheduled_start=scheduled_start,
+            scheduled_end=scheduled_end,
+            client_id=client_id,
+            coach_name=coach_name,
+        )
+        return await self.send_email(to_email, "coaching_rescheduled", {
+            "old_when": old_when,
+            "new_date": new_date,
+            "new_time": new_time,
+            "timezone": timezone,
+            "coach_name": coach_name,
+            **extra,
+        }, ics_bytes=ics)
     
     async def send_coaching_reminder(
         self, to_email: str, time: str, coach_name: str,

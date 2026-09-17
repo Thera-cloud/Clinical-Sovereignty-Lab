@@ -374,7 +374,7 @@ _CLIENT_UPCOMING_STATUSES = frozenset({
 })
 _CLIENT_GONE_STATUSES = frozenset({
     "cancelled", "canceled", "cancelled_by_google", "no_show",
-    "declined", "rejected", "expired",
+    "declined", "rejected", "expired", "rescheduled",
 })
 
 

@@ -29,8 +29,14 @@ MIN_FEE_CENTS = 3000  # $30 minimum
 # Canonical appointment time: REST/bridge writes scheduled_start; legacy rows use scheduled_at.
 _APPT_TIME = "COALESCE(cs.scheduled_start, cs.scheduled_at)"
 _APPT_TIME_BARE = "COALESCE(scheduled_start, scheduled_at)"
-_NOT_CANCELLED = "UPPER(cs.status) != 'CANCELLED'"
-_NOT_CANCELLED_BARE = "UPPER(status) != 'CANCELLED'"
+_NOT_CANCELLED = (
+    "UPPER(cs.status) NOT IN "
+    "('CANCELLED', 'RESCHEDULED', 'CANCELLED_BY_GOOGLE', 'CANCELED')"
+)
+_NOT_CANCELLED_BARE = (
+    "UPPER(status) NOT IN "
+    "('CANCELLED', 'RESCHEDULED', 'CANCELLED_BY_GOOGLE', 'CANCELED')"
+)
 
 
 def _format_scheduled_for_session(session: dict, tz_key: str = "client_timezone") -> str:

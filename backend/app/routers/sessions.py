@@ -360,6 +360,12 @@ class ScheduleSessionRequest(BaseModel):
     zoom_link: Optional[str] = ""
     disable_recording: Optional[bool] = False  # Coach can opt-out of auto-recording
 
+class RescheduleSessionRequest(BaseModel):
+    scheduled_start: str
+    scheduled_end: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = ""
+
 class UpdateSessionRequest(BaseModel):
     session_id: str
     status: Optional[str] = None
@@ -436,7 +442,8 @@ async def _fetch_session_pg(request: Request, session_id: str) -> Optional[dict]
         async with db.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT session_id, client_id, coach_id, client_name, status,
+                SELECT id, session_id, client_id, coach_id, family_id, client_name,
+                       session_type, status, notes, price_cents, payment_status,
                        scheduled_start, scheduled_end, zoom_meeting_id,
                        zoom_link, zoom_host_url, session_data
                 FROM coaching_sessions
@@ -557,6 +564,62 @@ async def _lookup_coach_display(db_pool, coach_id: str) -> dict:
         }
     except Exception:
         return {"name": "Your coach", "credentials": "", "coaching_fee": 0.0}
+
+
+async def _send_reschedule_notice(request: Request, old: dict, new: dict) -> dict:
+    """One email: prior slot voided, new date/Zoom. SMS uses the new confirmation path."""
+    result = {"email": False, "sms": False, "channels": []}
+    db = _get_db(request)
+    contact = await _lookup_client_contact(db, (new.get("client_id") or "").strip())
+    email_addr = (contact.get("email") or "").strip()
+    try:
+        from app.services.notifications_service import EmailService
+        from app.utils.timezone_resolver import split_session_start_for_profile
+        from app.services.calendar_invite import join_from_host_path, safe_join_url
+
+        tz_name = (contact.get("timezone") or "").strip() or "America/New_York"
+        sd = old.get("session_data") if isinstance(old.get("session_data"), dict) else {}
+        old_iso = str(sd.get("original_scheduled_start") or old.get("scheduled_start") or "")
+        new_iso = str(new.get("scheduled_start") or "")
+        old_when = old_iso
+        new_date, new_time = "", new_iso
+        if old_iso:
+            old_date, old_time, _ = split_session_start_for_profile(
+                datetime.fromisoformat(old_iso.replace("Z", "+00:00")),
+                {"timezone": tz_name},
+            )
+            old_when = f"{old_date} {old_time}".strip()
+        if new_iso:
+            new_date, new_time, tz_name = split_session_start_for_profile(
+                datetime.fromisoformat(new_iso.replace("Z", "+00:00")),
+                {"timezone": tz_name},
+            )
+        coach = await _lookup_coach_display(db, (new.get("coach_id") or "").strip())
+        join_url = safe_join_url(new.get("zoom_link")) or join_from_host_path(
+            new.get("zoom_host_url") or ""
+        )
+        if email_addr and "@" in email_addr:
+            ok = await EmailService().send_coaching_rescheduled(
+                to_email=email_addr,
+                old_when=old_when,
+                new_date=new_date,
+                new_time=new_time or new_iso,
+                timezone=tz_name,
+                coach_name=coach.get("name") or "Your coach",
+                join_url=join_url,
+                session_id=str(new.get("session_id") or ""),
+                scheduled_start=new.get("scheduled_start"),
+                scheduled_end=new.get("scheduled_end"),
+                client_id=str(new.get("client_id") or ""),
+            )
+            result["email"] = bool(ok)
+            if ok:
+                result["channels"].append("email")
+    except Exception as e:
+        _logger.warning("_send_reschedule_notice email failed: %s", e)
+    if result["email"]:
+        return result
+    return await _send_session_link(request, new)
 
 
 async def _send_session_link(request: Request, session: dict) -> dict:
@@ -892,6 +955,186 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     if notify_result is not None:
         resp["notification"] = notify_result
     return resp
+
+
+@router.post("/{session_id}/reschedule")
+async def reschedule_session(
+    session_id: str,
+    req: RescheduleSessionRequest,
+    request: Request,
+    current_user: str = Depends(get_current_user_id),
+):
+    """Move a future live session. Past calendar slots stay locked for billing."""
+    from app.services.session_reschedule import (
+        build_new_session,
+        duration_minutes,
+        log_reschedule,
+        mark_old_rescheduled,
+        parse_iso_dt,
+        reschedule_guard,
+        void_session_reminders,
+    )
+
+    old = await _fetch_session_pg(request, session_id)
+    sessions = await _load_sessions_pf(request)
+    if not old:
+        for s in sessions:
+            if s.get("session_id") == session_id:
+                old = dict(s)
+                break
+    if not old:
+        raise HTTPException(404, "Session not found")
+
+    user_role = getattr(request.state, "user_role", "")
+    if current_user not in (old.get("client_id"), old.get("coach_id")) and user_role != "ADMIN":
+        raise HTTPException(403, "Only the assigned coach can reschedule this session")
+
+    new_start = parse_iso_dt(req.scheduled_start)
+    if not new_start:
+        raise HTTPException(422, "scheduled_start must be ISO-8601")
+    mins = req.duration_minutes if (req.duration_minutes or 0) >= 5 else duration_minutes(old)
+    new_end = parse_iso_dt(req.scheduled_end) if req.scheduled_end else None
+    if not new_end:
+        from datetime import timedelta
+        new_end = new_start + timedelta(minutes=mins)
+    if new_end <= new_start:
+        raise HTTPException(422, "scheduled_end must be after scheduled_start")
+
+    err, msg = reschedule_guard(old, new_start)
+    if err:
+        raise HTTPException(409, {"error": err, "message": msg})
+
+    now = datetime.now(timezone.utc)
+    for s in sessions:
+        if s.get("coach_id") != old.get("coach_id"):
+            continue
+        if s.get("session_id") == session_id:
+            continue
+        if s.get("status") not in ("scheduled", "active", "pending_approval"):
+            continue
+        existing_start = _parse_iso_dt(s.get("scheduled_start", ""))
+        existing_end = _parse_iso_dt(s.get("scheduled_end", ""))
+        if not (existing_start and existing_end):
+            continue
+        if existing_end < now and s.get("status") in ("scheduled", "pending_approval"):
+            continue
+        if new_start < existing_end and new_end > existing_start:
+            raise HTTPException(409, "Time slot conflict with existing session")
+
+    meeting_id = (old.get("zoom_meeting_id") or "").strip()
+    if meeting_id and settings.ENABLE_ZOOM:
+        try:
+            await _make_zoom_client().delete_meeting(meeting_id=meeting_id)
+        except Exception as e:
+            _logger.warning("reschedule: zoom delete failed %s: %s", session_id, e)
+
+    new_id = generate_session_id()
+    actor = current_user or ""
+    mark_old_rescheduled(old, new_session_id=new_id, actor=actor)
+    new_session = build_new_session(
+        old,
+        new_session_id=new_id,
+        scheduled_start=new_start.isoformat(),
+        scheduled_end=new_end.isoformat(),
+        actor=actor,
+    )
+    if req.notes:
+        new_session["notes"] = req.notes
+
+    zoom_error = None
+    try:
+        if settings.ENABLE_ZOOM:
+            client = _make_zoom_client()
+            start_iso = _iso_to_zoom_start(new_session["scheduled_start"]) or (
+                datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+            )
+            zoom_resp = await client.create_meeting(
+                topic=f"{new_session.get('session_type') or 'COACH'} — Coaching Session {new_id}",
+                start_time_iso=start_iso,
+                duration_minutes=int(mins or 50),
+                agenda=new_session.get("notes") or "",
+            )
+            mid = str(zoom_resp.get("id") or "")
+            join_url = str(zoom_resp.get("join_url") or "")
+            start_url = str(zoom_resp.get("start_url") or "")
+            if join_url:
+                new_session["zoom_link"] = join_url
+            if start_url:
+                new_session["zoom_host_url"] = start_url
+            if mid:
+                new_session["zoom_meeting_id"] = mid
+                _update_zoom_meeting_map(
+                    mid,
+                    schedule_session_id=new_id,
+                    client_id=new_session.get("client_id") or "",
+                    family_id=new_session.get("family_id") or "",
+                    topic=f"Rescheduled {new_id}",
+                )
+    except Exception as e:
+        zoom_error = str(e)
+        _logger.warning("reschedule: zoom create failed %s: %s", new_id, e)
+
+    replaced = False
+    for i, s in enumerate(sessions):
+        if s.get("session_id") == session_id:
+            sessions[i] = old
+            replaced = True
+            break
+    if not replaced:
+        sessions.append(old)
+    sessions.append(new_session)
+    await _save_session_dual(request, old, sessions)
+    await _save_session_dual(request, new_session, sessions)
+    try:
+        from app.services.session_schedule_link import _patch_coach_schedule_json
+        _patch_coach_schedule_json(
+            str(old.get("coach_id") or ""),
+            session_id,
+            {"status": "rescheduled", "zoom_meeting_id": "", "zoom_link": ""},
+        )
+    except Exception as e:
+        _logger.warning("reschedule: vault schedule.json patch failed: %s", e)
+
+    db = _get_db(request)
+    await void_session_reminders(db, old.get("id"))
+    await log_reschedule(
+        db,
+        old_session_id=session_id,
+        new_session_id=new_id,
+        coach_id=str(old.get("coach_id") or ""),
+        client_id=str(old.get("client_id") or ""),
+        old_start=parse_iso_dt(
+            (old.get("session_data") or {}).get("original_scheduled_start")
+            if isinstance(old.get("session_data"), dict)
+            else None
+        ) or parse_iso_dt(old.get("scheduled_start")),
+        new_start=new_start,
+        actor=actor,
+    )
+
+    if _gcal_sync and db:
+        try:
+            asyncio.create_task(_gcal_sync(db, old, action="delete"))
+            asyncio.create_task(_gcal_sync(db, new_session, action="create"))
+        except Exception:
+            pass
+
+    notify_result = None
+    try:
+        notify_result = await _send_reschedule_notice(request, old, new_session)
+    except Exception as e:
+        _logger.warning("reschedule: notify failed %s: %s", new_id, e)
+        try:
+            notify_result = await _send_session_link(request, new_session)
+        except Exception:
+            notify_result = None
+
+    out = {"session": new_session, "superseded": old, "message": "Session rescheduled"}
+    if zoom_error:
+        out["zoom_error"] = zoom_error
+    if notify_result is not None:
+        out["notification"] = notify_result
+    return out
 
 
 @router.post("/{session_id}/resend-link")
@@ -1826,6 +2069,16 @@ async def cancel_session(session_id: str, request: Request, current_user: str = 
             user_role = getattr(request.state, "user_role", "")
             if current_user not in (s.get("client_id"), s.get("coach_id")) and user_role != "ADMIN":
                 raise HTTPException(403, "Access denied: you are not a participant in this session")
+            if not hard_delete:
+                from app.services.session_reschedule import is_past_locked
+                if is_past_locked(s.get("scheduled_start")):
+                    raise HTTPException(
+                        409,
+                        {
+                            "error": "past_locked",
+                            "message": "Past sessions stay on the calendar for records and billing.",
+                        },
+                    )
             if hard_delete:
                 if has_archived_transcript(s):
                     raise HTTPException(

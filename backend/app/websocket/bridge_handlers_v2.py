@@ -172,10 +172,13 @@ class CoachNexusV2:
             except:
                 pass
         
-        # Filter by month/year
+        # Filter by month/year — cancelled / rescheduled vault rows stay off the grid
         filtered = []
+        _gone = {"cancelled", "canceled", "rescheduled", "cancelled_by_google"}
         for s in schedule:
             try:
+                if str((s or {}).get("status") or "").lower() in _gone:
+                    continue
                 dt = _parse_date_any(s.get("date", ""))
                 if dt and dt.month == month and dt.year == year:
                     filtered.append(s)
@@ -440,6 +443,8 @@ class CoachNexusV2:
                       AND scheduled_start <  $3
                       AND COALESCE(session_data->>'schedule_link_hidden', 'false')
                           IN ('true', '1', 'yes')
+                      AND LOWER(COALESCE(status, '')) NOT IN
+                          ('rescheduled', 'cancelled', 'canceled', 'cancelled_by_google')
                     ORDER BY scheduled_start ASC
                     LIMIT 200
                     """,

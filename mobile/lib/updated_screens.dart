@@ -6927,16 +6927,65 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Zoom meeting deleted")));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              "Zoom meeting deleted. The calendar slot is still booked until you cancel the session."),
+        ));
       }
       _emitFetchCoachCalendar();
+      await _offerCancelAfterZoomDelete(sessionId);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("Delete Zoom failed: $e")));
       }
     }
+  }
+
+  Future<void> _offerCancelAfterZoomDelete(String sessionId) async {
+    Map<String, dynamic>? sess;
+    for (final raw in _schedule) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final id = (m['session_id'] ?? m['id'] ?? '').toString();
+      if (id == sessionId) {
+        sess = m;
+        break;
+      }
+    }
+    final status = (sess?['status'] ?? 'scheduled').toString().toLowerCase();
+    if (status != 'scheduled' && status != 'active') return;
+    if (sess != null && _sessionAppointmentIsPast(sess)) return;
+    if (!mounted) return;
+    final name =
+        (sess?['client_name'] ?? sess?['client'] ?? 'this client').toString();
+    final tm = sess != null ? _formatScheduledTime(sess) : '';
+    final cancel = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: const Text('Cancel the calendar slot too?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          '$name${tm.isNotEmpty ? ' • $tm' : ''}\n\n'
+          'Delete Zoom only removed the meeting room. The session stays on the calendar until you cancel it, then you can book a new time.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep on calendar',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel session',
+                style: TextStyle(color: Color(0xFFEF4444))),
+          ),
+        ],
+      ),
+    );
+    if (cancel == true) await _coachCancelSessionRest(sessionId);
   }
 
   Future<void> _deleteSessionPermanently(String sessionId) async {
@@ -7237,7 +7286,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     });
   }
 
-  Future<void> _scheduleSessionViaApi({
+  Future<bool> _scheduleSessionViaApi({
     required String clientId,
     required String clientName,
     required String coachId,
@@ -7300,13 +7349,252 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         ),
         selectDay: scheduledStartLocal,
       );
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Schedule failed: $e")),
         );
       }
+      return false;
     }
+  }
+
+  Future<bool> _rescheduleSessionViaApi({
+    required String sessionId,
+    required DateTime scheduledStartLocal,
+    required int durationMinutes,
+    String notes = "",
+  }) async {
+    final stUtc = scheduledStartLocal.toUtc();
+    final enUtc = stUtc.add(Duration(minutes: durationMinutes));
+    final payload = <String, dynamic>{
+      "scheduled_start": stUtc.toIso8601String(),
+      "scheduled_end": enUtc.toIso8601String(),
+      "duration_minutes": durationMinutes,
+      if (notes.trim().isNotEmpty) "notes": notes.trim(),
+    };
+    try {
+      final resp = await http.post(
+        _apiUri('/api/sessions/$sessionId/reschedule'),
+        headers: _restHeaders(),
+        body: jsonEncode(payload),
+      );
+      if (resp.statusCode == 409) {
+        String msg = "This session cannot be rescheduled.";
+        try {
+          final body = jsonDecode(resp.body);
+          final detail = body is Map ? (body['detail'] ?? body) : body;
+          if (detail is Map) {
+            msg = (detail['message'] ?? detail['error'] ?? msg).toString();
+          }
+        } catch (_) {}
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(msg),
+            backgroundColor: const Color(0xFF8B7355),
+          ));
+        }
+        return false;
+      }
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
+      }
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map) {
+        _dropScheduleItem(sessionId);
+        if (decoded["session"] is Map) {
+          _upsertScheduleFromApiSession(
+              Map<String, dynamic>.from(decoded["session"] as Map));
+        }
+      }
+      if (mounted) {
+        final zoomError =
+            (decoded is Map) ? (decoded["zoom_error"]?.toString() ?? "") : "";
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(zoomError.isNotEmpty
+              ? "Rescheduled (Zoom error: $zoomError)"
+              : "Session rescheduled. Client notified; reminders follow the new time."),
+          backgroundColor: const Color(0xFF22C55E),
+        ));
+      }
+      _navigateCalendarTo(
+        DateTime(
+          scheduledStartLocal.year,
+          scheduledStartLocal.month,
+          scheduledStartLocal.day,
+        ),
+        selectDay: scheduledStartLocal,
+      );
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Reschedule failed: $e")),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<void> _openRescheduleDialog(Map session) async {
+    if (_sessionAppointmentIsPast(session)) {
+      _snackPastSessionLocked();
+      return;
+    }
+    final sessionId =
+        (session['session_id'] ?? session['id'] ?? '').toString().trim();
+    if (sessionId.isEmpty) return;
+    DateTime startLocal = DateTime.now().add(const Duration(hours: 1));
+    final ss = (session['scheduled_start'] ?? '').toString().trim();
+    if (ss.isNotEmpty) {
+      try {
+        startLocal = DateTime.parse(ss).toLocal();
+      } catch (_) {}
+    }
+    if (!startLocal.isAfter(DateTime.now())) {
+      startLocal = DateTime.now().add(const Duration(hours: 1));
+    }
+    int durationMinutes = 50;
+    try {
+      final raw = int.tryParse(
+              (session['duration_minutes'] ?? '').toString()) ??
+          0;
+      if (raw >= 5) durationMinutes = raw;
+    } catch (_) {}
+    String notes = (session['notes'] ?? '').toString();
+    final clientName =
+        (session['client_name'] ?? session['client'] ?? 'this client')
+            .toString();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            Future<void> pickDateTime() async {
+              final pickedDate = await showDatePicker(
+                context: ctx,
+                initialDate: startLocal.isAfter(DateTime.now())
+                    ? startLocal
+                    : DateTime.now(),
+                firstDate: DateTime.now(),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+              );
+              if (pickedDate == null) return;
+              final pickedTime = await showTimePicker(
+                context: ctx,
+                initialTime: TimeOfDay.fromDateTime(startLocal),
+              );
+              if (pickedTime == null) return;
+              setLocal(() {
+                startLocal = DateTime(
+                  pickedDate.year,
+                  pickedDate.month,
+                  pickedDate.day,
+                  pickedTime.hour,
+                  pickedTime.minute,
+                );
+              });
+            }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0A0A0F),
+              title: const Text("Reschedule session",
+                  style: TextStyle(color: Color(0xFFFFD700))),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "$clientName\nThe old Zoom meeting is deleted. Reminders move to the new time.",
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.event, color: Color(0xFF00F5D4)),
+                      label: Text(
+                        "${startLocal.toLocal().toString().substring(0, 16)} (local)",
+                        style: const TextStyle(color: Color(0xFF00F5D4)),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF00F5D4)),
+                      ),
+                      onPressed: pickDateTime,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      initialValue: durationMinutes.toString(),
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: "Minutes",
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.06),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (v) => setLocal(() =>
+                          durationMinutes = int.tryParse(v) ?? durationMinutes),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      initialValue: notes,
+                      minLines: 2,
+                      maxLines: 4,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: "Notes (optional)",
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.06),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (v) => notes = v,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Cancel",
+                      style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD700),
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: () async {
+                    if (!startLocal.isAfter(DateTime.now())) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text("Pick a future date and time."),
+                      ));
+                      return;
+                    }
+                    Navigator.pop(ctx);
+                    await _rescheduleSessionViaApi(
+                      sessionId: sessionId,
+                      scheduledStartLocal: startLocal,
+                      durationMinutes:
+                          durationMinutes >= 5 ? durationMinutes : 50,
+                      notes: notes,
+                    );
+                  },
+                  child: const Text("Reschedule"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   /// External consultee — WebSocket `coach_create_consultation` (bridge + Zoom + email).
@@ -8047,7 +8335,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             familyIdForPayload = selectedSecondaryId;
                           else if (sessionType == "CORPORATE")
                             familyIdForPayload = selectedSecondaryId;
-                          await _scheduleSessionViaApi(
+                          final created = await _scheduleSessionViaApi(
                             clientId: selectedClientId,
                             clientName: selectedClientName,
                             coachId: coachId,
@@ -8058,7 +8346,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             notes: notes,
                             disableRecording: disableRecording,
                           );
-                          if (ctx.mounted) Navigator.of(ctx).pop();
+                          if (created && ctx.mounted) Navigator.of(ctx).pop();
                         }
                       : null,
                   child: const Text("Create"),
@@ -13891,6 +14179,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             final sessionId =
                 (session['id'] ?? session['session_id'] ?? 'idx_$index')
                     .toString();
+            final pastLocked = _sessionAppointmentIsPast(session);
             final isConsult = _isCoachExternalConsultation(session);
             final displayName = isConsult
                 ? (session['consultation_name'] ??
@@ -14121,6 +14410,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           if (v == "start_facetime") {
                             await _openFaceTimeLaunchDialog(session);
                           }
+                          if (v == "reschedule") {
+                            if (pastLocked) {
+                              _snackPastSessionLocked();
+                            } else {
+                              await _openRescheduleDialog(session);
+                            }
+                          }
                           if (v == "resend_link") {
                             await _resendSessionLink(sessionId);
                           }
@@ -14194,7 +14490,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             await _pullSummaryToFolder(sessionId);
                           }
                           if (v == "delete_session") {
-                            await _confirmRemoveScheduleLink(sessionId);
+                            if (pastLocked) {
+                              _snackPastSessionLocked();
+                            } else {
+                              await _confirmRemoveScheduleLink(sessionId);
+                            }
                           }
                         },
                         itemBuilder: (ctx) => [
@@ -14208,6 +14508,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                                 Text("Start FaceTime",
                                     style:
                                         TextStyle(color: Color(0xFF4ECDC4))),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: "reschedule",
+                            enabled: !pastLocked,
+                            child: Row(
+                              children: [
+                                Icon(Icons.event_repeat,
+                                    size: 18,
+                                    color: pastLocked
+                                        ? Colors.white38
+                                        : const Color(0xFFFFD700)),
+                                const SizedBox(width: 8),
+                                Text(
+                                    pastLocked
+                                        ? "Reschedule (locked — past)"
+                                        : "Reschedule",
+                                    style: TextStyle(
+                                        color: pastLocked
+                                            ? Colors.white38
+                                            : const Color(0xFFFFD700))),
                               ],
                             ),
                           ),
@@ -14258,11 +14580,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             ),
                             const PopupMenuDivider(),
                           ],
-                          // Always show remove-from-schedule option
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: "delete_session",
-                            child: Text("Remove from Schedule",
-                                style: TextStyle(color: Colors.redAccent)),
+                            enabled: !pastLocked,
+                            child: Text(
+                                pastLocked
+                                    ? "Remove from Schedule (locked — past)"
+                                    : "Remove from Schedule",
+                                style: TextStyle(
+                                    color: pastLocked
+                                        ? Colors.white38
+                                        : Colors.redAccent)),
                           ),
                         ],
                       ),
@@ -14296,6 +14624,54 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   // --- Helpers for availability/calendar ---
+  bool _sessionAppointmentIsPast(Map session) {
+    final ss = (session['scheduled_start'] ?? '').toString().trim();
+    if (ss.isNotEmpty) {
+      try {
+        return !DateTime.parse(ss).toUtc().isAfter(DateTime.now().toUtc());
+      } catch (_) {}
+    }
+    final date = (session['date'] ?? '').toString().trim();
+    final time = (session['time'] ?? '').toString().trim();
+    if (date.length >= 10) {
+      try {
+        final parts = time.split(':');
+        final h = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 0 : 0;
+        final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+        final local = DateTime(
+          int.parse(date.substring(0, 4)),
+          int.parse(date.substring(5, 7)),
+          int.parse(date.substring(8, 10)),
+          h,
+          m,
+        );
+        return !local.isAfter(DateTime.now());
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  void _snackPastSessionLocked() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text(
+          'Past sessions stay on the calendar for records and billing. They cannot be rescheduled or cancelled.'),
+      backgroundColor: Color(0xFF8B7355),
+    ));
+  }
+
+  void _dropScheduleItem(String sessionId) {
+    if (sessionId.isEmpty || !mounted) return;
+    setState(() {
+      _schedule = _schedule.where((raw) {
+        if (raw is! Map) return true;
+        final id = (raw['session_id'] ?? raw['id'] ?? '').toString();
+        return id != sessionId;
+      }).toList();
+      _hydratePendingFromSchedule();
+    });
+  }
+
   /// Prefer UTC ISO scheduled_start converted to device-local HH:mm; else wire `time`. // COACH-SCHEDULE-LOCAL
   String _formatScheduledTime(Map session) {
     final ss = (session['scheduled_start'] ?? '').toString().trim();
@@ -15482,13 +15858,27 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   ),
                 ] else if (isBooked && !isC && sid.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.event_busy,
-                        color: Color(0xFFEF4444), size: 18),
-                    tooltip: 'Cancel session',
+                    icon: Icon(
+                        _sessionAppointmentIsPast(sm)
+                            ? Icons.lock_outline
+                            : Icons.event_busy,
+                        color: _sessionAppointmentIsPast(sm)
+                            ? const Color(0xFF8B7355)
+                            : const Color(0xFFEF4444),
+                        size: 18),
+                    tooltip: _sessionAppointmentIsPast(sm)
+                        ? 'Past session locked'
+                        : 'Cancel session',
                     padding: EdgeInsets.zero,
                     constraints:
                         const BoxConstraints(minWidth: 28, minHeight: 28),
-                    onPressed: () => _confirmCoachCancelSession(sid, cl, tm),
+                    onPressed: () {
+                      if (_sessionAppointmentIsPast(sm)) {
+                        _snackPastSessionLocked();
+                        return;
+                      }
+                      _confirmCoachCancelSession(sid, cl, tm);
+                    },
                   ),
               ]),
             );
@@ -23967,6 +24357,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   void _confirmCoachCancelSession(String sessionId, String clientName, String when) {
+    for (final raw in _schedule) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final id = (m['session_id'] ?? m['id'] ?? '').toString();
+      if (id == sessionId && _sessionAppointmentIsPast(m)) {
+        _snackPastSessionLocked();
+        return;
+      }
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -24027,6 +24426,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           backgroundColor: const Color(0xFF22C55E),
         ));
         _emitFetchCoachCalendar();
+      } else if (resp.statusCode == 409) {
+        String msg =
+            'Past sessions stay on the calendar for records and billing.';
+        try {
+          final body = jsonDecode(resp.body);
+          final detail = body is Map ? (body['detail'] ?? body) : body;
+          if (detail is Map) {
+            msg = (detail['message'] ?? detail['error'] ?? msg).toString();
+          }
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: const Color(0xFF8B7355),
+        ));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Cancel failed (${resp.statusCode}).'),
