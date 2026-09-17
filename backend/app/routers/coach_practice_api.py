@@ -17,6 +17,7 @@ from app.services.assistant_consult_archive import (
     list_consult_actions,
 )
 from app.services.coach_practice_report import (
+    _as_dict,
     anonymize_snapshot,
     compose_guidance,
     render_html,
@@ -177,7 +178,10 @@ async def create_report(
         _ = folder_id
     prior_dict = None
     if prior:
-        prior_dict = {"metrics": prior["metrics"] or {}, "guidance": prior["guidance"] or {}}
+        prior_dict = {
+            "metrics": _as_dict(prior["metrics"]),
+            "guidance": _as_dict(prior["guidance"]),
+        }
     guidance = await compose_guidance(request, snap, prior_dict, consult, banned)
     print_snap = anonymize_snapshot(snap)
     html_doc = render_html(print_snap, guidance, req.days)

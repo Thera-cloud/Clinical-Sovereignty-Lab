@@ -32,6 +32,19 @@ def _esc(v: Any) -> str:
     return html.escape("" if v is None else str(v))
 
 
+def _as_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
 def _svg_chart(
     series: List[Dict[str, Any]],
     scatter: Optional[List[Dict[str, Any]]] = None,
@@ -130,9 +143,13 @@ def _svg_chart(
 
 def _fallback_guidance(snap: Dict[str, Any], prior: Optional[Dict[str, Any]], consult: Dict[str, Any]) -> Dict[str, Any]:
     skills = snap.get("skills") or []
-    skill_txt = ", ".join(s["skill"] for s in skills[:4]) or "presence during live sessions"
-    totals = snap.get("totals") or {}
-    infl = snap.get("live_influence") or {}
+    skill_txt = ", ".join(
+        str(s.get("skill") or "")
+        for s in skills[:4]
+        if isinstance(s, dict) and s.get("skill")
+    ) or "presence during live sessions"
+    totals = _as_dict(snap.get("totals"))
+    infl = _as_dict(snap.get("live_influence"))
     mean = totals.get("healing_mean")
     dips = totals.get("cycle_dips") or 0
     lift = infl.get("mean_lift")
@@ -148,8 +165,12 @@ def _fallback_guidance(snap: Dict[str, Any], prior: Optional[Dict[str, Any]], co
         "Keep one CEE skill as the session opener; do not add a new modality this window.",
     ]
     prior_comp: List[Dict[str, str]] = []
-    if prior:
-        pt = (prior.get("metrics") or {}).get("totals") or {}
+    prior_d = _as_dict(prior)
+    if prior_d:
+        metrics = _as_dict(prior_d.get("metrics"))
+        pt = _as_dict(metrics.get("totals")) or (
+            metrics if "healing_mean" in metrics else {}
+        )
         pmean = pt.get("healing_mean")
         if mean is not None and pmean is not None:
             delta = float(mean) - float(pmean)
@@ -199,7 +220,11 @@ async def compose_guidance(
     infer = getattr(router, "inference_router", None) if router else None
     if infer is None:
         return base
-    totals = snap.get("totals") or {}
+    totals = _as_dict(snap.get("totals"))
+    prior_metrics = _as_dict(_as_dict(prior).get("metrics"))
+    prior_totals = _as_dict(prior_metrics.get("totals")) or (
+        prior_metrics if "healing_mean" in prior_metrics else {}
+    )
     prompt = (
         "Write coach-only performance guidance. NEVER name a client, family, or city. "
         "Return JSON with keys: cee_skillset (string), action_items (3 strings), "
@@ -208,9 +233,9 @@ async def compose_guidance(
         f"Cycle dips: {totals.get('cycle_dips')}\n"
         f"LN turns: {totals.get('ln_turns')}\n"
         f"Live sessions: {totals.get('live_sessions')}\n"
-        f"Live influence: {json.dumps(snap.get('live_influence') or {})}\n"
+        f"Live influence: {json.dumps(_as_dict(snap.get('live_influence')))}\n"
         f"Skill weights: {json.dumps(snap.get('skills') or [])}\n"
-        f"Prior totals: {json.dumps((prior or {}).get('metrics', {}).get('totals') if prior else {})}\n"
+        f"Prior totals: {json.dumps(prior_totals)}\n"
     )
     try:
         result = await asyncio.wait_for(

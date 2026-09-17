@@ -66,6 +66,23 @@ def test_print_html_has_letterhead_and_no_client_names():
     assert "Three actions" in html
 
 
+def test_fallback_guidance_accepts_string_metrics():
+    import json as _json
+
+    snap = {
+        "totals": {"healing_mean": 0.50, "cycle_dips": 2},
+        "skills": [{"skill": "presence"}],
+        "live_influence": {"direction": "flat"},
+    }
+    prior = {
+        "metrics": _json.dumps({"totals": {"healing_mean": 0.40, "cycle_dips": 1}}),
+        "guidance": _json.dumps({"cee_skillset": "ok"}),
+    }
+    g = _fallback_guidance(snap, prior, {"open": [], "completed": []})
+    assert any(i["item"] == "Roster healing mean" for i in g["prior_items"])
+    assert "0.400" in g["prior_items"][0]["detail"]
+
+
 def test_strip_client_names():
     raw = "Lana Smith opened a CEE window on Tuesday."
     assert "Lana" not in strip_client_names(raw, ["Lana Smith"])
