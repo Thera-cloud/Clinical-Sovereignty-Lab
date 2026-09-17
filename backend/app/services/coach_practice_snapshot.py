@@ -9,6 +9,8 @@ import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.services.thrive.healing_cycle import score_coherence, score_language
+
 logger = logging.getLogger(__name__)
 
 WINDOWS = (30, 90, 180)
@@ -68,7 +70,7 @@ async def resolve_master_for(conn, assistant_hw: str) -> Optional[Dict[str, str]
 
 async def roster_clients(conn, coach_hw: str, coach_username: str) -> List[Dict[str, str]]:
     rows = await conn.fetch(
-        """SELECT username, hardware_id,
+        """SELECT username, hardware_id, id::text AS uuid,
                   COALESCE(profile_data->>'name', username) AS display_name
            FROM users
            WHERE role = 'CLIENT'
@@ -82,6 +84,7 @@ async def roster_clients(conn, coach_hw: str, coach_username: str) -> List[Dict[
         {
             "username": r["username"],
             "hardware_id": r["hardware_id"],
+            "uuid": r["uuid"],
             "display_name": r["display_name"] or r["username"],
         }
         for r in rows
@@ -117,11 +120,13 @@ async def build_snapshot(
         clients = await roster_clients(conn, coach["hardware_id"], coach["username"])
         usernames = [c["username"] for c in clients]
         hw_ids = [c["hardware_id"] for c in clients]
+        uuids = [c.get("uuid") or "" for c in clients if c.get("uuid")]
         name_by_user = {c["username"]: c["display_name"] for c in clients}
+        alias = _identity_alias(clients)
 
         start = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         series, scatter = await _daily_series(
-            conn, coach, usernames, hw_ids, name_by_user, start, days, include_names
+            conn, coach, clients, usernames, hw_ids, uuids, alias, name_by_user, start, days, include_names
         )
         skills = await _skill_clusters(conn, coach, start)
         influence = _live_influence(series)
@@ -144,24 +149,307 @@ async def build_snapshot(
     }
 
 
+def _identity_alias(clients: List[Dict[str, str]]) -> Dict[str, str]:
+    alias: Dict[str, str] = {}
+    for c in clients:
+        user = c.get("username") or ""
+        if not user:
+            continue
+        alias[user] = user
+        for key in ("hardware_id", "uuid"):
+            val = (c.get(key) or "").strip()
+            if val:
+                alias[val] = user
+    return alias
+
+
+def compose_chart(
+    *,
+    days: int,
+    start: dt.date,
+    last_before: Dict[str, float],
+    observations: List[Dict[str, Any]],
+    dips: List[Dict[str, Any]],
+    live: List[Dict[str, Any]],
+    ln_by_day: Dict[str, int],
+    ln_by_user_day: Dict[Tuple[str, str], int],
+    live_count_by_day: Dict[str, int],
+    name_by_user: Dict[str, str],
+    include_names: bool,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Gold mean uses last-known carry-forward. Scatter keeps observed + weekly cloud."""
+    rank = {"coherence": 0, "session_cee": 1, "healing": 2}
+    by_day: Dict[str, List[Dict[str, Any]]] = {}
+    for obs in observations:
+        d = str(obs.get("date") or "")
+        if not d or obs.get("score") is None:
+            continue
+        by_day.setdefault(d, []).append(obs)
+    for bucket in by_day.values():
+        bucket.sort(key=lambda o: rank.get(str(o.get("kind") or ""), 0))
+
+    last = {
+        k: max(0.0, min(1.0, float(v)))
+        for k, v in last_before.items()
+        if v is not None
+    }
+    dip_count: Dict[str, int] = {}
+    for row in dips:
+        d = str(row.get("date") or "")
+        if d:
+            dip_count[d] = dip_count.get(d, 0) + 1
+
+    series: List[Dict[str, Any]] = []
+    scatter: List[Dict[str, Any]] = []
+    observed_keys: set = set()
+    step = 7 if days > 45 else 3
+    for i in range(days):
+        day = start + dt.timedelta(days=i + 1)
+        d = day.isoformat()
+        for obs in by_day.get(d, []):
+            user = str(obs.get("user") or "")
+            score = max(0.0, min(1.0, float(obs["score"])))
+            kind = str(obs.get("kind") or "healing")
+            if user and kind == "healing":
+                last[user] = score
+                observed_keys.add((d, user))
+            scatter.append(_scatter_point(
+                d, score, kind, user,
+                name_by_user, include_names, observed=True,
+                ln=ln_by_user_day.get((user, d), 0),
+                live=live_count_by_day.get(d, 0) > 0,
+            ))
+        scores = list(last.values())
+        mean_h = round(sum(scores) / len(scores), 4) if scores else None
+        series.append({
+            "date": d,
+            "healing_mean": mean_h,
+            "cycle_dips": dip_count.get(d, 0),
+            "ln_turns": ln_by_day.get(d, 0),
+            "live_sessions": live_count_by_day.get(d, 0),
+            "live": live_count_by_day.get(d, 0) > 0,
+        })
+        if i % step == (step - 1) or i == days - 1:
+            for user, score in last.items():
+                if (d, user) in observed_keys:
+                    continue
+                scatter.append(_scatter_point(
+                    d, score, "carried", user, name_by_user, include_names,
+                    observed=False,
+                    ln=ln_by_user_day.get((user, d), 0),
+                    live=live_count_by_day.get(d, 0) > 0,
+                ))
+
+    for row in dips:
+        d = str(row.get("date") or "")
+        user = str(row.get("user") or "")
+        if not d:
+            continue
+        y = last.get(user)
+        if y is None:
+            y = 0.38
+        scatter.append(_scatter_point(
+            d, y, "cycle_dip", user, name_by_user, include_names,
+            observed=True,
+            ln=ln_by_user_day.get((user, d), 0),
+            live=live_count_by_day.get(d, 0) > 0,
+        ))
+
+    for row in live:
+        d = str(row.get("date") or "")
+        user = str(row.get("user") or "")
+        if not d:
+            continue
+        y = row.get("score")
+        if y is None:
+            y = last.get(user)
+        if y is None:
+            y = next((s["healing_mean"] for s in series if s["date"] == d), None)
+        if y is None:
+            continue
+        scatter.append(_scatter_point(
+            d, float(y), "live_session", user, name_by_user, include_names,
+            observed=True,
+            ln=ln_by_user_day.get((user, d), 0),
+            live=True,
+        ))
+    return series, scatter
+
+
+def _scatter_point(
+    date: str,
+    healing: float,
+    kind: str,
+    user: str,
+    name_by_user: Dict[str, str],
+    include_names: bool,
+    *,
+    observed: bool,
+    ln: int,
+    live: bool,
+) -> Dict[str, Any]:
+    point: Dict[str, Any] = {
+        "date": date,
+        "healing": round(float(healing), 4),
+        "kind": kind,
+        "observed": observed,
+        "ln": int(ln or 0),
+        "live": bool(live),
+        "user": user,
+    }
+    if include_names:
+        point["client"] = name_by_user.get(user) or ("Cycle dip" if kind == "cycle_dip" else "Client")
+    return point
+
+
+def apply_language_floors(
+    last_before: Dict[str, float],
+    texts_by_user: Dict[str, List[str]],
+) -> Dict[str, float]:
+    """Fill missing clients from LN language so the whole book can hover."""
+    out = dict(last_before)
+    for user, texts in texts_by_user.items():
+        if not user or user in out:
+            continue
+        lang = score_language(texts)
+        if lang and lang.get("score") is not None:
+            out[user] = float(lang["score"])
+        elif texts:
+            out[user] = 0.5
+    return out
+
+
+async def _fill_roster_healing(
+    conn,
+    clients: List[Dict[str, str]],
+    alias: Dict[str, str],
+    last_before: Dict[str, float],
+    start: dt.datetime,
+) -> None:
+    missing = [c for c in clients if c.get("username") and c["username"] not in last_before]
+    if not missing:
+        return
+    idents = list({
+        x for c in missing
+        for x in (c.get("username"), c.get("hardware_id"), c.get("uuid"))
+        if x
+    })
+    texts_by_user: Dict[str, List[str]] = {}
+    try:
+        rows = await conn.fetch(
+            """SELECT user_id, user_text
+               FROM conversation_history
+               WHERE user_id = ANY($1::text[])
+                 AND created_at >= $2
+                 AND user_text IS NOT NULL
+                 AND length(user_text) > 8
+               ORDER BY created_at DESC
+               LIMIT 8000""",
+            idents,
+            start,
+        )
+        for r in rows:
+            user = alias.get(str(r["user_id"] or ""), str(r["user_id"] or ""))
+            if not user:
+                continue
+            bucket = texts_by_user.setdefault(user, [])
+            if len(bucket) < 80:
+                bucket.append(r["user_text"])
+    except Exception as e:
+        logger.debug("practice snapshot language floors: %s", e)
+    filled = apply_language_floors(last_before, texts_by_user)
+    last_before.update(filled)
+
+    still = [c for c in missing if c["username"] not in last_before]
+    if not still:
+        return
+    still_ids = list({
+        x for c in still
+        for x in (c.get("username"), c.get("hardware_id"), c.get("uuid"))
+        if x
+    })
+    try:
+        rows = await conn.fetch(
+            """SELECT COALESCE(hardware_id, user_id::text) AS ident, c_emo::float AS score
+               FROM client_metrics
+               WHERE (hardware_id = ANY($1::text[]) OR user_id::text = ANY($1::text[]))
+                 AND c_emo IS NOT NULL
+               ORDER BY updated_at DESC""",
+            still_ids,
+        )
+        recent: Dict[str, List[float]] = {}
+        for r in rows:
+            user = alias.get(str(r["ident"] or ""), "")
+            if not user or user in last_before:
+                continue
+            recent.setdefault(user, []).append(float(r["score"]))
+        for user, vals in recent.items():
+            if user in last_before:
+                continue
+            coh = score_coherence(vals[:20], vals[20:40] if len(vals) > 20 else [])
+            if coh and coh.get("score") is not None:
+                last_before[user] = float(coh["score"])
+            elif vals:
+                last_before[user] = max(0.0, min(1.0, sum(vals[:8]) / min(8, len(vals))))
+    except Exception as e:
+        logger.debug("practice snapshot metric floors: %s", e)
+
+
 async def _daily_series(
     conn,
     coach: Dict[str, str],
+    clients: List[Dict[str, str]],
     usernames: List[str],
     hw_ids: List[str],
+    uuids: List[str],
+    alias: Dict[str, str],
     name_by_user: Dict[str, str],
     start: dt.datetime,
     days: int,
     include_names: bool,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    healing_rows = []
-    cycle_rows = []
-    ln_rows = []
-    live_rows = []
-    ident_all = list({*usernames, *hw_ids})
+    ident_all = list({x for x in [*usernames, *hw_ids, *uuids] if x})
+    observations: List[Dict[str, Any]] = []
+    last_before: Dict[str, float] = {}
+    dips: List[Dict[str, Any]] = []
+    live: List[Dict[str, Any]] = []
+    ln_by_day: Dict[str, int] = {}
+    ln_by_user_day: Dict[Tuple[str, str], int] = {}
+    live_count_by_day: Dict[str, int] = {}
+
+    def _user(raw: Any) -> str:
+        return alias.get(str(raw or ""), "")
+
     if usernames:
         try:
-            healing_rows = await conn.fetch(
+            rows = await conn.fetch(
+                """SELECT DISTINCT ON (username) username, healing_score::float AS score
+                   FROM client_growth_phase_history
+                   WHERE username = ANY($1::text[])
+                     AND created_at < $2
+                     AND healing_score IS NOT NULL
+                   ORDER BY username, created_at DESC""",
+                usernames,
+                start,
+            )
+            for r in rows:
+                last_before[r["username"]] = float(r["score"])
+        except Exception as e:
+            logger.debug("practice snapshot last-before: %s", e)
+        try:
+            rows = await conn.fetch(
+                """SELECT username, healing_score::float AS score
+                   FROM client_growth_phase
+                   WHERE username = ANY($1::text[])
+                     AND healing_score IS NOT NULL""",
+                usernames,
+            )
+            for r in rows:
+                last_before.setdefault(r["username"], float(r["score"]))
+        except Exception as e:
+            logger.debug("practice snapshot current phase: %s", e)
+        try:
+            rows = await conn.fetch(
                 """SELECT username, created_at::date AS d, healing_score::float AS score
                    FROM client_growth_phase_history
                    WHERE username = ANY($1::text[])
@@ -170,11 +458,37 @@ async def _daily_series(
                 usernames,
                 start,
             )
+            for r in rows:
+                observations.append({
+                    "user": r["username"], "date": str(r["d"]),
+                    "score": float(r["score"]), "kind": "healing",
+                })
         except Exception as e:
             logger.debug("practice snapshot healing: %s", e)
         try:
-            cycle_rows = await conn.fetch(
-                """SELECT user_id, observed_at::date AS d, value
+            rows = await conn.fetch(
+                """SELECT user_id::text AS uid, recorded_at::date AS d,
+                          AVG(c_emo)::float AS score
+                   FROM nevedal_metrics
+                   WHERE user_id::text = ANY($1::text[])
+                     AND recorded_at >= $2
+                     AND c_emo IS NOT NULL
+                   GROUP BY 1, 2""",
+                ident_all,
+                start,
+            )
+            for r in rows:
+                user = _user(r["uid"])
+                if user and r["score"] is not None:
+                    observations.append({
+                        "user": user, "date": str(r["d"]),
+                        "score": float(r["score"]), "kind": "coherence",
+                    })
+        except Exception as e:
+            logger.debug("practice snapshot nevedal: %s", e)
+        try:
+            rows = await conn.fetch(
+                """SELECT user_id, observed_at::date AS d
                    FROM cycle_observations
                    WHERE user_id = ANY($1::text[])
                      AND observed_at >= $2
@@ -182,10 +496,12 @@ async def _daily_series(
                 ident_all,
                 start,
             )
+            for r in rows:
+                dips.append({"user": _user(r["user_id"]), "date": str(r["d"])})
         except Exception as e:
             logger.debug("practice snapshot cycles: %s", e)
         try:
-            ln_rows = await conn.fetch(
+            rows = await conn.fetch(
                 """SELECT user_id, created_at::date AS d, COUNT(*)::int AS n
                    FROM conversation_history
                    WHERE user_id = ANY($1::text[])
@@ -194,12 +510,20 @@ async def _daily_series(
                 ident_all,
                 start,
             )
+            for r in rows:
+                d = str(r["d"])
+                n = int(r["n"] or 0)
+                ln_by_day[d] = ln_by_day.get(d, 0) + n
+                user = _user(r["user_id"])
+                if user:
+                    ln_by_user_day[(user, d)] = ln_by_user_day.get((user, d), 0) + n
         except Exception as e:
             logger.debug("practice snapshot ln: %s", e)
     try:
-        live_rows = await conn.fetch(
-            """SELECT COALESCE(actual_start, scheduled_start, created_at)::date AS d,
-                      client_id, COUNT(*)::int AS n
+        rows = await conn.fetch(
+            f"""SELECT COALESCE(actual_start, scheduled_start, created_at)::date AS d,
+                      client_id, COUNT(*)::int AS n,
+                      AVG({_safe_cee()}) AS score
                FROM coaching_sessions
                WHERE coach_id::text = ANY($1::text[])
                  AND upper(COALESCE(session_type, '')) NOT IN ('MASTER_CONSULTATION', 'CONSULTATION')
@@ -209,67 +533,53 @@ async def _daily_series(
             [coach["hardware_id"], coach["uuid"], coach["username"]],
             start,
         )
+        for r in rows:
+            d = str(r["d"])
+            live_count_by_day[d] = live_count_by_day.get(d, 0) + int(r["n"] or 0)
+            user = _user(r["client_id"])
+            score = float(r["score"]) if r["score"] is not None else None
+            if score is not None and user:
+                observations.append({
+                    "user": user, "date": d, "score": score, "kind": "session_cee",
+                })
+            live.append({"user": user, "date": d, "score": score})
     except Exception as e:
         logger.debug("practice snapshot live: %s", e)
+    try:
+        rows = await conn.fetch(
+            f"""SELECT DISTINCT ON (client_id) client_id,
+                      {_safe_cee()} AS score
+               FROM coaching_sessions
+               WHERE client_id::text = ANY($1::text[])
+                 AND status IN ('completed', 'active')
+                 AND COALESCE(actual_start, scheduled_start, created_at) < $2
+               ORDER BY client_id,
+                        COALESCE(actual_start, scheduled_start, created_at) DESC""",
+            ident_all,
+            start,
+        )
+        for r in rows:
+            user = _user(r["client_id"])
+            if user and r["score"] is not None:
+                last_before.setdefault(user, max(0.0, min(1.0, float(r["score"]))))
+    except Exception as e:
+        logger.debug("practice snapshot last-before session: %s", e)
 
-    by_day_heal: Dict[str, List[float]] = {}
-    scatter: List[Dict[str, Any]] = []
-    for r in healing_rows:
-        d = str(r["d"])
-        score = float(r["score"] or 0)
-        by_day_heal.setdefault(d, []).append(score)
-        point = {
-            "date": d,
-            "healing": round(score, 4),
-            "kind": "healing",
-        }
-        if include_names:
-            point["client"] = name_by_user.get(r["username"], "Client")
-        scatter.append(point)
+    await _fill_roster_healing(conn, clients, alias, last_before, start)
 
-    dips: Dict[str, int] = {}
-    for r in cycle_rows:
-        d = str(r["d"])
-        dips[d] = dips.get(d, 0) + 1
-        point = {"date": d, "healing": None, "kind": "cycle_dip"}
-        if include_names:
-            point["client"] = "Cycle dip"
-        scatter.append(point)
-
-    ln_day: Dict[str, int] = {}
-    for r in ln_rows:
-        d = str(r["d"])
-        ln_day[d] = ln_day.get(d, 0) + int(r["n"] or 0)
-
-    live_day: Dict[str, int] = {}
-    live_clients: Dict[str, set] = {}
-    for r in live_rows:
-        d = str(r["d"])
-        live_day[d] = live_day.get(d, 0) + int(r["n"] or 0)
-        live_clients.setdefault(d, set()).add(str(r["client_id"] or ""))
-
-    series: List[Dict[str, Any]] = []
-    for i in range(days):
-        day = (start.date() + dt.timedelta(days=i + 1))
-        d = day.isoformat()
-        scores = by_day_heal.get(d) or []
-        mean_h = round(sum(scores) / len(scores), 4) if scores else None
-        series.append({
-            "date": d,
-            "healing_mean": mean_h,
-            "cycle_dips": dips.get(d, 0),
-            "ln_turns": ln_day.get(d, 0),
-            "live_sessions": live_day.get(d, 0),
-            "live": live_day.get(d, 0) > 0,
-        })
-        if live_day.get(d, 0) and include_names:
-            scatter.append({
-                "date": d,
-                "healing": mean_h,
-                "kind": "live_session",
-                "client": "Live session",
-            })
-    return series, scatter
+    return compose_chart(
+        days=days,
+        start=start.date(),
+        last_before=last_before,
+        observations=observations,
+        dips=dips,
+        live=live,
+        ln_by_day=ln_by_day,
+        ln_by_user_day=ln_by_user_day,
+        live_count_by_day=live_count_by_day,
+        name_by_user=name_by_user,
+        include_names=include_names,
+    )
 
 
 async def _skill_clusters(conn, coach: Dict[str, str], start: dt.datetime) -> List[Dict[str, Any]]:

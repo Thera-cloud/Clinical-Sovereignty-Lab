@@ -31,14 +31,19 @@ def _esc(v: Any) -> str:
     return html.escape("" if v is None else str(v))
 
 
-def _svg_chart(series: List[Dict[str, Any]], width: int = 720, height: int = 220) -> str:
+def _svg_chart(
+    series: List[Dict[str, Any]],
+    scatter: Optional[List[Dict[str, Any]]] = None,
+    width: int = 720,
+    height: int = 220,
+) -> str:
     if not series:
         return f'<svg width="{width}" height="{height}"></svg>'
-    pad_l, pad_r, pad_t, pad_b = 36, 12, 12, 28
+    pad_l, pad_r, pad_t, pad_b = 56, 16, 16, 48
     inner_w = width - pad_l - pad_r
     inner_h = height - pad_t - pad_b
     n = max(len(series) - 1, 1)
-    heals = [s.get("healing_mean") for s in series if s.get("healing_mean") is not None]
+    idx = {str(s.get("date")): i for i, s in enumerate(series)}
     pts = []
     live_ticks = []
     for i, s in enumerate(series):
@@ -57,17 +62,68 @@ def _svg_chart(series: List[Dict[str, Any]], width: int = 720, height: int = 220
         f'stroke="#C9A962" stroke-opacity="0.35" stroke-width="1"/>'
         for x in live_ticks
     )
-    dots = "".join(
-        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.4" fill="#E8D5A3"/>' for x, y in pts
-    )
+    dots = []
+    for p in scatter or []:
+        h = p.get("healing")
+        di = idx.get(str(p.get("date") or ""))
+        if h is None or di is None:
+            continue
+        x = pad_l + inner_w * (di / n)
+        y = pad_t + inner_h * (1.0 - max(0.0, min(1.0, float(h))))
+        kind = str(p.get("kind") or "")
+        if kind == "cycle_dip":
+            dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.2" fill="#EF4444"/>')
+        elif kind == "live_session":
+            dots.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="none" stroke="#C9A962" stroke-width="1.4"/>'
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.6" fill="#E8D5A3"/>'
+            )
+        elif kind == "carried":
+            dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2" fill="#C9A962" fill-opacity="0.35"/>')
+        else:
+            dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.4" fill="#E8D5A3"/>')
     line = f'<path d="{path}" fill="none" stroke="#C9A962" stroke-width="2"/>' if path else ""
+    y_labels = [
+        f'<text transform="rotate(-90 12 {height / 2:.0f})" x="12" y="{height / 2:.0f}" '
+        f'fill="#E8D5A3" font-size="11" text-anchor="middle">Healing 0–1</text>'
+    ]
+    for t in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        y = pad_t + inner_h * (1.0 - t)
+        y_labels.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" '
+            f'stroke="#FFFFFF" stroke-opacity="0.18"/>'
+            f'<text x="22" y="{y + 3:.0f}" fill="#E8D5A3" font-size="10">{t:.1f}</text>'
+        )
+    x_max = max(len(series), 1)
+    x_count = x_max if x_max <= 8 else 6
+    x_labels = [
+        f'<text x="{pad_l + inner_w / 2:.1f}" y="{height - 4}" fill="#E8D5A3" '
+        f'font-size="11" text-anchor="middle">Days 0–{x_max}</text>'
+    ]
+    for k in range(x_count):
+        day = 0 if x_count == 1 else round(k / (x_count - 1) * x_max)
+        x = pad_l + inner_w * (day / x_max)
+        i = min(day, len(series) - 1)
+        date = _esc(series[i].get("date") or "")
+        x_labels.append(
+            f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{pad_t + inner_h}" '
+            f'stroke="#FFFFFF" stroke-opacity="0.12"/>'
+            f'<text x="{x:.1f}" y="{height - 22}" fill="#C9A962" font-size="9" '
+            f'text-anchor="middle">Day {day}</text>'
+            f'<text x="{x:.1f}" y="{height - 12}" fill="#C9A962" font-size="8" '
+            f'text-anchor="middle">{date}</text>'
+        )
+    axes = (
+        f'<line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{pad_t + inner_h}" stroke="#C9A962" stroke-width="1.6"/>'
+        f'<line x1="{pad_l}" y1="{pad_t + inner_h}" x2="{width - pad_r}" y2="{pad_t + inner_h}" stroke="#C9A962" stroke-width="1.6"/>'
+        f'<circle cx="{pad_l}" cy="{pad_t + inner_h}" r="3" fill="#E8D5A3"/>'
+    )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" aria-label="Practice trend">'
         f'<rect width="{width}" height="{height}" fill="#0A0A0A"/>'
-        f'<text x="8" y="16" fill="#8B7355" font-size="10">Healing 1.0</text>'
-        f'<text x="8" y="{height - 8}" fill="#8B7355" font-size="10">0.0</text>'
-        f"{ticks}{line}{dots}</svg>"
+        f"{''.join(y_labels)}{''.join(x_labels)}{axes}"
+        f"{ticks}{line}{''.join(dots)}</svg>"
     )
 
 
@@ -213,7 +269,7 @@ def render_html(
     open_a = guidance.get("master_actions_open") or []
     done_html = "".join(f"<li>{_esc(x.get('text') if isinstance(x, dict) else x)}</li>" for x in done) or "<li>None completed this window.</li>"
     open_html = "".join(f"<li>{_esc(x.get('text') if isinstance(x, dict) else x)}</li>" for x in open_a) or "<li>No open consult requests.</li>"
-    svg = _svg_chart(snap.get("series") or [])
+    svg = _svg_chart(snap.get("series") or [], snap.get("scatter") or [])
     hm = totals.get("healing_mean")
     hm_s = f"{hm:.3f}" if isinstance(hm, (int, float)) else "—"
     lift = infl.get("mean_lift")
@@ -293,7 +349,7 @@ def anonymize_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(snap)
     clean_scatter = []
     for p in snap.get("scatter") or []:
-        q = {k: v for k, v in p.items() if k != "client"}
+        q = {k: v for k, v in p.items() if k not in ("client", "user")}
         clean_scatter.append(q)
     out["scatter"] = clean_scatter
     return out

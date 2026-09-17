@@ -5,12 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.services.assistant_consult_archive import extract_action_items
+import datetime as dt
+
 from app.services.coach_practice_report import (
     anonymize_snapshot,
     render_html,
     strip_client_names,
     _fallback_guidance,
 )
+from app.services.coach_practice_snapshot import apply_language_floors, compose_chart
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -42,9 +45,14 @@ def test_print_html_has_letterhead_and_no_client_names():
     }
     clean = anonymize_snapshot(snap)
     assert "client" not in (clean["scatter"][0])
+    assert "user" not in (clean["scatter"][0])
     guidance = _fallback_guidance(clean, None, {"open": [], "completed": [{"text": "Log two consult hours"}]})
     html = render_html(clean, guidance, 90)
     assert "Sovereign Sanctuary" in html
+    assert "Day 0" in html
+    assert "Healing 0" in html
+    assert "Days 0–" in html
+    assert ">0.2<" in html or "0.2" in html
     assert "84-3879515" in html
     assert "Lana Smith" not in html
     assert "Coach Hope" in html
@@ -58,6 +66,48 @@ def test_strip_client_names():
     assert "Lana" not in strip_client_names(raw, ["Lana Smith"])
 
 
+def test_compose_chart_fills_window_and_keeps_scatter():
+    start = dt.date(2026, 6, 20)
+    series, scatter = compose_chart(
+        days=90,
+        start=start,
+        last_before={"longra": 0.75},
+        observations=[
+            {"user": "longra", "date": "2026-07-01", "score": 0.05, "kind": "coherence"},
+            {"user": "longra", "date": "2026-09-16", "score": 0.80, "kind": "healing"},
+        ],
+        dips=[{"user": "longra", "date": "2026-08-01"}],
+        live=[{"user": "longra", "date": "2026-09-10", "score": 0.66}],
+        ln_by_day={"2026-09-16": 4},
+        ln_by_user_day={("longra", "2026-09-16"): 4},
+        live_count_by_day={"2026-09-10": 1},
+        name_by_user={"longra": "Longra"},
+        include_names=True,
+    )
+    assert len(series) == 90
+    assert series[0]["date"] < series[-1]["date"]
+    assert series[0]["healing_mean"] == 0.75
+    july = next(s for s in series if s["date"] == "2026-07-01")
+    assert july["healing_mean"] == 0.75
+    assert series[-1]["healing_mean"] == 0.80
+    assert any(p.get("client") == "Longra" and p.get("kind") == "healing" for p in scatter)
+    assert any(p.get("kind") == "carried" for p in scatter)
+    assert any(p.get("kind") == "cycle_dip" and p.get("healing") is not None for p in scatter)
+    assert any(p.get("kind") == "live_session" for p in scatter)
+
+
+def test_language_floors_fill_missing_book():
+    texts = {
+        "lisa": ["I keep moving forward and I am sleeping better now.", "I want to keep this pace.", "I am proud of the work.", "Today felt lighter than last week."],
+        "kristy": ["I keep moving forward and I am sleeping better now.", "I want to keep this pace.", "I am proud of the work.", "Today felt lighter than last week."],
+        "eric": ["checking in"],
+    }
+    filled = apply_language_floors({"lisa": 0.81}, texts)
+    assert filled["lisa"] == 0.81
+    assert "kristy" in filled and 0.0 <= filled["kristy"] <= 1.0
+    assert filled["eric"] == 0.5
+
+
 def test_flutter_wires_practice_card():
     src = (REPO / "mobile/lib/updated_screens.dart").read_text()
     assert "CoachPracticeSnapshotCard" in src
@@ -65,6 +115,16 @@ def test_flutter_wires_practice_card():
     widget = (REPO / "mobile/lib/widgets/coach_practice_snapshot.dart").read_text()
     assert "Print review (no client names)" in widget
     assert "PointerScrollEvent" in widget
+    assert "Gold = roster mean" in widget
+    assert "Origin bottom-left" in widget
+    assert "_ChartGeom" in widget
+    assert "pointerSignalResolver" in widget
+    assert "HitTestBehavior.opaque" in widget
+    assert "Healing 0–1" in widget
+    assert "Days 0–" in widget
+    assert "Day $day" in widget
+    assert "0.2" in widget
+    assert "_zoomStart = 0" in widget
 
 
 def test_migration_adds_assistant_folder_type():
