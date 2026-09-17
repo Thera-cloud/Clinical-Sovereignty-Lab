@@ -37,8 +37,12 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   Map<String, dynamic>? _snap;
   String? _hover;
   Offset? _hoverPos;
-  double _zoomStart = 0;
-  double _zoomEnd = 1;
+  final _nameCtrl = TextEditingController();
+  final List<String> _picked = [];
+  double _x0 = 0;
+  double _x1 = 1;
+  double _y0 = 0;
+  double _y1 = 1;
 
   @override
   void initState() {
@@ -47,9 +51,17 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   }
 
   @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(covariant CoachPracticeSnapshotCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.targetCoachUsername != widget.targetCoachUsername) {
+      _picked.clear();
+      _nameCtrl.clear();
       _load();
     }
   }
@@ -62,6 +74,9 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
       if ((widget.targetCoachUsername ?? '').isNotEmpty) {
         q['coach'] = widget.targetCoachUsername!;
       }
+      if (_picked.isNotEmpty) {
+        q['clients'] = _picked.join(',');
+      }
       final uri = Uri.parse('${widget.apiBase}/api/coach/practice/snapshot')
           .replace(queryParameters: q);
       final resp = await http.get(uri, headers: widget.headers);
@@ -70,8 +85,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
         final data = jsonDecode(resp.body);
         setState(() {
           _snap = Map<String, dynamic>.from(data['snapshot'] ?? {});
-          _zoomStart = 0;
-          _zoomEnd = 1;
+          _resetView(notify: false);
           _hover = null;
         });
       }
@@ -81,6 +95,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
 
   Future<void> _print() async {
     if (_printing) return;
+    final sheet = kIsWeb ? openPrintWindow() : null;
     setState(() => _printing = true);
     try {
       final resp = await http.post(
@@ -93,10 +108,16 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
           'days': _days,
           if ((widget.targetCoachUsername ?? '').isNotEmpty)
             'coach_username': widget.targetCoachUsername,
+          if (_picked.isNotEmpty) 'clients': _picked,
         }),
       );
-      if (!mounted) return;
+      if (!mounted) {
+        closePrintWindow(sheet);
+        return;
+      }
       if (resp.statusCode != 200) {
+        closePrintWindow(sheet);
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Print failed (${resp.statusCode})'),
           backgroundColor: Colors.red.shade800,
@@ -105,48 +126,183 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
       }
       final data = jsonDecode(resp.body);
       final printUrl = data['print_url']?.toString() ?? '';
-      if (printUrl.isEmpty) return;
+      if (printUrl.isEmpty) {
+        closePrintWindow(sheet);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Print failed: no report URL'),
+          backgroundColor: Color(0xFF8B7355),
+        ));
+        return;
+      }
       final htmlResp = await http.get(
         Uri.parse('${widget.apiBase}$printUrl'),
         headers: widget.headers,
       );
+      if (!mounted) {
+        closePrintWindow(sheet);
+        return;
+      }
       if (htmlResp.statusCode == 200 &&
           htmlResp.body.contains('Sovereign Sanctuary')) {
-        if (kIsWeb) openPrintHtml(htmlResp.body);
+        writePrintHtml(sheet, htmlResp.body);
+      } else {
+        closePrintWindow(sheet);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Print page failed (${htmlResp.statusCode})'),
+          backgroundColor: Colors.red.shade800,
+        ));
       }
     } catch (e) {
+      closePrintWindow(sheet);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Print failed: $e'),
           backgroundColor: Colors.red.shade800,
         ));
       }
+    } finally {
+      if (mounted) setState(() => _printing = false);
     }
-    if (mounted) setState(() => _printing = false);
   }
 
-  void _resetZoom() {
-    setState(() {
-      _zoomStart = 0;
-      _zoomEnd = 1;
-    });
+  List<Map<String, dynamic>> _rosterMembers() {
+    return List<Map<String, dynamic>>.from(_snap?['roster_members'] ?? []);
   }
+
+  void _applyTypedNames() {
+    final raw = _nameCtrl.text.trim();
+    if (raw.isEmpty) {
+      setState(_picked.clear);
+      _load();
+      return;
+    }
+    final tokens = raw
+        .split(RegExp(r'[,;\n]+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final book = _rosterMembers();
+    final matched = <String>{};
+    for (final t in tokens) {
+      final needle = t.toLowerCase();
+      for (final m in book) {
+        final un = (m['username'] ?? '').toString();
+        final dn = (m['display_name'] ?? '').toString();
+        if (un.toLowerCase().contains(needle) ||
+            dn.toLowerCase().contains(needle)) {
+          if (un.isNotEmpty) matched.add(un);
+        }
+      }
+    }
+    if (matched.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('No roster match for "$raw"'),
+        backgroundColor: const Color(0xFF8B7355),
+      ));
+      return;
+    }
+    setState(() {
+      _picked
+        ..clear()
+        ..addAll(matched);
+    });
+    _load();
+  }
+
+  void _toggleMember(String username) {
+    setState(() {
+      if (_picked.contains(username)) {
+        _picked.remove(username);
+      } else {
+        _picked.add(username);
+      }
+    });
+    _load();
+  }
+
+  void _resetView({bool notify = true}) {
+    void apply() {
+      _x0 = 0;
+      _x1 = 1;
+      _y0 = 0;
+      _y1 = 1;
+    }
+
+    if (notify) {
+      setState(apply);
+    } else {
+      apply();
+    }
+  }
+
+  double _minSpanX(int seriesLen) =>
+      math.max(7.0 / math.max(seriesLen, 7), 0.06);
 
   void _onWheel(PointerScrollEvent e, Size size, int seriesLen) {
     GestureBinding.instance.pointerSignalResolver.register(e, (event) {
       final ev = event as PointerScrollEvent;
       if (ev.scrollDelta.dy == 0) return;
-      final geom = _ChartGeom(size, math.max(seriesLen, 1));
+      final geom = _ChartGeom(
+        size,
+        math.max(seriesLen, 1),
+        x0: _x0,
+        x1: _x1,
+        y0: _y0,
+        y1: _y1,
+      );
       if (!geom.plot.contains(ev.localPosition)) return;
-      final minSpan = math.max(7.0 / math.max(seriesLen, 7), 0.22);
-      final next = ev.scrollDelta.dy > 0
-          ? (_zoomEnd * 1.12).clamp(minSpan, 1.0)
-          : (_zoomEnd * 0.88).clamp(minSpan, 1.0);
+      final fx = ((ev.localPosition.dx - geom.plot.left) / geom.plot.width)
+          .clamp(0.0, 1.0);
+      final fy = ((ev.localPosition.dy - geom.plot.top) / geom.plot.height)
+          .clamp(0.0, 1.0);
+      final anchorX = _x0 + fx * (_x1 - _x0);
+      final anchorY = _y0 + (1 - fy) * (_y1 - _y0);
+      final factor = ev.scrollDelta.dy > 0 ? 1.12 : 0.88;
+      final spanX =
+          ((_x1 - _x0) * factor).clamp(_minSpanX(seriesLen), 1.0);
+      final spanY = ((_y1 - _y0) * factor).clamp(0.08, 1.0);
+      var x0 = anchorX - fx * spanX;
+      var y0 = anchorY - (1 - fy) * spanY;
+      if (x0 < 0) x0 = 0;
+      if (x0 + spanX > 1) x0 = 1 - spanX;
+      if (y0 < 0) y0 = 0;
+      if (y0 + spanY > 1) y0 = 1 - spanY;
       setState(() {
-        _zoomStart = 0;
-        _zoomEnd = next;
+        _x0 = x0;
+        _x1 = x0 + spanX;
+        _y0 = y0;
+        _y1 = y0 + spanY;
       });
     });
+  }
+
+  void _onDateWindow(RangeValues v, int seriesLen) {
+    final minSpan = _minSpanX(seriesLen);
+    var a = v.start.clamp(0.0, 1.0);
+    var b = v.end.clamp(0.0, 1.0);
+    if (b - a < minSpan) {
+      final mid = ((v.start + v.end) / 2).clamp(minSpan / 2, 1 - minSpan / 2);
+      a = (mid - minSpan / 2).clamp(0.0, 1.0);
+      b = (a + minSpan).clamp(0.0, 1.0);
+      a = b - minSpan;
+    }
+    setState(() {
+      _x0 = a;
+      _x1 = b;
+    });
+  }
+
+  String _dateAt(List<Map<String, dynamic>> series, double t) {
+    if (series.isEmpty) return '';
+    final i = (t * (series.length - 1)).round().clamp(0, series.length - 1);
+    return _shortDate(series[i]['date']);
+  }
+
+  String _shortDate(dynamic raw) {
+    final s = raw?.toString() ?? '';
+    if (s.length >= 10) return '${s.substring(5, 7)}/${s.substring(8, 10)}';
+    return s;
   }
 
   @override
@@ -157,6 +313,8 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
     final height = widget.compact ? 236.0 : 320.0;
     final title = widget.headlineHint ??
         '${coach['display_name'] ?? 'Practice'} · ${_days}d snapshot';
+    final series = List<Map<String, dynamic>>.from(_snap?['series'] ?? []);
+    final scatter = List<Map<String, dynamic>>.from(_snap?['scatter'] ?? []);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -219,7 +377,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
               }),
               const SizedBox(width: 8),
               TextButton(
-                onPressed: _resetZoom,
+                onPressed: _resetView,
                 child: const Text('Reset',
                     style: TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
               ),
@@ -246,10 +404,11 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
               ),
             ),
+          _nameFilterBar(),
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'Origin bottom-left. Days → right. Healing 0–1 ↑. Gold = roster mean   ● client   ◯ live   ● dip',
+              'Wheel zooms at cursor (X+Y). Slider searches dates. Gold = roster mean   ● client   ◯ live   ● dip',
               style: TextStyle(color: Color(0xFF8B7355), fontSize: 10),
             ),
           ),
@@ -267,11 +426,6 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
               child: LayoutBuilder(
                 builder: (context, box) {
                   final size = Size(box.maxWidth, height);
-                  final series = List<Map<String, dynamic>>.from(
-                      _snap?['series'] ?? []);
-                  final scatter = List<Map<String, dynamic>>.from(
-                      _snap?['scatter'] ?? []);
-                  final vis = _visible(series);
                   return Listener(
                     behavior: HitTestBehavior.opaque,
                     onPointerSignal: (sig) {
@@ -280,11 +434,11 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                       }
                     },
                     child: GestureDetector(
-                      onDoubleTap: _resetZoom,
+                      onDoubleTap: () => _resetView(),
                       child: MouseRegion(
                         onHover: (e) {
                           final label = _hoverAt(
-                              e.localPosition, size, vis, scatter);
+                              e.localPosition, size, series, scatter);
                           if (label != _hover || _hoverPos != e.localPosition) {
                             setState(() {
                               _hover = label;
@@ -302,9 +456,13 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                             CustomPaint(
                               size: size,
                               painter: _PracticePainter(
-                                series: vis,
+                                series: series,
                                 scatter: scatter,
-                                dayMax: vis.isEmpty ? _days : vis.length,
+                                x0: _x0,
+                                x1: _x1,
+                                y0: _y0,
+                                y1: _y1,
+                                windowDays: _days,
                               ),
                             ),
                             if (_hover != null && _hoverPos != null)
@@ -345,6 +503,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 },
               ),
             ),
+          if (series.isNotEmpty) _dateSlider(series),
           const SizedBox(height: 8),
           Wrap(
             spacing: 10,
@@ -356,6 +515,148 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
               _stat('Live', '${totals['live_sessions'] ?? 0}'),
               _stat('Book', '${totals['roster'] ?? 0}'),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _nameFilterBar() {
+    final book = _rosterMembers();
+    final typed = _nameCtrl.text.trim().toLowerCase();
+    final suggestions = typed.isEmpty
+        ? book.take(8).toList()
+        : book
+            .where((m) {
+              final un = (m['username'] ?? '').toString().toLowerCase();
+              final dn = (m['display_name'] ?? '').toString().toLowerCase();
+              return un.contains(typed) || dn.contains(typed);
+            })
+            .take(8)
+            .toList();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 36,
+            child: TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Type a name, or several separated by commas',
+                hintStyle:
+                    const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
+                filled: true,
+                fillColor: const Color(0xFF111111),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0x55C9A962)),
+                ),
+                suffixIcon: IconButton(
+                  tooltip: 'Show named set',
+                  icon: const Icon(Icons.person_search,
+                      color: Color(0xFFC9A962), size: 18),
+                  onPressed: _applyTypedNames,
+                ),
+              ),
+              onSubmitted: (_) => _applyTypedNames(),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          if (book.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  ...suggestions.map((m) {
+                    final un = (m['username'] ?? '').toString();
+                    final dn = (m['display_name'] ?? un).toString();
+                    final on = _picked.contains(un);
+                    return FilterChip(
+                      label: Text(dn,
+                          style: TextStyle(
+                              color: on
+                                  ? const Color(0xFF050505)
+                                  : const Color(0xFFE8D5A3),
+                              fontSize: 10)),
+                      selected: on,
+                      selectedColor: const Color(0xFFC9A962),
+                      backgroundColor: const Color(0xFF111111),
+                      side: const BorderSide(color: Color(0x55C9A962)),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => _toggleMember(un),
+                    );
+                  }),
+                  if (_picked.isNotEmpty)
+                    ActionChip(
+                      label: const Text('All',
+                          style: TextStyle(
+                              color: Color(0xFFC9A962), fontSize: 10)),
+                      backgroundColor: const Color(0xFF111111),
+                      side: const BorderSide(color: Color(0x55C9A962)),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () {
+                        _nameCtrl.clear();
+                        setState(_picked.clear);
+                        _load();
+                      },
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dateSlider(List<Map<String, dynamic>> series) {
+    final start = _dateAt(series, _x0);
+    final end = _dateAt(series, _x1);
+    final lo = (_x0 * math.max(series.length - 1, 1)).round();
+    final hi = (_x1 * math.max(series.length - 1, 1)).round();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(48, 2, 8, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Text('Dates',
+                  style: TextStyle(color: Color(0xFFE8D5A3), fontSize: 10)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Day $lo ($start)  →  Day $hi ($end)',
+                  style: const TextStyle(color: Color(0xFFC9A962), fontSize: 10),
+                ),
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: const Color(0xFFC9A962),
+              inactiveTrackColor: const Color(0x33C9A962),
+              thumbColor: const Color(0xFFE8D5A3),
+              overlayColor: const Color(0x33C9A962),
+              rangeThumbShape:
+                  const RoundRangeSliderThumbShape(enabledThumbRadius: 7),
+              rangeTrackShape: const RoundedRectRangeSliderTrackShape(),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: RangeSlider(
+              values: RangeValues(_x0.clamp(0.0, 1.0), _x1.clamp(0.0, 1.0)),
+              min: 0,
+              max: 1,
+              divisions: math.max(series.length - 1, 1),
+              onChanged: (v) => _onDateWindow(v, series.length),
+            ),
           ),
         ],
       ),
@@ -375,23 +676,30 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   String? _hoverAt(
     Offset pos,
     Size size,
-    List<Map<String, dynamic>> vis,
+    List<Map<String, dynamic>> series,
     List<Map<String, dynamic>> scatter,
   ) {
-    if (vis.isEmpty) return null;
-    final geom = _ChartGeom(size, vis.length);
+    if (series.isEmpty) return null;
+    final geom = _ChartGeom(
+      size,
+      series.length,
+      x0: _x0,
+      x1: _x1,
+      y0: _y0,
+      y1: _y1,
+    );
     if (!geom.plot.contains(pos)) {
-      final mean = _meanAt(pos, vis, geom);
-      return mean;
+      return _meanAt(pos, series, geom);
     }
     String? best;
     var bestD = 16.0;
     for (final p in scatter) {
       final date = p['date']?.toString();
-      final idx = vis.indexWhere((s) => s['date'] == date);
+      final idx = series.indexWhere((s) => s['date'] == date);
       if (idx < 0) continue;
       final h = p['healing'];
       if (h is! num) continue;
+      if (!geom.inX(idx)) continue;
       final pt = geom.point(idx, h.toDouble(), p['client']?.toString() ?? '');
       final d = (pt - pos).distance;
       if (d < bestD) {
@@ -405,35 +713,40 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
             '$label\n${p['date']} · $kind ${h.toStringAsFixed(3)}\nLN $ln that day · Live $live';
       }
     }
-    return best ?? _meanAt(pos, vis, geom);
+    return best ?? _meanAt(pos, series, geom);
   }
 
   String? _meanAt(
-      Offset pos, List<Map<String, dynamic>> vis, _ChartGeom geom) {
-    if (vis.isEmpty) return null;
-    final t = ((pos.dx - geom.plot.left) / geom.plot.width).clamp(0.0, 1.0);
-    final idx = (t * (vis.length - 1)).round().clamp(0, vis.length - 1);
-    final h = vis[idx]['healing_mean'];
+      Offset pos, List<Map<String, dynamic>> series, _ChartGeom geom) {
+    if (series.isEmpty) return null;
+    final wx = geom.screenToWorldX(pos.dx);
+    final idx = (wx * (series.length - 1)).round().clamp(0, series.length - 1);
+    final h = series[idx]['healing_mean'];
     if (h is! num) return null;
-    return 'Roster mean · ${vis[idx]['date']} · ${h.toStringAsFixed(3)}';
-  }
-
-  List<Map<String, dynamic>> _visible(List<Map<String, dynamic>> series) {
-    if (series.isEmpty) return series;
-    final b = (_zoomEnd * series.length).ceil().clamp(1, series.length);
-    return series.sublist(0, b);
+    return 'Roster mean · ${series[idx]['date']} · ${h.toStringAsFixed(3)}';
   }
 }
 
 class _ChartGeom {
   final Size size;
   final int count;
+  final double x0;
+  final double x1;
+  final double y0;
+  final double y1;
   static const padL = 56.0;
   static const padR = 16.0;
   static const padT = 14.0;
   static const padB = 48.0;
 
-  _ChartGeom(this.size, this.count);
+  _ChartGeom(
+    this.size,
+    this.count, {
+    required this.x0,
+    required this.x1,
+    required this.y0,
+    required this.y1,
+  });
 
   Rect get plot => Rect.fromLTWH(
         padL,
@@ -442,36 +755,70 @@ class _ChartGeom {
         math.max(1, size.height - padT - padB),
       );
 
+  double get spanX => math.max(x1 - x0, 1e-6);
+  double get spanY => math.max(y1 - y0, 1e-6);
+
+  double worldX(int idx) => count <= 1 ? 0.0 : idx / (count - 1);
+
+  bool inX(int idx) {
+    final wx = worldX(idx);
+    return wx >= x0 - 0.002 && wx <= x1 + 0.002;
+  }
+
+  Offset mapped(int idx, double healing) {
+    final sx = plot.left + plot.width * ((worldX(idx) - x0) / spanX);
+    final sy = plot.top +
+        plot.height * (1 - ((healing.clamp(0.0, 1.0) - y0) / spanY));
+    return Offset(sx, sy);
+  }
+
   Offset point(int idx, double healing, String jitterKey) {
-    final n = math.max(count - 1, 1);
-    final x = plot.left + plot.width * (idx / n);
-    final y = plot.top + plot.height * (1 - healing.clamp(0.0, 1.0));
+    final base = mapped(idx, healing);
     final h = jitterKey.hashCode;
     return Offset(
-      x + ((h % 13) - 6).toDouble(),
-      y + (((h ~/ 13) % 15) - 7).toDouble(),
+      base.dx + ((h % 13) - 6).toDouble(),
+      base.dy + (((h ~/ 13) % 15) - 7).toDouble(),
     );
   }
+
+  double screenToWorldX(double dx) =>
+      x0 + ((dx - plot.left) / plot.width).clamp(0.0, 1.0) * spanX;
 }
 
 class _PracticePainter extends CustomPainter {
   final List<Map<String, dynamic>> series;
   final List<Map<String, dynamic>> scatter;
-  final int dayMax;
+  final double x0;
+  final double x1;
+  final double y0;
+  final double y1;
+  final int windowDays;
 
   _PracticePainter({
     required this.series,
     required this.scatter,
-    required this.dayMax,
+    required this.x0,
+    required this.x1,
+    required this.y0,
+    required this.y1,
+    required this.windowDays,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final count = math.max(series.length, 2);
-    final geom = _ChartGeom(size, count);
+    final geom = _ChartGeom(
+      size,
+      series.isEmpty ? count : series.length,
+      x0: x0,
+      x1: x1,
+      y0: y0,
+      y1: y1,
+    );
     final plot = geom.plot;
-    final n = math.max(count - 1, 1);
-    final xMax = math.max(dayMax, 1);
+    final nDays = math.max(series.isEmpty ? windowDays : series.length, 1);
+    final dayLo = (x0 * (nDays - 1)).round();
+    final dayHi = (x1 * (nDays - 1)).round();
 
     final grid = Paint()
       ..color = const Color(0x33FFFFFF)
@@ -483,17 +830,23 @@ class _PracticePainter extends CustomPainter {
       plot,
       Paint()..color = const Color(0x180C0C0C),
     );
-    const yTicks = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0];
+
+    final yTicks = <double>[];
+    for (var i = 0; i < 6; i++) {
+      yTicks.add(y0 + (y1 - y0) * (i / 5));
+    }
     for (final t in yTicks) {
-      final y = plot.top + plot.height * (1 - t);
+      final y = plot.top + plot.height * (1 - ((t - y0) / geom.spanY));
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), grid);
     }
     canvas.drawLine(
         Offset(plot.left, plot.top), Offset(plot.left, plot.bottom), axis);
     canvas.drawLine(
         Offset(plot.left, plot.bottom), Offset(plot.right, plot.bottom), axis);
-    canvas.drawCircle(Offset(plot.left, plot.bottom), 3.2, Paint()
-      ..color = const Color(0xFFE8D5A3));
+    if (x0 <= 0.001 && y0 <= 0.001) {
+      canvas.drawCircle(Offset(plot.left, plot.bottom), 3.2,
+          Paint()..color = const Color(0xFFE8D5A3));
+    }
 
     final labelStyle = const TextStyle(
       color: Color(0xFFE8D5A3),
@@ -527,20 +880,21 @@ class _PracticePainter extends CustomPainter {
     canvas.restore();
 
     for (final t in yTicks) {
-      final y = plot.top + plot.height * (1 - t);
-      drawLabel(t.toStringAsFixed(1), Offset(18, y - 7));
+      final y = plot.top + plot.height * (1 - ((t - y0) / geom.spanY));
+      drawLabel(t.toStringAsFixed(2), Offset(14, y - 7));
     }
 
-    final xCount = xMax <= 8 ? math.max(xMax, 2) : 6;
+    const xCount = 6;
     for (var k = 0; k < xCount; k++) {
-      final day = xCount == 1 ? 0 : ((k / (xCount - 1)) * xMax).round();
-      final t = day / xMax;
+      final t = k / (xCount - 1);
+      final wx = x0 + t * (x1 - x0);
       final x = plot.left + plot.width * t;
       canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), grid);
       canvas.drawLine(Offset(x, plot.bottom), Offset(x, plot.bottom + 5), axis);
+      final day = (wx * (nDays - 1)).round();
       final date = series.isEmpty
           ? ''
-          : _shortDate(series[((day / xMax) * (series.length - 1))
+          : _shortDate(series[(wx * (series.length - 1))
               .round()
               .clamp(0, series.length - 1)]['date']);
       final label = date.isEmpty ? 'Day $day' : 'Day $day\n$date';
@@ -555,8 +909,8 @@ class _PracticePainter extends CustomPainter {
       tp.paint(canvas, Offset(dx, plot.bottom + 6));
     }
     drawLabel(
-      'Days 0–$xMax',
-      Offset(plot.center.dx - 28, size.height - 13),
+      'Days $dayLo–$dayHi',
+      Offset(plot.center.dx - 32, size.height - 13),
       const TextStyle(
         color: Color(0xFFE8D5A3),
         fontSize: 11,
@@ -566,13 +920,16 @@ class _PracticePainter extends CustomPainter {
 
     if (series.isEmpty) return;
 
+    canvas.save();
+    canvas.clipRect(plot);
+
     final tick = Paint()
       ..color = const Color(0x40C9A962)
       ..strokeWidth = 1;
     for (var i = 0; i < series.length; i++) {
-      if (series[i]['live'] == true) {
-        final x = plot.left + plot.width * (i / n);
-        canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), tick);
+      if (series[i]['live'] == true && geom.inX(i)) {
+        final p = geom.mapped(i, y0);
+        canvas.drawLine(Offset(p.dx, plot.top), Offset(p.dx, plot.bottom), tick);
       }
     }
 
@@ -581,13 +938,12 @@ class _PracticePainter extends CustomPainter {
     for (var i = 0; i < series.length; i++) {
       final h = series[i]['healing_mean'];
       if (h is! num) continue;
-      final x = plot.left + plot.width * (i / n);
-      final y = plot.top + plot.height * (1 - h.toDouble().clamp(0.0, 1.0));
+      final pt = geom.mapped(i, h.toDouble());
       if (!started) {
-        path.moveTo(x, y);
+        path.moveTo(pt.dx, pt.dy);
         started = true;
       } else {
-        path.lineTo(x, y);
+        path.lineTo(pt.dx, pt.dy);
       }
     }
     if (started) {
@@ -611,10 +967,11 @@ class _PracticePainter extends CustomPainter {
     for (final p in scatter) {
       final date = p['date']?.toString();
       final idx = series.indexWhere((s) => s['date'] == date);
-      if (idx < 0) continue;
+      if (idx < 0 || !geom.inX(idx)) continue;
       final h = p['healing'];
       if (h is! num) continue;
-      final pt = geom.point(idx, h.toDouble(), p['client']?.toString() ?? p['user']?.toString() ?? '');
+      final pt = geom.point(
+          idx, h.toDouble(), p['client']?.toString() ?? p['user']?.toString() ?? '');
       final kind = p['kind']?.toString() ?? '';
       if (kind == 'cycle_dip') {
         canvas.drawCircle(pt, 4.0, dip);
@@ -627,6 +984,7 @@ class _PracticePainter extends CustomPainter {
         canvas.drawCircle(pt, 4.0, gold);
       }
     }
+    canvas.restore();
   }
 
   String _shortDate(dynamic raw) {
@@ -637,5 +995,11 @@ class _PracticePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _PracticePainter old) =>
-      old.series != series || old.scatter != scatter || old.dayMax != dayMax;
+      old.series != series ||
+      old.scatter != scatter ||
+      old.x0 != x0 ||
+      old.x1 != x1 ||
+      old.y0 != y0 ||
+      old.y1 != y1 ||
+      old.windowDays != windowDays;
 }

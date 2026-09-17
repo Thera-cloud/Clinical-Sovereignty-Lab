@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.thrive.healing_cycle import score_coherence, score_language
@@ -14,6 +15,39 @@ from app.services.thrive.healing_cycle import score_coherence, score_language
 logger = logging.getLogger(__name__)
 
 WINDOWS = (30, 90, 180)
+_CLIENT_SPLIT = re.compile(r"[,;\n]+")
+
+
+def parse_client_tokens(raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x) for x in raw]
+    else:
+        parts = _CLIENT_SPLIT.split(str(raw))
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def filter_roster(
+    clients: List[Dict[str, str]],
+    tokens: Optional[List[str]],
+) -> List[Dict[str, str]]:
+    wanted = [t.lower() for t in (tokens or []) if t]
+    if not wanted:
+        return list(clients)
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for c in clients:
+        un = (c.get("username") or "").strip()
+        dn = (c.get("display_name") or "").strip()
+        key = un.lower()
+        if key in seen:
+            continue
+        hay = f"{un} {dn}".lower()
+        if any(t in hay or hay in t for t in wanted if t):
+            seen.add(key or dn.lower())
+            out.append(c)
+    return out
 
 
 def _clamp_days(days: int) -> int:
@@ -97,6 +131,7 @@ async def build_snapshot(
     coach_ident: str,
     days: int = 90,
     include_names: bool = True,
+    client_tokens: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     days = _clamp_days(days)
     empty = {
@@ -104,6 +139,8 @@ async def build_snapshot(
         "coach": {},
         "master": None,
         "client_count": 0,
+        "roster_members": [],
+        "selected_clients": [],
         "series": [],
         "scatter": [],
         "totals": {},
@@ -117,7 +154,9 @@ async def build_snapshot(
         if not coach:
             return empty
         master = await resolve_master_for(conn, coach["hardware_id"])
-        clients = await roster_clients(conn, coach["hardware_id"], coach["username"])
+        book = await roster_clients(conn, coach["hardware_id"], coach["username"])
+        tokens = parse_client_tokens(client_tokens)
+        clients = filter_roster(book, tokens) if tokens else book
         usernames = [c["username"] for c in clients]
         hw_ids = [c["hardware_id"] for c in clients]
         uuids = [c.get("uuid") or "" for c in clients if c.get("uuid")]
@@ -141,6 +180,11 @@ async def build_snapshot(
         },
         "master": master,
         "client_count": len(clients),
+        "roster_members": [
+            {"username": c["username"], "display_name": c["display_name"]}
+            for c in book
+        ],
+        "selected_clients": [c["username"] for c in clients] if tokens else [],
         "series": series,
         "scatter": scatter,
         "totals": totals,

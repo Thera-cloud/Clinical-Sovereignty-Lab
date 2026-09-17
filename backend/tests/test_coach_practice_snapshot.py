@@ -13,7 +13,12 @@ from app.services.coach_practice_report import (
     strip_client_names,
     _fallback_guidance,
 )
-from app.services.coach_practice_snapshot import apply_language_floors, compose_chart
+from app.services.coach_practice_snapshot import (
+    apply_language_floors,
+    compose_chart,
+    filter_roster,
+    parse_client_tokens,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -96,6 +101,31 @@ def test_compose_chart_fills_window_and_keeps_scatter():
     assert any(p.get("kind") == "live_session" for p in scatter)
 
 
+def test_filter_roster_by_typed_names():
+    book = [
+        {"username": "lisaw", "display_name": "Lisa West"},
+        {"username": "kristy", "display_name": "Kristy Moore"},
+        {"username": "longra", "display_name": "Ryan Long"},
+    ]
+    assert parse_client_tokens("Lisa, kristy") == ["Lisa", "kristy"]
+    picked = filter_roster(book, parse_client_tokens("Lisa West; Ryan"))
+    assert {c["username"] for c in picked} == {"lisaw", "longra"}
+    assert filter_roster(book, []) == book
+
+
+def test_anonymize_drops_roster_names():
+    clean = anonymize_snapshot({
+        "scatter": [{"client": "Lisa West", "user": "lisaw", "healing": 0.4}],
+        "roster_members": [{"username": "lisaw", "display_name": "Lisa West"}],
+        "selected_clients": ["lisaw"],
+        "totals": {"roster": 1},
+    })
+    assert "roster_members" not in clean
+    assert "selected_clients" not in clean
+    assert clean["selected_count"] == 1
+    assert "client" not in clean["scatter"][0]
+
+
 def test_language_floors_fill_missing_book():
     texts = {
         "lisa": ["I keep moving forward and I am sleeping better now.", "I want to keep this pace.", "I am proud of the work.", "Today felt lighter than last week."],
@@ -116,15 +146,22 @@ def test_flutter_wires_practice_card():
     assert "Print review (no client names)" in widget
     assert "PointerScrollEvent" in widget
     assert "Gold = roster mean" in widget
-    assert "Origin bottom-left" in widget
+    assert "Wheel zooms at cursor" in widget
+    assert "RangeSlider" in widget
+    assert "anchorX" in widget
+    assert "anchorY" in widget
     assert "_ChartGeom" in widget
     assert "pointerSignalResolver" in widget
     assert "HitTestBehavior.opaque" in widget
     assert "Healing 0–1" in widget
-    assert "Days 0–" in widget
+    assert "Days $dayLo" in widget
     assert "Day $day" in widget
-    assert "0.2" in widget
-    assert "_zoomStart = 0" in widget
+    assert "_x0 = 0" in widget
+    assert "Type a name" in widget
+    assert "person_search" in widget
+    assert "q['clients']" in widget
+    assert "openPrintWindow" in widget
+    assert "writePrintHtml" in widget
 
 
 def test_migration_adds_assistant_folder_type():

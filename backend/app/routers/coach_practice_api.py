@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -21,7 +21,11 @@ from app.services.coach_practice_report import (
     compose_guidance,
     render_html,
 )
-from app.services.coach_practice_snapshot import build_snapshot, resolve_coach_ids
+from app.services.coach_practice_snapshot import (
+    build_snapshot,
+    parse_client_tokens,
+    resolve_coach_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,7 @@ router = APIRouter(prefix="/api/coach/practice", tags=["coach-practice"])
 class ReportRequest(BaseModel):
     days: int = 90
     coach_username: Optional[str] = None
+    clients: Optional[List[str]] = None
 
 
 def _pool(request: Request):
@@ -71,10 +76,12 @@ async def get_snapshot(
     request: Request,
     days: int = 90,
     coach: Optional[str] = None,
+    clients: Optional[str] = None,
     user: Dict = Depends(require_coach),
 ):
     pool = _pool(request)
     ident = coach or _caller_ident(user)
+    tokens = parse_client_tokens(clients)
     async with pool.acquire() as conn:
         target_username = await _authorize_target(conn, user, ident)
         coach_row = await resolve_coach_ids(conn, target_username)
@@ -86,7 +93,13 @@ async def get_snapshot(
             master = await resolve_master_for(conn, coach_row["hardware_id"])
         if master:
             await backfill_completed_consults(pool, master["hardware_id"])
-    snap = await build_snapshot(pool, coach_ident=target_username, days=days, include_names=True)
+    snap = await build_snapshot(
+        pool,
+        coach_ident=target_username,
+        days=days,
+        include_names=True,
+        client_tokens=tokens,
+    )
     return {"status": "ok", "snapshot": snap}
 
 
@@ -137,7 +150,13 @@ async def create_report(
                WHERE coach_username = $1 ORDER BY created_at DESC LIMIT 1""",
             target,
         )
-    snap = await build_snapshot(pool, coach_ident=target, days=req.days, include_names=False)
+    snap = await build_snapshot(
+        pool,
+        coach_ident=target,
+        days=req.days,
+        include_names=False,
+        client_tokens=parse_client_tokens(req.clients),
+    )
     banned = []
     consult = {"open": [], "completed": []}
     master = snap.get("master")

@@ -5,6 +5,7 @@ QUANTUM-CRYSTAL-ARCH
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import html
 import json
@@ -212,14 +213,17 @@ async def compose_guidance(
         f"Prior totals: {json.dumps((prior or {}).get('metrics', {}).get('totals') if prior else {})}\n"
     )
     try:
-        result = await infer.generate(
-            prompt,
-            system=(
-                "You are Little Nate writing a coach performance review. "
-                "No client names. Skills only. JSON only."
+        result = await asyncio.wait_for(
+            infer.generate(
+                prompt,
+                system=(
+                    "You are Little Nate writing a coach performance review. "
+                    "No client names. Skills only. JSON only."
+                ),
+                domain="coaching",
+                max_tokens=700,
             ),
-            domain="coaching",
-            max_tokens=700,
+            timeout=4.0,
         )
         text = (result or {}).get("text") or ""
         m = re.search(r"\{.*\}", text, re.S)
@@ -310,7 +314,7 @@ def render_html(
   </div>
   <h1>{_esc(coach.get('display_name'))} · @{_esc(coach.get('username'))}</h1>
   {master_line}
-  <div class="meta">Window: {window_days} days · Printed {now} UTC</div>
+  <div class="meta">Window: {window_days} days · Printed {now} UTC · Book {_esc(totals.get('roster') or 0)}</div>
   <div class="cards">
     <div class="card"><b>{hm_s}</b><span>Healing mean</span></div>
     <div class="card"><b>{_esc(totals.get('cycle_dips') or 0)}</b><span>Cycle dips</span></div>
@@ -352,4 +356,8 @@ def anonymize_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
         q = {k: v for k, v in p.items() if k not in ("client", "user")}
         clean_scatter.append(q)
     out["scatter"] = clean_scatter
+    selected = snap.get("selected_clients") or []
+    out.pop("roster_members", None)
+    out.pop("selected_clients", None)
+    out["selected_count"] = len(selected)
     return out

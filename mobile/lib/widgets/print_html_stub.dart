@@ -1,3 +1,5 @@
-void openPrintHtml(String html) {
-  // Non-web: print sheet is web-only.
-}
+Object? openPrintWindow() => null;
+
+void writePrintHtml(Object? handle, String htmlDoc) {}
+
+void closePrintWindow(Object? handle) {}
