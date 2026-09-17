@@ -95,7 +95,10 @@ async def test_payment_agent_overdue_query_uses_appointment_time_and_price_guard
 def test_payment_agent_sql_constants_use_coalesce():
     assert "scheduled_start" in _APPT_TIME
     assert "scheduled_at" in _APPT_TIME
-    assert _NOT_CANCELLED == "UPPER(cs.status) != 'CANCELLED'"
+    assert "NOT IN" in _NOT_CANCELLED
+    assert "CANCELLED" in _NOT_CANCELLED
+    assert "RESCHEDULED" in _NOT_CANCELLED
+    assert "CANCELED" in _NOT_CANCELLED
 
 
 @pytest.mark.asyncio
