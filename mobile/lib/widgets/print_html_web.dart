@@ -1,28 +1,14 @@
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 
-Object? openPrintWindow() {
-  return html.window.open('about:blank', 'coach_practice_print');
-}
-
-bool _assignBlob(Object handle, String url) {
-  try {
-    final loc = js_util.getProperty(handle, 'location');
-    if (loc != null) {
-      js_util.setProperty(loc, 'href', url);
-      return true;
-    }
-  } catch (_) {}
-  return false;
-}
+/// Print uses a hidden iframe only. A click-opened about:blank stays empty
+/// after the report fetch and becomes a leftover tab next to the print dialog.
+Object? openPrintWindow() => null;
 
 void writePrintHtml(Object? handle, String htmlDoc) {
+  closePrintWindow(handle);
   final blob = html.Blob(<Object>[htmlDoc], 'text/html');
   final url = html.Url.createObjectUrlFromBlob(blob);
-  if (handle != null && _assignBlob(handle, url)) {
-    return;
-  }
-  closePrintWindow(handle);
   final iframe = html.IFrameElement()
     ..src = url
     ..setAttribute(

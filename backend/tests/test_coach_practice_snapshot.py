@@ -209,8 +209,8 @@ def test_flutter_wires_practice_card():
     assert "writePrintHtml" in widget
     print_web = (REPO / "mobile/lib/widgets/print_html_web.dart").read_text()
     assert "createObjectUrlFromBlob" in print_web
-    assert "closePrintWindow(handle)" in print_web
-    assert "location" in print_web
+    assert "window.open" not in print_web
+    assert "openPrintWindow() => null" in print_web
 
 
 def test_migration_adds_assistant_folder_type():
