@@ -17762,7 +17762,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       if (u.isNotEmpty) return u;
     }
     final brief = _selectedClientBrief;
-    if (brief is Map) {
+    if (brief != null) {
       final client = brief['client'];
       if (client is Map) {
         final m = Map<String, dynamic>.from(client);
