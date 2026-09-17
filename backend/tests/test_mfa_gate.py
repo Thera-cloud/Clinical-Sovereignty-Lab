@@ -281,12 +281,22 @@ def test_enforce_raises_401_when_stale(monkeypatch: pytest.MonkeyPatch) -> None:
     assert detail["retry_after_seconds"] > 0
 
 
-def test_enforce_raises_401_when_no_mfa_field(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enforce_allows_coach_with_no_mfa_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Coaches have no MFA step-up UI; no_mfa_field must not 401 them."""
+    gate = _reload_gate(monkeypatch, ENABLE_PHI_MFA_GATE="1")
+    pool = _FakePool(row={"profile_data": {"unrelated": "value"}})
+    principal = {"username": "coach1", "hardware_id": "HW_COACH1", "role": "COACH"}
+    asyncio.run(gate.enforce_mfa_recent(pool, principal))
+
+
+def test_enforce_raises_401_when_admin_has_no_mfa_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fastapi import HTTPException
 
     gate = _reload_gate(monkeypatch, ENABLE_PHI_MFA_GATE="1")
     pool = _FakePool(row={"profile_data": {"unrelated": "value"}})
-    principal = {"username": "coach1", "hardware_id": "HW_COACH1", "role": "COACH"}
+    principal = {"username": "DrNevedal1", "hardware_id": "ADMIN_DRNEVEDAL1_ID", "role": "ADMIN"}
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(gate.enforce_mfa_recent(pool, principal))
     assert excinfo.value.status_code == 401

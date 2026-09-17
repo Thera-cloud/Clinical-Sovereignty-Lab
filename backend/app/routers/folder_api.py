@@ -160,7 +160,7 @@ async def upload_file_metadata(req: UploadFileRequest, request: Request, user: D
 UPLOAD_DIR = Path(os.environ.get("COACH_UPLOAD_DIR", "/app/data/coach_uploads"))
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 ALLOWED_EXTENSIONS = {
-    ".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".xls", ".xlsx",
+    ".pdf", ".doc", ".docx", ".txt", ".md", ".html", ".csv", ".xls", ".xlsx",
     ".jpg", ".jpeg", ".png", ".gif", ".webp",
     ".mp3", ".mp4", ".m4a", ".wav",
     ".zip", ".json",
@@ -450,3 +450,25 @@ async def _auto_populate_folders(conn, coach_id: str):
                        VALUES ($1, 'family', $2, $3) ON CONFLICT DO NOTHING""",
                     coach_id, fid, f"{fname} Family",
                 )
+
+    # QUANTUM-CRYSTAL-ARCH — master's drawer for each active assistant
+    try:
+        assistants = await conn.fetch(
+            """SELECT u.username,
+                      COALESCE(u.profile_data->>'name', u.username) AS name
+               FROM coach_hierarchy ch
+               JOIN users u ON u.hardware_id = ch.assistant_id
+               WHERE ch.master_coach_id = $1
+                 AND ch.status IN ('active', 'accepted')""",
+            coach_id,
+        )
+        for a in assistants:
+            aid = a["username"]
+            if aid and (aid, "assistant") not in existing_set:
+                await conn.execute(
+                    """INSERT INTO coach_folders (coach_id, folder_type, entity_id, entity_name)
+                       VALUES ($1, 'assistant', $2, $3) ON CONFLICT DO NOTHING""",
+                    coach_id, aid, a["name"] or aid,
+                )
+    except Exception as e:
+        logger.warning("auto-populate assistant folders: %s", e)

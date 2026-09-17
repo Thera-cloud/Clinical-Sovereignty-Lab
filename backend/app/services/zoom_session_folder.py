@@ -388,6 +388,18 @@ async def try_place_session_summary_in_coach_folder(
         logger.info("[ZoomFolder] No summary yet for session %s meeting %s", session_id, meeting_id)
         return None
 
+    # QUANTUM-CRYSTAL-ARCH — assistant consults go to master/assistant folder
+    _stype = str(pg_row.get("session_type") or "").upper()
+    if _stype in ("MASTER_CONSULTATION", "CONSULTATION"):
+        try:
+            from app.services.assistant_consult_archive import archive_consultation_session
+
+            return await archive_consultation_session(
+                db_pool, dict(pg_row), summary_text=body
+            )
+        except Exception as e:
+            logger.warning("[ZoomFolder] consult archive: %s", e)
+
     client_username, resolved_name = await _resolve_client_username(db_pool, client_hw)
     if not client_name:
         client_name = resolved_name

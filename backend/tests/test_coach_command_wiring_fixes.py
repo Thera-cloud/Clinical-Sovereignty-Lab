@@ -40,6 +40,27 @@ def test_flutter_coach_command_critical_wiring():
     assert "highRisk.toString()" in src
     assert "sessionsToday.toString()" in src
     assert "SESSION FOCUS" in src
+    assert "SUGGESTED TALKING POINTS" in src
+    assert "AT A GLANCE" in src
+    assert "REACH OUT" in src
+    assert "_briefTalkingPoints" in src
+    assert "_briefKeywordTopics" in src
+    assert "_buildClientFilterChips" in src
+    assert "_buildBriefingsFolderList" in src
+    assert "_briefCrystalRows" in src
+    assert "_briefFcodeLabels" in src
+    assert "fcodes_assigned" in src
+    assert "content_summary" in src
+    assert "_briefKeyGrowth" in src
+    assert "_briefSheetTick" in src
+    assert "_usernameForClientId" in src
+    assert "ValueListenableBuilder<int>" in src
+    assert "_thriveProcessQuestions" in src
+    assert "No goals on file yet." in src
+    assert "No practices adopted yet." in src
+    assert "CoachPracticeSnapshotCard" in src
+    assert "ASSISTANT MASTER FOLDERS" in src
+    assert "No live-session guidance calculated yet." in src
 
 
 def test_coaching_mesh_uses_token_auth():

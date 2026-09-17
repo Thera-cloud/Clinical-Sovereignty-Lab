@@ -38,8 +38,12 @@ Design invariants
 - Fail-closed when enabled: unknown timestamp / parse error / no MFA
   fields ⇒ ``ok=False``. HIPAA-appropriate default.
 - Audit token bypass: trust auditors don't carry MFA state. This is
-  identical to the ``require_clinician_for_user`` audit bypass and is
-  the ONLY bypass path.
+  identical to the ``require_clinician_for_user`` audit bypass.
+- Coach no-MFA pass-through: coaches have no enrollment / step-up UI.
+  ``role=COACH`` + ``reason=no_mfa_field`` is allowed so Sensitive
+  Bridge is not bricked (CoachN → Lana, 2026-09-16). ADMIN remains
+  fail-closed. Once a coach has an MFA timestamp, stale / unparseable
+  still raise.
 - No writes here. The gate reads state; writers live in
   ``admin.py`` (webauthn auth-verify) and future MFA endpoints.
 - Zero DB migrations. Uses the existing ``users.profile_data`` JSONB
@@ -274,10 +278,13 @@ async def enforce_mfa_recent(
     No-op paths (return without raising):
       1. Flag ``ENABLE_PHI_MFA_GATE`` is off.
       2. Principal carries ``is_audit=True`` (trust-auditor probe).
+      3. ``role=COACH`` and reason is ``no_mfa_field`` (MFA never
+         enrolled; coaches have no step-up UI yet).
 
     Fail-closed paths (raise 401):
-      3. Flag is on and profile_data lookup fails.
-      4. Flag is on and no supported MFA timestamp is present or fresh.
+      4. Flag is on and profile_data lookup fails.
+      5. Flag is on and MFA is stale / unparseable / future.
+      6. Flag is on and ``role=ADMIN`` (or any non-coach) has no MFA field.
 
     Cohort-aware window (Slice 6c-strict)
     -------------------------------------
@@ -318,6 +325,17 @@ async def enforce_mfa_recent(
         return
 
     who = principal.get("username") or principal.get("hardware_id") or "?"
+    role = (principal.get("role") or "").strip().upper()
+    # Coaches have no MFA enrollment path. Blocking no_mfa_field bricks
+    # View Brief → Sensitive Bridge (CoachN / lanasmith). ADMIN stays
+    # fail-closed. Enrolled coaches still hit stale/unparseable.
+    if role == "COACH" and reason == "no_mfa_field":
+        logger.warning(
+            "mfa_gate: allowing COACH %s with no MFA enrolled (gate on)",
+            who,
+        )
+        return
+
     logger.info(
         "mfa_gate: blocking %s (role=%s) reason=%s window=%ds cohort=%s",
         who,

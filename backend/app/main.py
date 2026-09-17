@@ -4819,6 +4819,14 @@ try:
 except Exception as _ch_err:
     print(f"   ⚠️  Coach Hierarchy router failed: {_ch_err}")
 
+# QUANTUM-CRYSTAL-ARCH — coach practice snapshot + nameless print report
+try:
+    if os.environ.get("ENABLE_COACH_PRACTICE_SNAPSHOT", "true").lower() in ("1", "true", "yes"):
+        from app.routers.coach_practice_api import router as coach_practice_router
+        app.include_router(coach_practice_router)
+except Exception as _cps_err:
+    print(f"   ⚠️  Coach practice router failed: {_cps_err}")
+
 # Community Mesh — Nate-to-Nate group wisdom + attendance
 try:
     from app.routers.community_api import router as community_router

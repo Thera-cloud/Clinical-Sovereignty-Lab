@@ -10,8 +10,9 @@ guarded:
    nudges and a due-in-3-days heads-up.
 3. **Weekly recap** — once per client per 7 days when they hold any active
    practice or goal: streaks, completions, goal progress, one core question.
-4. **Phase evaluation** — ``phase_resolver.evaluate`` at most once per 24 h
-   per recently-active client (auto-promotion + coach notify live there).
+4. **Phase evaluation** — ``phase_resolver.evaluate`` at most once per 24 h.
+   Never-seeded clients with any conversation history are included (not only
+   the last 14 days). Re-evals still require a turn in the last 14 days.
 
 Respects: safe_silence_mode (active) → no email; ``checkin_snooze_until``;
 ``notification_prefs.email == false``; missing email → in-app nudge only.
@@ -395,7 +396,11 @@ class ThriveCoachAgent:
                   AND EXISTS (
                       SELECT 1 FROM conversation_history ch
                       WHERE (ch.user_id = u.username OR ch.user_id = u.hardware_id)
-                        AND ch.created_at >= NOW() - interval '14 days'
+                        AND (
+                          g.username IS NULL
+                          OR g.last_evaluated IS NULL
+                          OR ch.created_at >= NOW() - interval '14 days'
+                        )
                   )
                 ORDER BY g.last_evaluated NULLS FIRST
                 LIMIT $1

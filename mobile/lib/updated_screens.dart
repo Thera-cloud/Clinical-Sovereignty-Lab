@@ -52,6 +52,7 @@ import 'screens/high_risk_crisis_screens.dart';
 import 'screens/coach_pgsd_screen.dart';
 import 'screens/coach_portal_v2_complete.dart' show CoachQuickBooksTab;
 import 'screens/intake_form_coach_panel.dart';
+import 'widgets/coach_practice_snapshot.dart';
 import 'screens/daily_reconnect_screen.dart';
 import 'screens/training_ground_screen.dart';
 import 'config/app_config.dart';
@@ -6250,6 +6251,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<dynamic> _clients = [];
   List<dynamic> _schedule = [];
   Map<String, dynamic>? _selectedClientBrief;
+  final GlobalKey _briefKeyGlance = GlobalKey();
+  final GlobalKey _briefKeyReach = GlobalKey();
+  final GlobalKey _briefKeyPrep = GlobalKey();
+  final GlobalKey _briefKeyGrowth = GlobalKey();
+  final GlobalKey _briefKeyMetrics = GlobalKey();
+  final GlobalKey _briefKeyClinical = GlobalKey();
+  final GlobalKey _briefKeyMemory = GlobalKey();
+  final GlobalKey _briefKeyTalk = GlobalKey();
+  /// Rebuilds an already-open View Brief sheet when thrive/brief data arrives.
+  final ValueNotifier<int> _briefSheetTick = ValueNotifier(0);
+  bool _briefSheetOpen = false;
+  String _thriveBriefClientId = '';
+  bool _thriveLoading = false;
   List<Map<String, dynamic>> _clientSkillPlans = [];
   // ── Growth-phase (thrive) coaching layer ─────────────────────────────────
   // /api/thrive/{client}/brief — phase, coach focus, goals, session guidance
@@ -8078,7 +8092,354 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _socket?.sink.add(
         jsonEncode({"type": "get_presession_brief", "client_id": clientId}));
     _loadClientSkillPlans(clientId);
-    _loadClientThriveBrief(clientId);
+    _loadClientThriveBrief(_usernameForClientId(clientId));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Preparing briefing…'),
+        duration: Duration(seconds: 2),
+      ));
+    }
+  }
+
+  String _briefPlainText(dynamic raw) {
+    if (raw == null) return '';
+    if (raw is String) return raw.trim();
+    if (raw is Map) {
+      for (final k in const [
+        'text',
+        'guidance',
+        'question',
+        'point',
+        'label',
+        'title',
+        'summary',
+        'body',
+        'topic',
+        'theme',
+        'clinical_translation',
+      ]) {
+        final v = raw[k];
+        if (v != null && v.toString().trim().isNotEmpty) {
+          return v.toString().trim();
+        }
+      }
+    }
+    final s = raw.toString().trim();
+    if (s.startsWith('{') || s.startsWith('[') || s.startsWith('Instance of')) {
+      return '';
+    }
+    return s;
+  }
+
+  String _briefClamp(String s, int max) {
+    final t = s.trim();
+    if (t.length <= max) return t;
+    return '${t.substring(0, max).trimRight()}…';
+  }
+
+  bool _briefLooksLikeBlob(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return true;
+    if (t.startsWith('{') || t.startsWith('[')) return true;
+    if (t.length > 80) return true;
+    if (t.split(RegExp(r'\s+')).length > 12) return true;
+    return false;
+  }
+
+  List<Map<String, dynamic>> _briefCrystalRows(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .where((e) =>
+              (e['content_summary'] ?? e['crystal_text'] ?? e['text'] ?? '')
+                  .toString()
+                  .trim()
+                  .isNotEmpty)
+          .toList();
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      return <Map<String, dynamic>>[
+        <String, dynamic>{'content_summary': raw.trim()}
+      ];
+    }
+    return const <Map<String, dynamic>>[];
+  }
+
+  List<String> _briefFcodeLabels(Map<String, dynamic> brief) {
+    final labels = <String>[];
+    void addFrom(dynamic raw, {String suffix = ''}) {
+      if (raw is! List) return;
+      for (final item in raw) {
+        if (item is Map) {
+          final code =
+              (item['code'] ?? item['fcode'] ?? '').toString().trim();
+          final desc = (item['description'] ??
+                  item['fcode_description'] ??
+                  '')
+              .toString()
+              .trim();
+          final parts = <String>[
+            if (code.isNotEmpty) code,
+            if (desc.isNotEmpty) desc,
+            if (suffix.isNotEmpty) suffix,
+          ];
+          if (parts.isNotEmpty) labels.add(parts.join(' — '));
+        } else {
+          final s = item.toString().trim();
+          if (s.isNotEmpty) {
+            labels.add(suffix.isEmpty ? s : '$s — $suffix');
+          }
+        }
+      }
+    }
+
+    addFrom(brief['fcodes_active']);
+    if (labels.isEmpty) {
+      addFrom(brief['fcodes_assigned']);
+      addFrom(brief['fcodes_nate_suggestions'], suffix: 'Nate suggestion');
+    }
+    return labels;
+  }
+
+  List<String> _briefTalkingPoints(
+    Map<String, dynamic> brief,
+    List<String> recentTopics,
+  ) {
+    final out = <String>[];
+    final seen = <String>{};
+    void add(String raw, {bool allowLong = false}) {
+      var t = raw.trim();
+      if (t.isEmpty) return;
+      if (t.startsWith('{') || t.contains('Instance of')) return;
+      if (!allowLong && _briefLooksLikeBlob(t)) return;
+      if (allowLong && t.length > 120) t = _briefClamp(t, 120);
+      final key = t.toLowerCase();
+      if (seen.contains(key)) return;
+      seen.add(key);
+      out.add(t);
+    }
+
+    add(_briefPlainText(brief['session_focus']), allowLong: true);
+    final thrive = _clientThriveBrief;
+    if (thrive != null) {
+      final guide = thrive['live_session_guidance'] ?? thrive['session_guidance'];
+      if (guide is List) {
+        for (final p in guide.take(4)) {
+          add(_briefPlainText(p), allowLong: true);
+        }
+      } else {
+        add(_briefPlainText(guide), allowLong: true);
+      }
+      final pts = thrive['talking_points'];
+      if (pts is List) {
+        for (final p in pts.take(4)) {
+          add(_briefPlainText(p));
+        }
+      }
+    }
+    final metrics = brief['metrics'];
+    if (metrics is Map) {
+      final mood = (metrics['mood_current'] ?? '').toString().trim();
+      final trend = (metrics['mood_trend'] ?? '').toString().trim();
+      if (mood.isNotEmpty || trend.isNotEmpty) {
+        add([
+          if (mood.isNotEmpty) 'Current mood: $mood',
+          if (trend.isNotEmpty) 'trend $trend',
+        ].join(' — '));
+      }
+      final risk = (metrics['risk_level'] ?? '').toString().toUpperCase();
+      if (risk == 'HIGH' || risk == 'CRITICAL' || risk == 'CRISIS') {
+        add('Risk flag $risk — open with safety and last-session carryover.');
+      }
+    }
+    for (final t in recentTopics.take(6)) {
+      add('Topic in play: $t');
+    }
+    return out.take(8).toList();
+  }
+
+  List<String> _briefKeywordTopics(Map<String, dynamic> brief) {
+    const stops = {
+      'the', 'and', 'that', 'this', 'with', 'from', 'have', 'been', 'were',
+      'they', 'what', 'when', 'where', 'your', 'about', 'just', 'like',
+      'want', 'need', 'really', 'there', 'their', 'would', 'could',
+      'should', 'into', 'then', 'i', 'i\'m', 'im', 'my', 'me',
+    };
+    final out = <String>[];
+    final seen = <String>{};
+
+    void addKeyword(String raw) {
+      var t = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (t.isEmpty) return;
+      if (t.startsWith('{') || t.startsWith('[') || t.contains('Instance of')) {
+        return;
+      }
+      if (t.length > 40 || t.split(' ').length > 6) {
+        final words = t
+            .split(RegExp(r"[^A-Za-z0-9'\-]+"))
+            .where((w) => w.length >= 3 && !stops.contains(w.toLowerCase()))
+            .take(4)
+            .toList();
+        if (words.isEmpty) return;
+        t = words.join(' ');
+        if (t.length > 32) t = _briefClamp(t, 32);
+      }
+      final key = t.toLowerCase();
+      if (seen.contains(key)) return;
+      seen.add(key);
+      out.add(t);
+    }
+
+    for (final t in List<dynamic>.from(brief['recent_topics'] ?? const [])) {
+      addKeyword(_briefPlainText(t));
+    }
+    if (out.length < 6) {
+      for (final t in List<dynamic>.from(
+          brief['recent_conversation_topics'] ?? const [])) {
+        if (t is Map) {
+          final short = (t['topic'] ?? t['label'] ?? t['theme'] ?? t['title'] ?? '')
+              .toString()
+              .trim();
+          addKeyword(short.isNotEmpty
+              ? short
+              : (t['topic_summary'] ?? t['text'] ?? t['user_text'] ?? '')
+                  .toString());
+        } else {
+          addKeyword(_briefPlainText(t));
+        }
+      }
+    }
+    return out.take(6).toList();
+  }
+
+  Map<String, String> _briefMoodPair(Map<String, dynamic> brief) {
+    String mood = '';
+    String trend = '';
+    final metrics = brief['metrics'];
+    if (metrics is Map) {
+      mood = (metrics['mood_current'] ?? '').toString().trim();
+      trend = (metrics['mood_trend'] ?? '').toString().trim();
+    }
+    if (mood.isEmpty) {
+      final hist = brief['mood_history'];
+      if (hist is List && hist.isNotEmpty) {
+        final last = hist.last;
+        if (last is Map) {
+          mood = (last['mood'] ?? last['label'] ?? last['state'] ?? '')
+              .toString()
+              .trim();
+          if (trend.isEmpty) {
+            trend = (last['trend'] ?? '').toString().trim();
+          }
+        }
+      }
+    }
+    return {
+      'mood': mood.isEmpty ? 'Unknown' : mood,
+      'trend': trend.isEmpty ? 'stable' : trend,
+    };
+  }
+
+  String _briefSensitiveState(Map<String, dynamic> brief) {
+    final vis = brief['sensitive_bridge_visibility'];
+    if (vis is! Map) return 'hidden';
+    return (vis['button_state'] ?? 'hidden').toString();
+  }
+
+  String _briefIntakeGlance(Map<String, dynamic> brief) {
+    final summary = brief['intake_summary'];
+    if (summary is! Map) return 'Not started';
+    final pctRaw = summary['section_1_completion_pct'];
+    final pct = pctRaw is num
+        ? pctRaw.toInt()
+        : int.tryParse(pctRaw?.toString() ?? '') ?? 0;
+    final status = (summary['section_1_status'] ?? '').toString().trim();
+    if (pct <= 0 && (status.isEmpty || status == 'not_started')) {
+      return 'Not started';
+    }
+    final pretty = status.replaceAll('_', ' ');
+    return pretty.isEmpty ? '$pct%' : '$pct% · $pretty';
+  }
+
+  void _briefScrollTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOut,
+      alignment: 0.08,
+    );
+  }
+
+  Widget _briefJumpChip(String label, GlobalKey key) {
+    return ActionChip(
+      backgroundColor: const Color(0xFF1A1A2E),
+      side: const BorderSide(color: Color(0xFF333333)),
+      label: Text(label,
+          style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 11)),
+      onPressed: () => _briefScrollTo(key),
+    );
+  }
+
+  Widget _briefSectionCard({
+    required GlobalKey key,
+    required String title,
+    required Widget child,
+    Color accent = const Color(0xFFC9A962),
+  }) {
+    return Container(
+      key: key,
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111118),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withOpacity(0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  color: accent,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.4,
+                  fontSize: 12)),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _briefGlanceTile(String label, String value, {Color? color}) {
+    return Container(
+      width: 148,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  color: Colors.white38, fontSize: 10, letterSpacing: 0.8)),
+          const SizedBox(height: 4),
+          Text(value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: color ?? Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
   }
 
   Map<String, String> get _thriveHeaders => {
@@ -8146,7 +8507,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   Future<void> _loadClientThriveBrief(String clientId) async {
     if (clientId.isEmpty ||
         (widget.currentUserProfile['token'] ?? '').toString().isEmpty) return;
-    if (mounted) setState(() => _clientThriveBrief = null);
+    final switched = _thriveBriefClientId != clientId;
+    _thriveBriefClientId = clientId;
+    if (mounted) {
+      setState(() {
+        _thriveLoading = true;
+        if (switched) _clientThriveBrief = null;
+      });
+      _briefSheetTick.value++;
+    }
     try {
       final resp = await http
           .get(
@@ -8155,14 +8524,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             headers: _thriveHeaders,
           )
           .timeout(const Duration(seconds: 15));
-      if (!mounted || resp.statusCode != 200) return;
+      if (!mounted) return;
+      if (resp.statusCode != 200) {
+        setState(() => _thriveLoading = false);
+        _briefSheetTick.value++;
+        return;
+      }
       final decoded = jsonDecode(resp.body);
       if (decoded is Map) {
-        setState(
-            () => _clientThriveBrief = Map<String, dynamic>.from(decoded));
+        setState(() {
+          _clientThriveBrief = Map<String, dynamic>.from(decoded);
+          _thriveLoading = false;
+        });
+      } else {
+        setState(() => _thriveLoading = false);
       }
+      _briefSheetTick.value++;
     } catch (e) {
       debugPrint('[THRIVE] brief skipped: $e');
+      if (mounted) {
+        setState(() => _thriveLoading = false);
+        _briefSheetTick.value++;
+      }
     }
   }
 
@@ -8244,9 +8627,36 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   /// GROWTH PHASE section for the client brief sheet: badge, healing signal,
   /// coach focus, core questions, goal trajectories, practices, and the
   /// live-session guidance list (same list the Studio co-host reads).
-  Widget _buildThriveBriefSection(Map<String, dynamic> brief) {
-    final tb = _clientThriveBrief;
-    if (tb == null) return const SizedBox.shrink();
+  static const List<String> _thriveProcessQuestions = [
+    'What happened, and what did it mean about you?',
+    'What are you feeling as you touch that?',
+    'What did the younger you need that didn\'t come?',
+  ];
+
+  static const List<String> _thriveProcessGuidance = [
+    'Register: companion into the wound, steady, unhurried.',
+    'EFT: Stage 1 Steps 3-4 (underlying emotions, reframe) → Stage 2.',
+    'Watch for: Reprocessing — desensitization, installation of adaptive belief.',
+  ];
+
+  Widget _buildThriveBriefSection(Map<String, dynamic> brief,
+      {bool includeHeading = true}) {
+    if (_clientThriveBrief == null && _thriveLoading) {
+      return const Text('Loading growth phase…',
+          style: TextStyle(color: Colors.white38, fontSize: 12));
+    }
+    final tb = _clientThriveBrief ??
+        <String, dynamic>{
+          'phase': {'phase': 'process', 'coach_override': false},
+          'coach_focus':
+              'cycle map, reconsolidation targets, parts/exiles, EFT steps',
+          'time_focus': 'past -> present',
+          'core_questions': _thriveProcessQuestions,
+          'session_guidance': _thriveProcessGuidance,
+          'goals_active': const [],
+          'goals_completed': const [],
+          'practices': const [],
+        };
     final clientId =
         _clientIdFromMap(Map<String, dynamic>.from(brief['client'] ?? {}));
     final targetId = clientId.isNotEmpty
@@ -8287,7 +8697,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        h("GROWTH PHASE"),
+        if (includeHeading) h("GROWTH PHASE"),
         if (promo != null) ...[
           const SizedBox(height: 8),
           Text((promo['title'] ?? 'Little Nate moved this client').toString(),
@@ -8385,21 +8795,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ],
           ),
         ),
-        if (questions.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          h("CORE QUESTIONS"),
-          const SizedBox(height: 6),
-          ...questions.map((q) => Padding(
+        const SizedBox(height: 12),
+        h("CORE QUESTIONS"),
+        const SizedBox(height: 6),
+        if (questions.isEmpty)
+          const Text('No core questions calculated yet.',
+              style: TextStyle(color: Colors.white38, fontSize: 12))
+        else
+          ...questions.map((q) {
+            final line = _briefPlainText(q);
+            if (line.isEmpty) return const SizedBox.shrink();
+            return Padding(
                 padding: const EdgeInsets.only(bottom: 3),
-                child: Text('• $q',
+                child: Text('• $line',
                     style: const TextStyle(
                         color: Colors.white70, fontSize: 13)),
-              )),
-        ],
+              );
+          }),
+        const SizedBox(height: 12),
+        h("GOAL TRAJECTORIES"),
+        const SizedBox(height: 6),
+        if (goals.isEmpty && done.isEmpty)
+          const Text('No goals on file yet.',
+              style: TextStyle(color: Colors.white38, fontSize: 12)),
         if (goals.isNotEmpty || done.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          h("GOAL TRAJECTORIES"),
-          const SizedBox(height: 6),
           ...goals.whereType<Map>().map((g) {
             final pct = (g['progress_pct'] is num)
                 ? (g['progress_pct'] as num).toDouble()
@@ -8455,10 +8874,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 'Completed recently: ${done.whereType<Map>().map((g) => g['text']).take(3).join('; ')}',
                 style: TextStyle(color: Colors.grey[400], fontSize: 12)),
         ],
+        const SizedBox(height: 12),
+        h("FOCUS AREAS · PRACTICES"),
+        const SizedBox(height: 6),
+        if (practices.isEmpty)
+          const Text('No practices adopted yet.',
+              style: TextStyle(color: Colors.white38, fontSize: 12)),
         if (practices.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          h("FOCUS AREAS · PRACTICES"),
-          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -8483,10 +8905,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             }).toList(),
           ),
         ],
+        const SizedBox(height: 12),
+        h("LIVE SESSION GUIDANCE"),
+        const SizedBox(height: 6),
+        if (guidance.isEmpty)
+          const Text('No live-session guidance calculated yet.',
+              style: TextStyle(color: Colors.white38, fontSize: 12)),
         if (guidance.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          h("LIVE SESSION GUIDANCE"),
-          const SizedBox(height: 6),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -8499,14 +8924,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: guidance
-                  .map((g) => Padding(
+                  .map((g) {
+                    final line = _briefPlainText(g);
+                    if (line.isEmpty) return const SizedBox.shrink();
+                    return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
-                        child: Text('▸ $g',
+                        child: Text('▸ $line',
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 13,
                                 height: 1.35)),
-                      ))
+                      );
+                  })
                   .toList(),
             ),
           ),
@@ -9385,6 +9814,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               }
             }
           });
+          _briefSheetTick.value++;
           _showClientBriefSheet();
         }
       } else if (data['type'] == 'session_assistant_data') {
@@ -11110,7 +11540,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   void _showClientBriefSheet() {
     if (_selectedClientBrief == null) return;
-
+    if (_briefSheetOpen) {
+      _briefSheetTick.value++;
+      return;
+    }
+    _briefSheetOpen = true;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0A0A0F),
@@ -11119,42 +11553,107 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.85,
+        initialChildSize: 0.82,
         minChildSize: 0.5,
         maxChildSize: 0.95,
         expand: false,
-        builder: (context, scrollController) =>
-            _buildClientBriefContent(scrollController),
+        builder: (context, scrollController) => ValueListenableBuilder<int>(
+          valueListenable: _briefSheetTick,
+          builder: (_, __, ___) =>
+              _buildClientBriefContent(scrollController),
+        ),
       ),
-    );
+    ).whenComplete(() {
+      _briefSheetOpen = false;
+    });
   }
 
   Widget _buildClientBriefContent(ScrollController scrollController) {
     final brief = _selectedClientBrief!;
-    final client = brief['client'] ?? {};
-    final metrics = brief['metrics'] ?? {};
+    final client = brief['client'] is Map
+        ? Map<String, dynamic>.from(brief['client'])
+        : <String, dynamic>{};
+    final metrics = brief['metrics'] is Map
+        ? Map<String, dynamic>.from(brief['metrics'])
+        : <String, dynamic>{};
     final moodHistory = List<dynamic>.from(brief['mood_history'] ?? []);
     final recentConversations =
         List<dynamic>.from(brief['recent_conversations'] ?? []);
-    final recentTopics = <String>[];
-    for (final t in List<dynamic>.from(brief['recent_topics'] ?? const [])) {
-      if (t is String && t.trim().isNotEmpty) {
-        recentTopics.add(t.trim());
+    final recentTopics = _briefKeywordTopics(brief);
+    final talkingPoints = _briefTalkingPoints(brief, recentTopics);
+    final crystalRows = _briefCrystalRows(brief['crystal_memory']);
+    final fcodeLabels = _briefFcodeLabels(brief);
+    final moodPair = _briefMoodPair(brief);
+    final sbState = _briefSensitiveState(brief);
+    final showSensitive = !isNativeIOS &&
+        (sbState == 'active' || sbState == 'enroll_available');
+    final clientName = (client['name'] ?? 'Unknown').toString().trim();
+    final displayName = clientName.isEmpty ? 'Unknown' : clientName;
+    final initial =
+        displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
+    final risk = (metrics['risk_level'] ?? 'LOW').toString().toUpperCase();
+    Color riskColor = const Color(0xFF4ECDC4);
+    if (risk == 'HIGH' || risk == 'CRITICAL' || risk == 'CRISIS') {
+      riskColor = const Color(0xFFEF4444);
+    } else if (risk == 'MODERATE' || risk == 'MEDIUM') {
+      riskColor = const Color(0xFFC9A962);
+    }
+    final sessionFocus = _briefClamp(_briefPlainText(brief['session_focus']), 220);
+    final zoomText = _briefClamp(_zoomInsightText(brief['zoom_ai_insight']), 280);
+    final intakeGlance = _briefIntakeGlance(brief);
+    final sbGlance = sbState == 'active'
+        ? 'Enrolled'
+        : sbState == 'enroll_available'
+            ? 'Enroll available'
+            : '';
+    final panelLines = <String>[];
+    final panelRaw = brief['recent_panel_insights'];
+    if (panelRaw is List) {
+      for (final item in panelRaw.take(3)) {
+        final t = _briefClamp(_briefPlainText(item), 220);
+        if (t.isNotEmpty) panelLines.add(t);
       }
     }
-    if (recentTopics.isEmpty) {
-      for (final t in List<dynamic>.from(
-          brief['recent_conversation_topics'] ?? const [])) {
-        if (t is String && t.trim().isNotEmpty) {
-          recentTopics.add(t.trim());
-        } else if (t is Map) {
-          final s = (t['topic_summary'] ?? t['text'] ?? t['topic'] ?? '')
-              .toString()
-              .trim();
-          if (s.isNotEmpty) recentTopics.add(s);
+    final mm = brief['multimodal_brief'] is Map
+        ? Map<String, dynamic>.from(brief['multimodal_brief'])
+        : (brief['multimodal_insight'] is Map
+            ? Map<String, dynamic>.from(brief['multimodal_insight'])
+            : null);
+    final lp = brief['longitudinal_brief'] is Map
+        ? Map<String, dynamic>.from(brief['longitudinal_brief'])
+        : null;
+    final patternFlags = <String>[];
+    if (mm != null) {
+      final flags = mm['clinical_flags'];
+      if (flags is List) {
+        for (final f in flags.take(6)) {
+          final t = _briefPlainText(f);
+          if (t.isNotEmpty) patternFlags.add(t);
         }
       }
     }
+    final lpPatterns = <String>[];
+    if (lp != null) {
+      final pats = lp['patterns'];
+      if (pats is List) {
+        for (final p in pats.take(5)) {
+          final t = _briefPlainText(p);
+          if (t.isNotEmpty) lpPatterns.add(_briefClamp(t, 80));
+        }
+      }
+    }
+    final showPatterns = mm != null || lp != null;
+    final showClinical = (!isNativeIOS && fcodeLabels.isNotEmpty) ||
+        zoomText.isNotEmpty ||
+        showSensitive ||
+        !isNativeIOS;
+    final showMemory = crystalRows.isNotEmpty ||
+        (brief['recent_breakthroughs'] is List &&
+            (brief['recent_breakthroughs'] as List).isNotEmpty) ||
+        (brief['prior_session_summaries'] is List &&
+            (brief['prior_session_summaries'] as List).isNotEmpty) ||
+        (brief['dual_coo_insights'] is List &&
+            (brief['dual_coo_insights'] as List).isNotEmpty);
 
     return SingleChildScrollView(
       controller: scrollController,
@@ -11162,7 +11661,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle
           Center(
             child: Container(
               width: 40,
@@ -11173,36 +11671,34 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
               ),
             ),
           ),
-          const SizedBox(height: 20),
-
-          // Header
+          const SizedBox(height: 16),
           Row(
             children: [
               CircleAvatar(
-                radius: 30,
+                radius: 26,
                 backgroundColor: const Color(0xFF9D4EDD).withOpacity(0.3),
                 child: Text(
-                  (client['name'] ?? '?')[0].toUpperCase(),
+                  initial,
                   style: const TextStyle(
                       color: Color(0xFF9D4EDD),
                       fontWeight: FontWeight.bold,
-                      fontSize: 24),
+                      fontSize: 22),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      client['name'] ?? 'Unknown',
+                      displayName,
                       style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 22),
+                          fontSize: 20),
                     ),
                     Text(
-                      "Client since ${client['joined_date'] ?? 'Unknown'} • ${client['total_sessions'] ?? 0} sessions",
+                      "Client since ${client['joined_date'] ?? 'Unknown'} · ${client['total_sessions'] ?? 0} sessions",
                       style: TextStyle(color: Colors.grey[400], fontSize: 12),
                     ),
                   ],
@@ -11212,336 +11708,572 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 RiskBadge(riskLevel: metrics['risk_level'] ?? 'LOW', large: true),
             ],
           ),
-
-          const SizedBox(height: 24),
-
-          // PATH-C SENSITIVE PROFILE ENTRY POINT (M215+M216)
-          // Layout: MoodIndicator (Happy emoji box, left) + "Sensitive Profile"
-          // pill (right). brief['sensitive_bridge_visibility'].button_state:
-          //   hidden           → coach not authorized → no pill
-          //   enroll_available → coach OK, client not enrolled → muted pill (tap → enroll UI)
-          //   active           → enrolled → emphasized pill (tap → profile)
-          if (!isNativeIOS) ...[
-            Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: MoodIndicator(
-                  mood: metrics['mood_current'] ?? 'neutral',
-                  trend: metrics['mood_trend'],
-                  large: true,
-                ),
-              ),
-              const SizedBox(width: 12),
-              _buildSensitiveProfilePill(brief),
-            ],
-          ),
-
-          const SizedBox(height: 10),
-          ],
+          const SizedBox(height: 12),
           Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
-              _buildCallClientButton(brief),
-              _buildMessageClientButton(brief),
-              if (!isNativeIOS) _buildIntakeButton(brief),
+              _briefJumpChip('Glance', _briefKeyGlance),
+              _briefJumpChip('Reach out', _briefKeyReach),
+              _briefJumpChip('Prep', _briefKeyPrep),
+              _briefJumpChip('Growth', _briefKeyGrowth),
+              if (!isNativeIOS) _briefJumpChip('Metrics', _briefKeyMetrics),
+              if (showClinical) _briefJumpChip('Clinical', _briefKeyClinical),
+              if (showMemory) _briefJumpChip('Memory', _briefKeyMemory),
+              _briefJumpChip('Talk', _briefKeyTalk),
             ],
           ),
-
-          const SizedBox(height: 24),
-
-          // Nevedal metrics
-          if (!isNativeIOS) NevedalMetricsGrid(metrics: metrics),
-
-          // Growth-phase coaching layer (phase badge, override, goals,
-          // practices, live-session guidance). Empty until /api/thrive loads.
-          if (_clientThriveBrief != null) ...[
-            const SizedBox(height: 24),
-            _buildThriveBriefSection(brief),
-          ],
-
-          if (!isNativeIOS && _clinicalDirectoryPlanCount > 0) ...[
-            const SizedBox(height: 16),
-            Text(
-              "CLINICAL DIRECTORY: $_clinicalDirectoryPlanCount care-plan templates available — Nate can suggest when the client asks for a care/treatment plan.",
-              style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
-            ),
-          ],
-          if (!isNativeIOS && _clientSkillPlans.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            const Text(
-              "SKILL / TREATMENT PLANS",
-              style: TextStyle(
-                  color: Colors.grey,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                  fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            ..._clientSkillPlans.map((p) {
-              final title = (p['title'] ?? 'Plan').toString();
-              final status = (p['status'] ?? '').toString();
-              final source = (p['source'] ?? '').toString();
-              final step = p['current_step'];
-              final total = p['total_steps'];
-              final theme = (p['theme'] ?? p['practice'] ?? '').toString();
-              final modality = (p['modality'] ?? '').toString();
-              return Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A2E),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.35)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            color: Color(0xFFC9A962),
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(
-                      [
-                        if (status.isNotEmpty) status,
-                        if (source.isNotEmpty) source,
-                        if (modality.isNotEmpty) modality,
-                        if (step != null && total != null) 'step $step/$total',
-                      ].join(' · '),
-                      style: TextStyle(color: Colors.grey[400], fontSize: 12),
-                    ),
-                    if (theme.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(theme,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13)),
-                    ],
-                  ],
-                ),
-              );
-            }),
-          ],
-
-          const SizedBox(height: 24),
-
-          // Mood history chart
-          MoodHistoryChart(moodHistory: moodHistory, height: 150),
-
-          const SizedBox(height: 24),
-
-          // Recent topics
-          if (recentTopics.isNotEmpty) ...[
-            const Text(
-              "RECENT TOPICS",
-              style: TextStyle(
-                  color: Colors.grey,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                  fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
+          const SizedBox(height: 14),
+          _briefSectionCard(
+            key: _briefKeyGlance,
+            title: 'AT A GLANCE',
+            child: Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: recentTopics
-                  .map((topic) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4361EE).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: const Color(0xFF4361EE).withOpacity(0.3)),
-                        ),
-                        child: Text(topic,
-                            style: const TextStyle(
-                                color: Color(0xFF4361EE), fontSize: 12)),
-                      ))
-                  .toList(),
+              children: [
+                _briefGlanceTile('Risk', risk.isEmpty ? 'LOW' : risk,
+                    color: riskColor),
+                _briefGlanceTile(
+                    'Mood',
+                    moodPair['mood'] == 'Unknown'
+                        ? 'Unknown'
+                        : '${moodPair['mood']} · ${moodPair['trend']}'),
+                _briefGlanceTile('Intake', intakeGlance,
+                    color: const Color(0xFF9D4EDD)),
+                _briefGlanceTile(
+                    'Growth',
+                    _clientThriveBrief != null
+                        ? ((_clientThriveBrief!['phase'] is Map
+                                ? (_clientThriveBrief!['phase']['phase'] ??
+                                    'process')
+                                : 'process')
+                            .toString()
+                            .replaceAll('_', ' '))
+                        : (_thriveLoading ? 'Loading…' : 'process'),
+                    color: const Color(0xFF4ECDC4)),
+                if (showSensitive)
+                  _briefGlanceTile('Sensitive Bridge', sbGlance,
+                      color: const Color(0xFF4ECDC4)),
+              ],
             ),
-            const SizedBox(height: 24),
-          ],
-
-          // Session focus / breakthroughs / crystals (bridge enrichments)
-          if ((brief['session_focus'] ?? '').toString().trim().isNotEmpty) ...[
-            const Text("SESSION FOCUS",
-                style: TextStyle(
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.5,
-                    fontSize: 12)),
-            const SizedBox(height: 8),
-            Text(brief['session_focus'].toString(),
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            const SizedBox(height: 24),
-          ],
-          if ((brief['recent_breakthroughs'] is List &&
-                  (brief['recent_breakthroughs'] as List).isNotEmpty) ||
-              (brief['crystal_memory'] ?? '').toString().trim().isNotEmpty) ...[
-            const Text("MEMORY & BREAKTHROUGHS",
-                style: TextStyle(
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.5,
-                    fontSize: 12)),
-            const SizedBox(height: 8),
-            if ((brief['crystal_memory'] ?? '').toString().trim().isNotEmpty)
-              Text(brief['crystal_memory'].toString(),
-                  style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 12)),
-            if (brief['recent_breakthroughs'] is List)
-              ...List<Widget>.from((brief['recent_breakthroughs'] as List).take(5).map((b) => Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text("• ${b is Map ? (b['text'] ?? b['summary'] ?? b) : b}",
-                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                  ))),
-            const SizedBox(height: 24),
-          ],
-          if ((!isNativeIOS &&
-                  brief['fcodes_active'] is List &&
-                  (brief['fcodes_active'] as List).isNotEmpty) ||
-              _zoomInsightText(brief['zoom_ai_insight']).isNotEmpty) ...[
-            Text(isNativeIOS ? "SESSION NOTES" : "CLINICAL SIGNALS",
-                style: TextStyle(
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.5,
-                    fontSize: 12)),
-            const SizedBox(height: 8),
-            if (!isNativeIOS && brief['fcodes_active'] is List)
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: (brief['fcodes_active'] as List)
-                    .take(8)
-                    .map((f) => Chip(
-                          label: Text(f.toString(),
-                              style: const TextStyle(fontSize: 11, color: Colors.white)),
-                          backgroundColor: const Color(0xFF1A1A2E),
-                        ))
-                    .toList(),
-              ),
-            if (_zoomInsightText(brief['zoom_ai_insight']).isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_zoomInsightText(brief['zoom_ai_insight']),
-                    style: const TextStyle(color: Colors.white60, fontSize: 12)),
-              ),
-            const SizedBox(height: 24),
-          ],
-
-          if ((brief['dual_coo_insights'] is List) &&
-              (brief['dual_coo_insights'] as List).isNotEmpty) ...[
-            const Text(
-              "DUAL-COO INSIGHTS",
-              style: TextStyle(
-                  color: Colors.grey,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                  fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            ...(brief['dual_coo_insights'] as List).take(8).map((raw) {
-              final m = raw is Map
-                  ? Map<String, dynamic>.from(raw)
-                  : <String, dynamic>{};
-              final title = (m['title'] ?? '').toString();
-              final body = (m['body'] ?? '').toString();
-              final source = (m['source'] ?? '').toString();
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          ),
+          _briefSectionCard(
+            key: _briefKeyReach,
+            title: 'REACH OUT',
+            accent: const Color(0xFF4ECDC4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Call, message, open intake, or Sensitive Bridge — one tap each.',
+                  style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    if (title.isNotEmpty)
-                      Text(title,
-                          style: const TextStyle(
-                              color: Color(0xFFC9A962),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600)),
-                    if (source.isNotEmpty)
-                      Text(source,
-                          style: const TextStyle(
-                              color: Color(0xFF8B7355), fontSize: 11)),
-                    if (body.isNotEmpty)
-                      Text(body,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13, height: 1.4)),
+                    _buildCallClientButton(brief),
+                    _buildMessageClientButton(brief),
+                    if (!isNativeIOS) _buildIntakeButton(brief),
+                    if (showSensitive) _buildSensitiveProfilePill(brief),
                   ],
                 ),
-              );
-            }),
-            const SizedBox(height: 16),
-          ],
-
-          if ((brief['prior_session_summaries'] is List) &&
-              (brief['prior_session_summaries'] as List).isNotEmpty) ...[
-            const Text(
-              "PRIOR SESSION SUMMARIES",
-              style: TextStyle(
-                  color: Colors.grey,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                  fontSize: 12),
+              ],
             ),
-            const SizedBox(height: 8),
-            ...(brief['prior_session_summaries'] as List).take(8).map((raw) {
-              final m = raw is Map
-                  ? Map<String, dynamic>.from(raw)
-                  : <String, dynamic>{};
-              final when = (m['occurred_at'] ?? '').toString();
-              final summary = (m['summary'] ?? '').toString();
-              final source = (m['source'] ?? '').toString();
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (when.isNotEmpty || source.isNotEmpty)
+          ),
+          _briefSectionCard(
+            key: _briefKeyPrep,
+            title: 'SESSION PREP',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (sessionFocus.isNotEmpty) ...[
+                  const Text('SESSION FOCUS',
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(sessionFocus,
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 13, height: 1.4)),
+                  const SizedBox(height: 12),
+                ],
+                if (talkingPoints.isNotEmpty) ...[
+                  const Text('SUGGESTED TALKING POINTS',
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  ...talkingPoints.asMap().entries.map((e) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${e.key + 1}. ',
+                                style: const TextStyle(
+                                    color: Color(0xFFC9A962),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            Expanded(
+                              child: Text(e.value,
+                                  style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                      height: 1.35)),
+                            ),
+                          ],
+                        ),
+                      )),
+                ],
+                if (recentTopics.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  const Text('RECENT TOPICS',
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: recentTopics
+                        .map((topic) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4361EE).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: const Color(0xFF4361EE)
+                                        .withOpacity(0.3)),
+                              ),
+                              child: Text(topic,
+                                  style: const TextStyle(
+                                      color: Color(0xFF4361EE), fontSize: 12)),
+                            ))
+                        .toList(),
+                  ),
+                ],
+                if (panelLines.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text('PANEL INSIGHTS',
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  ...panelLines.map((p) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(p,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12, height: 1.35)),
+                      )),
+                ],
+                if (sessionFocus.isEmpty &&
+                    talkingPoints.isEmpty &&
+                    recentTopics.isEmpty &&
+                    panelLines.isEmpty)
+                  const Text('No session focus or topics on file yet.',
+                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+              ],
+            ),
+          ),
+          _briefSectionCard(
+            key: _briefKeyGrowth,
+            title: 'GROWTH PHASE',
+            accent: const Color(0xFF4ECDC4),
+            child: _buildThriveBriefSection(brief, includeHeading: false),
+          ),
+          if (!isNativeIOS)
+            _briefSectionCard(
+              key: _briefKeyMetrics,
+              title: 'METRICS',
+              accent: const Color(0xFF9D4EDD),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  MoodIndicator(
+                    mood: (moodPair['mood'] == null ||
+                            moodPair['mood'] == 'Unknown')
+                        ? 'neutral'
+                        : moodPair['mood']!,
+                    trend: moodPair['trend'],
+                    large: true,
+                  ),
+                  const SizedBox(height: 12),
+                  NevedalMetricsGrid(metrics: metrics),
+                  const SizedBox(height: 12),
+                  MoodHistoryChart(moodHistory: moodHistory, height: 150),
+                  if (showPatterns) ...[
+                    const SizedBox(height: 12),
+                    const Text('SESSION PATTERNS',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    if (lp != null)
                       Text(
                         [
-                          if (when.isNotEmpty)
-                            ConversationLogView.formatTimestamp(when),
-                          if (source.isNotEmpty) source,
+                          if ((lp['trend_direction'] ?? '')
+                              .toString()
+                              .isNotEmpty)
+                            'Trend ${lp['trend_direction']}',
+                          if (lp['sessions_analyzed'] != null)
+                            '${lp['sessions_analyzed']} sessions analyzed',
                         ].join(' · '),
                         style: const TextStyle(
-                            color: Color(0xFF8B7355), fontSize: 11),
+                            color: Colors.white70, fontSize: 12),
                       ),
-                    if (summary.isNotEmpty)
-                      Text(summary,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13, height: 1.4)),
+                    if (mm != null && mm['incongruence_count'] != null)
+                      Text(
+                        'Incongruence moments: ${mm['incongruence_count']}',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12),
+                      ),
+                    if (patternFlags.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: patternFlags
+                            .map((f) => Chip(
+                                  label: Text(f,
+                                      style: const TextStyle(
+                                          fontSize: 11, color: Colors.white)),
+                                  backgroundColor: const Color(0xFF1A1A2E),
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                    if (lpPatterns.isNotEmpty)
+                      ...lpPatterns.map((p) => Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text('• $p',
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 12)),
+                          )),
                   ],
-                ),
-              );
-            }),
-            const SizedBox(height: 16),
-          ],
-
-          // Recent conversations (shared threaded log)
-          const Text(
-            "RECENT CONVERSATIONS",
-            style: TextStyle(
-                color: Colors.grey,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.5,
-                fontSize: 12),
+                  if (_clinicalDirectoryPlanCount > 0) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      "CLINICAL DIRECTORY: $_clinicalDirectoryPlanCount care-plan templates available — Nate can suggest when the client asks for a care/treatment plan.",
+                      style: const TextStyle(
+                          color: Color(0xFF8B7355), fontSize: 11, height: 1.4),
+                    ),
+                  ],
+                  if (_clientSkillPlans.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Text('SKILL / TREATMENT PLANS',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    ..._clientSkillPlans.map((p) {
+                      final title = (p['title'] ?? 'Plan').toString();
+                      final status = (p['status'] ?? '').toString();
+                      final source = (p['source'] ?? '').toString();
+                      final step = p['current_step'];
+                      final total = p['total_steps'];
+                      final theme = (p['theme'] ?? p['practice'] ?? '').toString();
+                      final modality = (p['modality'] ?? '').toString();
+                      return Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1A1A2E),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: const Color(0xFFC9A962).withOpacity(0.35)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(title,
+                                style: const TextStyle(
+                                    color: Color(0xFFC9A962),
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            Text(
+                              [
+                                if (status.isNotEmpty) status,
+                                if (source.isNotEmpty) source,
+                                if (modality.isNotEmpty) modality,
+                                if (step != null && total != null)
+                                  'step $step/$total',
+                              ].join(' · '),
+                              style: TextStyle(
+                                  color: Colors.grey[400], fontSize: 12),
+                            ),
+                            if (theme.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(theme,
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 13)),
+                            ],
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+          if (showClinical)
+            _briefSectionCard(
+              key: _briefKeyClinical,
+              title: isNativeIOS ? 'SESSION NOTES' : 'CLINICAL · INTAKE · SENSITIVE',
+              accent: const Color(0xFF4ECDC4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!isNativeIOS) ...[
+                    Text('Intake · $intakeGlance',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: _buildIntakeButton(brief),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (showSensitive) ...[
+                    const Text('SENSITIVE BRIDGE',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text(
+                      sbState == 'active'
+                          ? 'Enrolled — open the profile for safety codes, parts, and status.'
+                          : 'Authorized — enroll this client to unlock the Sensitive Profile.',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12, height: 1.35),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: _buildSensitiveProfilePill(brief),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (!isNativeIOS && fcodeLabels.isNotEmpty) ...[
+                    const Text('F-CODES',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: fcodeLabels
+                          .take(8)
+                          .map((f) => Chip(
+                                label: Text(f,
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.white)),
+                                backgroundColor: const Color(0xFF1A1A2E),
+                              ))
+                          .toList(),
+                    ),
+                  ],
+                  if (zoomText.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text('ZOOM AI SUMMARY',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text(zoomText,
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12, height: 1.35)),
+                  ],
+                ],
+              ),
+            ),
+          if (showMemory)
+            _briefSectionCard(
+              key: _briefKeyMemory,
+              title: 'MEMORY & BREAKTHROUGHS',
+              accent: const Color(0xFF4ECDC4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ...crystalRows.take(5).map((c) {
+                    final domain = (c['domain'] ?? '').toString().trim();
+                    final text = _briefClamp(
+                        (c['content_summary'] ??
+                                c['crystal_text'] ??
+                                c['text'] ??
+                                '')
+                            .toString(),
+                        180);
+                    return Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A2E),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (domain.isNotEmpty)
+                            Text(domain.toUpperCase(),
+                                style: const TextStyle(
+                                    color: Color(0xFF4ECDC4),
+                                    fontSize: 10,
+                                    letterSpacing: 1.2)),
+                          Text(text,
+                              style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  height: 1.35)),
+                        ],
+                      ),
+                    );
+                  }),
+                  if (brief['recent_breakthroughs'] is List)
+                    ...List<Widget>.from(
+                        (brief['recent_breakthroughs'] as List).take(5).map((b) {
+                      final line = _briefClamp(_briefPlainText(b), 160);
+                      if (line.isEmpty) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text('• $line',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12)),
+                      );
+                    })),
+                  if ((brief['dual_coo_insights'] is List) &&
+                      (brief['dual_coo_insights'] as List).isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text('DUAL-COO INSIGHTS',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    ...(brief['dual_coo_insights'] as List).take(8).map((raw) {
+                      final m = raw is Map
+                          ? Map<String, dynamic>.from(raw)
+                          : <String, dynamic>{};
+                      final title = _briefPlainText(m['title']);
+                      final body = _briefClamp(_briefPlainText(m['body']), 220);
+                      final source = _briefPlainText(m['source']);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (title.isNotEmpty)
+                              Text(title,
+                                  style: const TextStyle(
+                                      color: Color(0xFFC9A962),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                            if (source.isNotEmpty)
+                              Text(source,
+                                  style: const TextStyle(
+                                      color: Color(0xFF8B7355), fontSize: 11)),
+                            if (body.isNotEmpty)
+                              Text(body,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                      height: 1.4)),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                  if ((brief['prior_session_summaries'] is List) &&
+                      (brief['prior_session_summaries'] as List)
+                          .isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text('PRIOR SESSION SUMMARIES',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    ...(brief['prior_session_summaries'] as List)
+                        .take(8)
+                        .map((raw) {
+                      final m = raw is Map
+                          ? Map<String, dynamic>.from(raw)
+                          : <String, dynamic>{};
+                      final when = (m['occurred_at'] ?? '').toString();
+                      final summary =
+                          _briefClamp(_briefPlainText(m['summary']), 220);
+                      final source = _briefPlainText(m['source']);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (when.isNotEmpty || source.isNotEmpty)
+                              Text(
+                                [
+                                  if (when.isNotEmpty)
+                                    ConversationLogView.formatTimestamp(when),
+                                  if (source.isNotEmpty) source,
+                                ].join(' · '),
+                                style: const TextStyle(
+                                    color: Color(0xFF8B7355), fontSize: 11),
+                              ),
+                            if (summary.isNotEmpty)
+                              Text(summary,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                      height: 1.4)),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+          _briefSectionCard(
+            key: _briefKeyTalk,
+            title: 'RECENT CONVERSATIONS',
+            child: ConversationLogView(
+              entries: ConversationLogView.parseEntries(recentConversations),
+              clientFirstName: (displayName
+                  .split(RegExp(r'\s+'))
+                  .first),
+              emptyText: 'No conversation history in vault or PostgreSQL.',
+              collapseChars: 160,
+            ),
           ),
-          const SizedBox(height: 12),
-          ConversationLogView(
-            entries: ConversationLogView.parseEntries(recentConversations),
-            clientFirstName: ((client['name'] ?? 'Client')
-                .toString()
-                .trim()
-                .split(RegExp(r'\s+'))
-                .first),
-            emptyText: 'No conversation history in vault or PostgreSQL.',
-          ),
-
-          const SizedBox(height: 40),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -11887,6 +12619,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     bool sendEmail = hasEmail;
     bool sendSms = false;
     bool sending = false;
+    final talkingPoints = _briefTalkingPoints(brief, _briefKeywordTopics(brief));
 
     showDialog(
       context: context,
@@ -11919,6 +12652,36 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         borderSide: BorderSide(color: Color(0xFF4ECDC4))),
                   ),
                 ),
+                if (talkingPoints.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text('Insert a talking point',
+                      style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: talkingPoints
+                        .take(5)
+                        .map((p) => ActionChip(
+                              backgroundColor: const Color(0xFF1A1A2E),
+                              label: Text(_briefClamp(p, 42),
+                                  style: const TextStyle(
+                                      color: Color(0xFFE8D5A3), fontSize: 11)),
+                              onPressed: () {
+                                final cur = msgController.text.trim();
+                                msgController.text =
+                                    cur.isEmpty ? p : '$cur\n\n$p';
+                                msgController.selection =
+                                    TextSelection.fromPosition(
+                                  TextPosition(
+                                      offset: msgController.text.length),
+                                );
+                                setDialogState(() {});
+                              },
+                            ))
+                        .toList(),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 CheckboxListTile(
                   value: sendEmail,
@@ -12061,6 +12824,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       disposeLnObserverIframe();
     }
     _tabController.dispose();
+    _briefSheetTick.dispose();
     _wsReconnectTimer?.cancel();
     _coachWsSub?.cancel();
     _socket?.sink.close();
@@ -12458,13 +13222,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Row(
-            children: [
-              Expanded(child: _buildClientSearchAndFilter()),
-              const SizedBox(width: 8),
-              // QUANTUM-CRYSTAL-ARCH: coach risk-window ops surface + active badge
-              CoachRiskWindowsEntryButton(profile: widget.currentUserProfile),
-            ],
+          child: _buildClientSearchAndFilter(
+            trailing: CoachRiskWindowsEntryButton(
+                profile: widget.currentUserProfile),
           ),
         ),
         Expanded(
@@ -15797,16 +16557,33 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 : _expandedAssistantClients.isEmpty
                     ? Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Text('No clients assigned',
-                            style: TextStyle(
-                                color: Colors.white.withOpacity(0.3),
-                                fontSize: 12)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CoachPracticeSnapshotCard(
+                              apiBase: _apiBaseUrl,
+                              headers: _restHeaders(json: false),
+                              targetCoachUsername: username,
+                              headlineHint: "$name · assistant snapshot",
+                            ),
+                            Text('No clients assigned',
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.3),
+                                    fontSize: 12)),
+                          ],
+                        ),
                       )
                     : Padding(
                         padding: const EdgeInsets.all(10),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            CoachPracticeSnapshotCard(
+                              apiBase: _apiBaseUrl,
+                              headers: _restHeaders(json: false),
+                              targetCoachUsername: username,
+                              headlineHint: "$name · assistant snapshot",
+                            ),
                             Padding(
                               padding:
                                   const EdgeInsets.only(bottom: 8, left: 4),
@@ -16084,6 +16861,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+          CoachPracticeSnapshotCard(
+            apiBase: _apiBaseUrl,
+            headers: _restHeaders(json: false),
+            compact: true,
+            headlineHint: 'Your practice snapshot',
           ),
           const SizedBox(height: 20),
           ..._assistantMetrics.map((a) => _buildAssistantCard(a)),
@@ -16574,85 +17358,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         );
       });
     }
-    final folderList = Column(
-      children: [
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: _buildClientSearchAndFilter(),
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: folders.length,
-            itemBuilder: (context, index) {
-              final f = folders[index];
-              final selected = f['folder_id'] == _selectedFolderId;
-              final folderType = (f['folder_type'] ?? 'family').toString();
-
-              // Type-appropriate icons
-              IconData folderIcon;
-              Color iconColor;
-              switch (folderType) {
-                case 'company':
-                  folderIcon = Icons.business;
-                  iconColor = const Color(0xFF4ECDC4);
-                  break;
-                case 'coach_only':
-                  folderIcon = Icons.calendar_today;
-                  iconColor = const Color(0xFFC9A962);
-                  break;
-                default:
-                  folderIcon = Icons.folder;
-                  iconColor = const Color(0xFFFFD700);
-              }
-
-              return InkWell(
-                onTap: () => _openFolder(
-                  folderId: f['folder_id'],
-                  label: f['label'],
-                  familyId: f['family_id'],
-                  clients: List<Map<String, dynamic>>.from(f['clients'] ?? []),
-                ),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? Colors.white.withOpacity(0.06)
-                        : Colors.white.withOpacity(0.03),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: selected
-                            ? const Color(0xFFFFD700).withOpacity(0.4)
-                            : Colors.white10),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(folderIcon, color: iconColor, size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          (f['label'] ?? 'Folder').toString(),
-                          style: TextStyle(
-                            color: selected ? Colors.white : Colors.white70,
-                            fontWeight:
-                                selected ? FontWeight.bold : FontWeight.w500,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-
     final folderContent = _buildFolderContent();
 
     if (!isWide) {
@@ -16660,6 +17365,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         return Column(
           children: [
             _buildMobileFilterBar(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: _buildClientFilterChips(wrap: true),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: CoachPracticeSnapshotCard(
+                apiBase: _apiBaseUrl,
+                headers: _restHeaders(json: false),
+                compact: true,
+              ),
+            ),
             const Divider(color: Colors.white10, height: 1),
             Expanded(child: folderContent),
           ],
@@ -16667,88 +17384,128 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       }
       return Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: _buildClientSearchAndFilter(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: _buildClientSearchAndFilter(),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: CoachPracticeSnapshotCard(
+            apiBase: _apiBaseUrl,
+            headers: _restHeaders(json: false),
           ),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: folders.length,
-              itemBuilder: (context, index) {
-                final f = folders[index];
-                final folderType = (f['folder_type'] ?? 'family').toString();
-                IconData folderIcon;
-                Color iconColor;
-                switch (folderType) {
-                  case 'company':
-                    folderIcon = Icons.business;
-                    iconColor = const Color(0xFF4ECDC4);
-                    break;
-                  case 'coach_only':
-                    folderIcon = Icons.calendar_today;
-                    iconColor = const Color(0xFFC9A962);
-                    break;
-                  default:
-                    folderIcon = Icons.folder;
-                    iconColor = const Color(0xFFFFD700);
-                }
-                return InkWell(
-                  onTap: () => _openFolder(
-                    folderId: f['folder_id'],
-                    label: f['label'],
-                    familyId: f['family_id'],
-                    clients:
-                        List<Map<String, dynamic>>.from(f['clients'] ?? []),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.03),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white10),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(folderIcon, color: iconColor, size: 20),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            (f['label'] ?? 'Folder').toString(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${(f['clients'] as List?)?.length ?? 0}',
-                          style:
-                              const TextStyle(color: Colors.grey, fontSize: 12),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right,
-                            color: Colors.grey, size: 18),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+        ),
+        Expanded(child: _buildBriefingsFolderList(folders, compact: false)),
         ],
       );
     }
 
-    return Row(
+    return Column(
       children: [
-        SizedBox(width: 320, child: folderList),
-        const VerticalDivider(color: Colors.white10, width: 1),
-        Expanded(child: folderContent),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: _buildClientSearchAndFilter(),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: CoachPracticeSnapshotCard(
+            apiBase: _apiBaseUrl,
+            headers: _restHeaders(json: false),
+          ),
+        ),
+        const Divider(color: Colors.white10, height: 1),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 280,
+                child: _buildBriefingsFolderList(folders, compact: true),
+              ),
+              const VerticalDivider(color: Colors.white10, width: 1),
+              Expanded(child: folderContent),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildBriefingsFolderList(List folders, {required bool compact}) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
+      itemCount: folders.length,
+      itemBuilder: (context, index) {
+        final f = folders[index];
+        final selected = f['folder_id'] == _selectedFolderId;
+        final folderType = (f['folder_type'] ?? 'family').toString();
+        IconData folderIcon;
+        Color iconColor;
+        switch (folderType) {
+          case 'company':
+            folderIcon = Icons.business;
+            iconColor = const Color(0xFF4ECDC4);
+            break;
+          case 'coach_only':
+            folderIcon = Icons.calendar_today;
+            iconColor = const Color(0xFFC9A962);
+            break;
+          default:
+            folderIcon = Icons.folder;
+            iconColor = const Color(0xFFFFD700);
+        }
+        return InkWell(
+          onTap: () => _openFolder(
+            folderId: f['folder_id'],
+            label: f['label'],
+            familyId: f['family_id'],
+            clients: List<Map<String, dynamic>>.from(f['clients'] ?? []),
+          ),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: EdgeInsets.all(compact ? 12 : 14),
+            decoration: BoxDecoration(
+              color: selected
+                  ? Colors.white.withOpacity(0.06)
+                  : Colors.white.withOpacity(0.03),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: selected
+                      ? const Color(0xFFFFD700).withOpacity(0.4)
+                      : Colors.white10),
+            ),
+            child: Row(
+              children: [
+                Icon(folderIcon, color: iconColor, size: compact ? 18 : 20),
+                SizedBox(width: compact ? 10 : 12),
+                Expanded(
+                  child: Text(
+                    (f['label'] ?? 'Folder').toString(),
+                    style: TextStyle(
+                      color: selected || !compact
+                          ? Colors.white
+                          : Colors.white70,
+                      fontWeight: selected || !compact
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      fontSize: compact ? 12 : 14,
+                    ),
+                  ),
+                ),
+                if (!compact) ...[
+                  Text(
+                    '${(f['clients'] as List?)?.length ?? 0}',
+                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right, color: Colors.grey, size: 18),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -16813,13 +17570,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   /// Builds the reusable search bar + toggle chips for client filtering
-  Widget _buildClientSearchAndFilter() {
+  Widget _buildClientSearchAndFilter({Widget? trailing}) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Search bar
         Container(
           margin: const EdgeInsets.only(bottom: 10),
-          child: TextField(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
             controller: _clientSearchController,
             style: const TextStyle(color: Colors.white, fontSize: 13),
             decoration: InputDecoration(
@@ -16856,28 +17618,46 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ),
             onChanged: (val) => setState(() => _clientSearchQuery = val),
           ),
-        ),
-        // Toggle chips
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _buildFilterChip('All', 'ALL'),
-              const SizedBox(width: 6),
-              _buildFilterChip('Clients', 'CLIENTS'),
-              const SizedBox(width: 6),
-              _buildFilterChip('Families', 'FAMILY'),
-              const SizedBox(width: 6),
-              _buildFilterChip('Coach-Only', 'COACH_ONLY'),
-              const SizedBox(width: 6),
-              _buildFilterChip('Company', 'COMPANY'),
-              const SizedBox(width: 6),
-              _buildFilterChip('High Risk', 'HIGH_RISK'),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 8),
+                trailing,
+              ],
             ],
           ),
         ),
+        _buildClientFilterChips(wrap: true),
         const SizedBox(height: 10),
       ],
+    );
+  }
+
+  Widget _buildClientFilterChips({bool wrap = false}) {
+    final chips = <Widget>[
+      _buildFilterChip('All', 'ALL'),
+      _buildFilterChip('Clients', 'CLIENTS'),
+      _buildFilterChip('Families', 'FAMILY'),
+      _buildFilterChip('Coach-Only', 'COACH_ONLY'),
+      _buildFilterChip('Company', 'COMPANY'),
+      _buildFilterChip('High Risk', 'HIGH_RISK'),
+    ];
+    if (wrap) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: chips,
+      );
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < chips.length; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            chips[i],
+          ],
+        ],
+      ),
     );
   }
 
@@ -16962,7 +17742,40 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   String _clientIdFromMap(Map<String, dynamic> c) {
-    return (c['hardware_id'] ?? c['id'] ?? c['client_id'] ?? '').toString();
+    return (c['hardware_id'] ?? c['client_id'] ?? c['id'] ?? '').toString();
+  }
+
+  String _usernameForClientId(String clientId) {
+    final id = clientId.trim();
+    if (id.isEmpty) return id;
+    String from(Map<String, dynamic> m) {
+      if (_clientIdFromMap(m) != id) return '';
+      return (m['username'] ?? '').toString().trim();
+    }
+    for (final c in _clients) {
+      if (c is! Map) continue;
+      final u = from(Map<String, dynamic>.from(c));
+      if (u.isNotEmpty) return u;
+    }
+    for (final c in _selectedFolderClients) {
+      final u = from(c);
+      if (u.isNotEmpty) return u;
+    }
+    final brief = _selectedClientBrief;
+    if (brief is Map) {
+      final client = brief['client'];
+      if (client is Map) {
+        final m = Map<String, dynamic>.from(client);
+        final u = (m['username'] ?? '').toString().trim();
+        if (u.isNotEmpty) return u;
+      }
+      final vis = brief['sensitive_bridge_visibility'];
+      if (vis is Map) {
+        final u = (vis['client_username'] ?? '').toString().trim();
+        if (u.isNotEmpty) return u;
+      }
+    }
+    return id;
   }
 
   String _clientNameFromMap(Map<String, dynamic> c) {
@@ -17118,6 +17931,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       out.putIfAbsent('client_id', () => cm['id']);
       out.putIfAbsent('client_name', () => cm['name']);
     }
+    final topics = _briefKeywordTopics(brief);
+    final points = _briefTalkingPoints(brief, topics);
+    if (points.isNotEmpty) out['talking_points'] = points;
     return out;
   }
 
@@ -17538,12 +18354,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 ),
                 TextButton(
                   onPressed: () {
-                    // For now: refresh notes + allow opening per-member briefings below.
                     _fetchFolderNotes(
                         folderId: _selectedFolderId,
                         familyId: _selectedFamilyId);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Folder refreshed")));
+                    if (_selectedFolderClients.length == 1) {
+                      final briefId =
+                          _clientIdFromMap(_selectedFolderClients.first);
+                      if (briefId.isNotEmpty) {
+                        _fetchClientBrief(briefId);
+                        return;
+                      }
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text(
+                            "Notes refreshed. Open View Brief on a member.")));
                   },
                   style: TextButton.styleFrom(
                       foregroundColor: const Color(0xFFFFD700)),
@@ -17555,7 +18379,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
           const SizedBox(height: 14),
           const Text(
-            "FAMILY MEMBERS",
+            "MEMBERS",
             style: TextStyle(
                 color: Colors.grey,
                 fontWeight: FontWeight.bold,
@@ -25288,6 +26112,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         _coachFolderList.where((f) => f['folder_type'] == 'group').toList();
     final companies =
         _coachFolderList.where((f) => f['folder_type'] == 'company').toList();
+    final assistants =
+        _coachFolderList.where((f) => f['folder_type'] == 'assistant').toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -25331,6 +26157,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         if (companies.isNotEmpty) ...[
           _buildCoachFolderSection(
               "COMPANY FOLDERS", Icons.business, companies),
+          const SizedBox(height: 16),
+        ],
+        if (assistants.isNotEmpty) ...[
+          _buildCoachFolderSection(
+              "ASSISTANT MASTER FOLDERS", Icons.supervisor_account, assistants),
         ],
         if (_coachFolderList.isEmpty)
           Center(
@@ -25385,6 +26216,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       'family': Icons.family_restroom,
       'group': Icons.groups,
       'company': Icons.business,
+      'assistant': Icons.supervisor_account,
     };
 
     return GestureDetector(
@@ -26746,6 +27578,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         _folderList.where((f) => f['folder_type'] == 'group').toList();
     final companies =
         _folderList.where((f) => f['folder_type'] == 'company').toList();
+    final assistants =
+        _folderList.where((f) => f['folder_type'] == 'assistant').toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -26796,6 +27630,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         ],
         if (companies.isNotEmpty) ...[
           _buildFolderSection("COMPANY FOLDERS", Icons.business, companies),
+          const SizedBox(height: 16),
+        ],
+        if (assistants.isNotEmpty) ...[
+          _buildFolderSection(
+              "ASSISTANT MASTER FOLDERS", Icons.supervisor_account, assistants),
         ],
         if (_folderList.isEmpty)
           Center(
@@ -26850,6 +27689,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       'family': Icons.family_restroom,
       'group': Icons.groups,
       'company': Icons.business,
+      'assistant': Icons.supervisor_account,
     };
 
     return GestureDetector(

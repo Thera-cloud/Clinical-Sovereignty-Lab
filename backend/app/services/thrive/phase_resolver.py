@@ -399,6 +399,11 @@ async def evaluate(
     pol = policy or _policy()
     state = await get_phase(db_pool, user_id, use_cache=False)
     signal = await compute_healing_signal(db_pool, state.username, hardware_id=hardware_id, days=pol.promote_window_days)
+    # Quiet clients still have history LN can score (longra last turn 2026-08-22).
+    if signal.score is None and pol.promote_window_days < 180:
+        signal = await compute_healing_signal(
+            db_pool, state.username, hardware_id=hardware_id, days=180
+        )
     if not state.username:
         return state, None, signal
     now = datetime.now(timezone.utc)

@@ -283,6 +283,17 @@ async def coaching_brief(username: str, request: Request, user: Dict = Depends(r
     pool = await _pool(request)
     canon = await _authorize(pool, user, username)
     state = await pr.get_phase(pool, canon, use_cache=False)
+    # First View Brief must persist + score even if the 14-day agent
+    # window never saw this client (longra: 423 turns, last chat Aug 22).
+    if not state.persisted:
+        try:
+            async with pool.acquire() as conn:
+                hw = await conn.fetchval(
+                    "SELECT hardware_id FROM users WHERE username = $1", canon
+                )
+            state, _, _ = await pr.evaluate(pool, canon, hardware_id=hw)
+        except Exception as e:
+            logger.warning("thrive brief: seed evaluate failed for %s: %s", canon, e)
     fw = gp.framework_for(state.phase)
     fs = await pt.focus_state(pool, canon)
     async with pool.acquire() as conn:

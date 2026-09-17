@@ -984,7 +984,7 @@ class _ApiError implements Exception {
       if (j is Map<String, dynamic>) {
         final d = j['detail'];
         if (d is Map<String, dynamic>) {
-          final reason = d['reason']?.toString() ?? 'request_failed';
+          final reason = (d['code'] ?? d['reason'] ?? 'request_failed').toString();
           final buf = StringBuffer(reason);
           if (d['pattern_matched'] != null) {
             buf.write(
@@ -1007,8 +1007,28 @@ class _ApiError implements Exception {
   /// Enrollment / snackbar paths still read `.reason`.
   String get reason => message;
 
+  String get coachFacingMessage {
+    final code = (detail?['code'] ?? '').toString();
+    if (status == 401 &&
+        (code == 'MFA_REVERIFY_REQUIRED' ||
+            message.contains('mfa') ||
+            message.contains('MFA'))) {
+      return 'Sensitive Bridge needs a fresh sign-in. Sign out of Coach Command, sign back in, then open this profile again.';
+    }
+    if (status == 401) {
+      return 'Coach session was rejected for Sensitive Bridge. Sign out and sign back in.';
+    }
+    if (status == 403) {
+      return 'You are not assigned as this client’s clinician for Sensitive Bridge.';
+    }
+    if (status == 404) {
+      return 'No Sensitive Bridge record for this client username.';
+    }
+    return message;
+  }
+
   @override
-  String toString() => 'API $status: $message';
+  String toString() => coachFacingMessage;
 }
 
 // =============================================================================

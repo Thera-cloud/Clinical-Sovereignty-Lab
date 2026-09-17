@@ -1,0 +1,81 @@
+"""Offline tests for coach practice snapshot + nameless print report."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from app.services.assistant_consult_archive import extract_action_items
+from app.services.coach_practice_report import (
+    anonymize_snapshot,
+    render_html,
+    strip_client_names,
+    _fallback_guidance,
+)
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def test_extract_action_items_from_consult_notes():
+    text = (
+        "Discussed roster pacing.\n"
+        "Action item: follow every live hour with a next-day LN check-in.\n"
+        "Next step: review cycle-dip weeks in supervision.\n"
+        "1. Please tighten session endings so clients do not drop silent.\n"
+    )
+    items = extract_action_items(text)
+    assert len(items) >= 2
+    assert any("ln check-in" in i.lower() for i in items)
+
+
+def test_print_html_has_letterhead_and_no_client_names():
+    snap = {
+        "coach": {"username": "CoachN", "display_name": "Coach Hope"},
+        "master": {"username": "hnevedal", "display_name": "Dr Nevedal"},
+        "series": [
+            {"date": "2026-09-01", "healing_mean": 0.61, "live": True, "cycle_dips": 1, "ln_turns": 4, "live_sessions": 1},
+            {"date": "2026-09-02", "healing_mean": 0.64, "live": False, "cycle_dips": 0, "ln_turns": 6, "live_sessions": 0},
+        ],
+        "scatter": [{"date": "2026-09-01", "healing": 0.61, "client": "Lana Smith", "kind": "healing"}],
+        "totals": {"healing_mean": 0.625, "cycle_dips": 1, "ln_turns": 10, "live_sessions": 1, "roster": 7},
+        "live_influence": {"mean_lift": 0.2, "direction": "up", "sample": 1},
+        "skills": [{"skill": "reflective listening", "weight": 4}],
+    }
+    clean = anonymize_snapshot(snap)
+    assert "client" not in (clean["scatter"][0])
+    guidance = _fallback_guidance(clean, None, {"open": [], "completed": [{"text": "Log two consult hours"}]})
+    html = render_html(clean, guidance, 90)
+    assert "Sovereign Sanctuary" in html
+    assert "84-3879515" in html
+    assert "Lana Smith" not in html
+    assert "Coach Hope" in html
+    assert "Dr Nevedal" in html
+    assert "CEE skillset" in html
+    assert "Three actions" in html
+
+
+def test_strip_client_names():
+    raw = "Lana Smith opened a CEE window on Tuesday."
+    assert "Lana" not in strip_client_names(raw, ["Lana Smith"])
+
+
+def test_flutter_wires_practice_card():
+    src = (REPO / "mobile/lib/updated_screens.dart").read_text()
+    assert "CoachPracticeSnapshotCard" in src
+    assert "ASSISTANT MASTER FOLDERS" in src
+    widget = (REPO / "mobile/lib/widgets/coach_practice_snapshot.dart").read_text()
+    assert "Print review (no client names)" in widget
+    assert "PointerScrollEvent" in widget
+
+
+def test_migration_adds_assistant_folder_type():
+    sql = (REPO / "backend/migrations/437_coach_practice_snapshot.sql").read_text()
+    assert "'assistant'" in sql
+    assert "coach_practice_reports" in sql
+    assert "assistant_consult_action_items" in sql
+
+
+def test_main_registers_practice_router():
+    src = (REPO / "backend/app/main.py").read_text()
+    assert "coach_practice_api" in src
+    assert "ENABLE_COACH_PRACTICE_SNAPSHOT" in src
+    assert "# QUANTUM-CRYSTAL-ARCH" in src
