@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import random
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,6 +16,7 @@ from app.services.thrive.healing_cycle import score_coherence, score_language
 logger = logging.getLogger(__name__)
 
 WINDOWS = (30, 90, 180)
+SAMPLE_SIZES = (1, 5, 10, 25, 100)
 _CLIENT_SPLIT = re.compile(r"[,;\n]+")
 
 
@@ -26,6 +28,52 @@ def parse_client_tokens(raw: Any) -> List[str]:
     else:
         parts = _CLIENT_SPLIT.split(str(raw))
     return [p.strip() for p in parts if p and p.strip()]
+
+
+def parse_sample_size(raw: Any) -> Optional[int]:
+    """None = ALL. Else 1, 5, 10, 25, or 100."""
+    if raw is None:
+        return None
+    text = str(raw).strip().upper()
+    if text in ("", "ALL", "0", "NONE"):
+        return None
+    try:
+        n = int(text)
+    except (TypeError, ValueError):
+        return None
+    if n in SAMPLE_SIZES:
+        return n
+    return min(SAMPLE_SIZES, key=lambda x: abs(x - n))
+
+
+def parse_sample_mode(raw: Any) -> str:
+    mode = str(raw or "pick").strip().lower()
+    if mode in ("random", "grab", "ln"):
+        return "random"
+    return "pick"
+
+
+def select_roster_sample(
+    clients: List[Dict[str, str]],
+    *,
+    mode: str = "pick",
+    size: Optional[int] = None,
+    tokens: Optional[List[str]] = None,
+) -> List[Dict[str, str]]:
+    """Pick named clients or a fresh random grab. Random is never sticky."""
+    book = list(clients)
+    mode = parse_sample_mode(mode)
+    if mode == "random":
+        random.shuffle(book)
+        if size is None:
+            return book
+        return book[: min(size, len(book))]
+    picked = filter_roster(book, tokens) if tokens else []
+    if not tokens:
+        return book if size is None else []
+    if size is None:
+        return picked
+    return picked[:size]
 
 
 def filter_roster(
@@ -132,8 +180,12 @@ async def build_snapshot(
     days: int = 90,
     include_names: bool = True,
     client_tokens: Optional[List[str]] = None,
+    sample_size: Optional[Any] = None,
+    sample_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     days = _clamp_days(days)
+    size = parse_sample_size(sample_size)
+    mode = parse_sample_mode(sample_mode)
     empty = {
         "window_days": days,
         "coach": {},
@@ -141,6 +193,7 @@ async def build_snapshot(
         "client_count": 0,
         "roster_members": [],
         "selected_clients": [],
+        "sample": {"size": size or "ALL", "mode": mode, "roster": 0, "selected": 0},
         "series": [],
         "scatter": [],
         "totals": {},
@@ -156,7 +209,9 @@ async def build_snapshot(
         master = await resolve_master_for(conn, coach["hardware_id"])
         book = await roster_clients(conn, coach["hardware_id"], coach["username"])
         tokens = parse_client_tokens(client_tokens)
-        clients = filter_roster(book, tokens) if tokens else book
+        clients = select_roster_sample(
+            book, mode=mode, size=size, tokens=tokens
+        )
         usernames = [c["username"] for c in clients]
         hw_ids = [c["hardware_id"] for c in clients]
         uuids = [c.get("uuid") or "" for c in clients if c.get("uuid")]
@@ -184,7 +239,13 @@ async def build_snapshot(
             {"username": c["username"], "display_name": c["display_name"]}
             for c in book
         ],
-        "selected_clients": [c["username"] for c in clients] if tokens else [],
+        "selected_clients": [c["username"] for c in clients],
+        "sample": {
+            "size": size if size is not None else "ALL",
+            "mode": mode,
+            "roster": len(book),
+            "selected": len(clients),
+        },
         "series": series,
         "scatter": scatter,
         "totals": totals,

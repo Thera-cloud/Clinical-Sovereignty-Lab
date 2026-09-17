@@ -33,12 +33,15 @@ class CoachPracticeSnapshotCard extends StatefulWidget {
 class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   int _days = 90;
   bool _loading = false;
+  bool _reloadQueued = false;
   bool _printing = false;
   Map<String, dynamic>? _snap;
   String? _hover;
   Offset? _hoverPos;
   final _nameCtrl = TextEditingController();
   final List<String> _picked = [];
+  int? _sampleSize;
+  String _sampleMode = 'pick';
   double _x0 = 0;
   double _x1 = 1;
   double _y0 = 0;
@@ -62,19 +65,26 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
     if (oldWidget.targetCoachUsername != widget.targetCoachUsername) {
       _picked.clear();
       _nameCtrl.clear();
+      _sampleSize = null;
+      _sampleMode = 'pick';
       _load();
     }
   }
 
   Future<void> _load() async {
-    if (_loading) return;
+    if (_loading) {
+      _reloadQueued = true;
+      return;
+    }
     setState(() => _loading = true);
     try {
       final q = <String, String>{'days': '$_days'};
       if ((widget.targetCoachUsername ?? '').isNotEmpty) {
         q['coach'] = widget.targetCoachUsername!;
       }
-      if (_picked.isNotEmpty) {
+      q['sample_size'] = _sampleSize == null ? 'ALL' : '$_sampleSize';
+      q['sample_mode'] = _sampleMode;
+      if (_sampleMode == 'pick' && _picked.isNotEmpty) {
         q['clients'] = _picked.join(',');
       }
       final uri = Uri.parse('${widget.apiBase}/api/coach/practice/snapshot')
@@ -91,6 +101,10 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+    if (_reloadQueued) {
+      _reloadQueued = false;
+      await _load();
+    }
   }
 
   Future<void> _print() async {
@@ -108,7 +122,9 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
           'days': _days,
           if ((widget.targetCoachUsername ?? '').isNotEmpty)
             'coach_username': widget.targetCoachUsername,
-          if (_picked.isNotEmpty) 'clients': _picked,
+          'sample_size': _sampleSize == null ? 'ALL' : '$_sampleSize',
+          'sample_mode': _sampleMode,
+          if (_printClientTokens().isNotEmpty) 'clients': _printClientTokens(),
         }),
       );
       if (!mounted) {
@@ -170,28 +186,46 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
     return List<Map<String, dynamic>>.from(_snap?['roster_members'] ?? []);
   }
 
-  void _applyTypedNames() {
-    final raw = _nameCtrl.text.trim();
-    if (raw.isEmpty) {
-      setState(_picked.clear);
-      _load();
-      return;
+  int get _pickCap => _sampleSize ?? 100000;
+
+  List<String> _printClientTokens() {
+    if (_sampleMode == 'random') {
+      return List<String>.from(_snap?['selected_clients'] ?? const []);
     }
+    return List<String>.from(_picked);
+  }
+
+  String _displayName(String username) {
+    for (final m in _rosterMembers()) {
+      if ((m['username'] ?? '').toString() == username) {
+        final dn = (m['display_name'] ?? '').toString();
+        if (dn.isNotEmpty) return dn;
+      }
+    }
+    return username;
+  }
+
+  void _addFromSearch() {
+    final raw = _nameCtrl.text.trim();
+    if (raw.isEmpty) return;
     final tokens = raw
         .split(RegExp(r'[,;\n]+'))
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
         .toList();
     final book = _rosterMembers();
-    final matched = <String>{};
+    final matched = <String>[];
     for (final t in tokens) {
       final needle = t.toLowerCase();
       for (final m in book) {
         final un = (m['username'] ?? '').toString();
         final dn = (m['display_name'] ?? '').toString();
+        if (un.isEmpty || matched.contains(un) || _picked.contains(un)) {
+          continue;
+        }
         if (un.toLowerCase().contains(needle) ||
             dn.toLowerCase().contains(needle)) {
-          if (un.isNotEmpty) matched.add(un);
+          matched.add(un);
         }
       }
     }
@@ -202,20 +236,41 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
       ));
       return;
     }
+    final room = _pickCap - _picked.length;
     setState(() {
-      _picked
-        ..clear()
-        ..addAll(matched);
+      _picked.addAll(matched.take(room));
+      _nameCtrl.clear();
     });
     _load();
   }
 
   void _toggleMember(String username) {
+    if (_sampleMode != 'pick') return;
     setState(() {
       if (_picked.contains(username)) {
         _picked.remove(username);
-      } else {
+      } else if (_picked.length < _pickCap) {
         _picked.add(username);
+      }
+    });
+    _load();
+  }
+
+  void _setSampleSize(int? size) {
+    setState(() {
+      _sampleSize = size;
+      if (_sampleMode == 'pick' && size != null && _picked.length > size) {
+        _picked.removeRange(size, _picked.length);
+      }
+    });
+    _load();
+  }
+
+  void _setSampleMode(String mode) {
+    setState(() {
+      _sampleMode = mode;
+      if (mode == 'random') {
+        _nameCtrl.clear();
       }
     });
     _load();
@@ -404,7 +459,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
               ),
             ),
-          _nameFilterBar(),
+          _sampleBar(),
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
@@ -503,6 +558,16 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 },
               ),
             ),
+          if (_sampleMode == 'pick' &&
+              _sampleSize != null &&
+              _picked.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 4, bottom: 4),
+              child: Text(
+                'Pick each name to fill this sample. Names stay when you search the next one.',
+                style: TextStyle(color: Color(0xFFC9A962), fontSize: 11),
+              ),
+            ),
           if (series.isNotEmpty) _dateSlider(series),
           const SizedBox(height: 8),
           Wrap(
@@ -521,84 +586,84 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
     );
   }
 
-  Widget _nameFilterBar() {
+  Widget _sampleBar() {
     final book = _rosterMembers();
+    final sample = (_snap?['sample'] as Map?) ?? {};
+    final rosterN = sample['roster'] ?? book.length;
+    final selectedN = sample['selected'] ??
+        (_sampleMode == 'random'
+            ? (_snap?['selected_clients'] as List?)?.length ?? 0
+            : _picked.length);
+    final grabbed = List<String>.from(_snap?['selected_clients'] ?? const []);
     final typed = _nameCtrl.text.trim().toLowerCase();
-    final suggestions = typed.isEmpty
-        ? book.take(8).toList()
-        : book
-            .where((m) {
-              final un = (m['username'] ?? '').toString().toLowerCase();
-              final dn = (m['display_name'] ?? '').toString().toLowerCase();
-              return un.contains(typed) || dn.contains(typed);
-            })
-            .take(8)
-            .toList();
+    final suggestions = book.where((m) {
+      final un = (m['username'] ?? '').toString();
+      if (un.isEmpty || _picked.contains(un)) return false;
+      if (typed.isEmpty) return true;
+      final dn = (m['display_name'] ?? '').toString().toLowerCase();
+      return un.toLowerCase().contains(typed) || dn.contains(typed);
+    }).take(8).toList();
+    const gold = Color(0xFFC9A962);
+    const dim = Color(0xFF8B7355);
+    const cream = Color(0xFFE8D5A3);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: 36,
-            child: TextField(
-              controller: _nameCtrl,
-              style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Type a name, or several separated by commas',
-                hintStyle:
-                    const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
-                filled: true,
-                fillColor: const Color(0xFF111111),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0x55C9A962)),
-                ),
-                suffixIcon: IconButton(
-                  tooltip: 'Show named set',
-                  icon: const Icon(Icons.person_search,
-                      color: Color(0xFFC9A962), size: 18),
-                  onPressed: _applyTypedNames,
-                ),
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text('Sample',
+                  style: TextStyle(color: cream, fontSize: 11)),
+              DropdownButton<int?>(
+                value: _sampleSize,
+                dropdownColor: const Color(0xFF111111),
+                underline: Container(height: 1, color: gold.withOpacity(0.4)),
+                style: const TextStyle(color: gold, fontSize: 12),
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('1')),
+                  DropdownMenuItem(value: 5, child: Text('5')),
+                  DropdownMenuItem(value: 10, child: Text('10')),
+                  DropdownMenuItem(value: 25, child: Text('25')),
+                  DropdownMenuItem(value: 100, child: Text('100')),
+                  DropdownMenuItem(value: null, child: Text('ALL')),
+                ],
+                onChanged: _setSampleSize,
               ),
-              onSubmitted: (_) => _applyTypedNames(),
-              onChanged: (_) => setState(() {}),
-            ),
+              _modeChip('Pick each', 'pick'),
+              _modeChip('Random grab', 'random'),
+              if (_sampleMode == 'random')
+                TextButton(
+                  onPressed: _load,
+                  child: const Text('New grab',
+                      style: TextStyle(color: gold, fontSize: 11)),
+                ),
+              Text('$selectedN of $rosterN',
+                  style: const TextStyle(color: dim, fontSize: 10)),
+            ],
           ),
-          if (book.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: [
-                  ...suggestions.map((m) {
-                    final un = (m['username'] ?? '').toString();
-                    final dn = (m['display_name'] ?? un).toString();
-                    final on = _picked.contains(un);
-                    return FilterChip(
-                      label: Text(dn,
-                          style: TextStyle(
-                              color: on
-                                  ? const Color(0xFF050505)
-                                  : const Color(0xFFE8D5A3),
-                              fontSize: 10)),
-                      selected: on,
-                      selectedColor: const Color(0xFFC9A962),
-                      backgroundColor: const Color(0xFF111111),
-                      side: const BorderSide(color: Color(0x55C9A962)),
-                      visualDensity: VisualDensity.compact,
-                      onSelected: (_) => _toggleMember(un),
-                    );
-                  }),
-                  if (_picked.isNotEmpty)
+          if (_sampleMode == 'pick') ...[
+            if (_picked.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    ..._picked.map((un) => InputChip(
+                          label: Text(_displayName(un),
+                              style: const TextStyle(
+                                  color: Color(0xFF050505), fontSize: 10)),
+                          backgroundColor: gold,
+                          visualDensity: VisualDensity.compact,
+                          onDeleted: () => _toggleMember(un),
+                        )),
                     ActionChip(
-                      label: const Text('All',
-                          style: TextStyle(
-                              color: Color(0xFFC9A962), fontSize: 10)),
+                      label: const Text('Clear picks',
+                          style: TextStyle(color: gold, fontSize: 10)),
                       backgroundColor: const Color(0xFF111111),
                       side: const BorderSide(color: Color(0x55C9A962)),
                       visualDensity: VisualDensity.compact,
@@ -608,10 +673,107 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                         _load();
                       },
                     ),
-                ],
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: SizedBox(
+                height: 36,
+                child: TextField(
+                  controller: _nameCtrl,
+                  enabled: _picked.length < _pickCap,
+                  style: const TextStyle(color: cream, fontSize: 12),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: _picked.length >= _pickCap
+                        ? 'Sample full — remove a name to add another'
+                        : 'Search a name to add (picks stay)',
+                    hintStyle: const TextStyle(color: dim, fontSize: 11),
+                    filled: true,
+                    fillColor: const Color(0xFF111111),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0x55C9A962)),
+                    ),
+                    suffixIcon: IconButton(
+                      tooltip: 'Add named clients',
+                      icon: const Icon(Icons.person_add_alt,
+                          color: gold, size: 18),
+                      onPressed: _addFromSearch,
+                    ),
+                  ),
+                  onSubmitted: (_) => _addFromSearch(),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ),
+            if (book.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: suggestions.map((m) {
+                    final un = (m['username'] ?? '').toString();
+                    final dn = (m['display_name'] ?? un).toString();
+                    return FilterChip(
+                      label: Text(dn,
+                          style: const TextStyle(color: cream, fontSize: 10)),
+                      selected: false,
+                      backgroundColor: const Color(0xFF111111),
+                      side: const BorderSide(color: Color(0x55C9A962)),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: _picked.length >= _pickCap
+                          ? null
+                          : (_) => _toggleMember(un),
+                    );
+                  }).toList(),
+                ),
+              ),
+          ] else if (grabbed.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: grabbed
+                    .map((un) => Chip(
+                          label: Text(_displayName(un),
+                              style: const TextStyle(
+                                  color: cream, fontSize: 10)),
+                          backgroundColor: const Color(0xFF111111),
+                          side: const BorderSide(color: Color(0x55C9A962)),
+                          visualDensity: VisualDensity.compact,
+                        ))
+                    .toList(),
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _modeChip(String label, String mode) {
+    final on = _sampleMode == mode;
+    return InkWell(
+      onTap: () => _setSampleMode(mode),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: on ? const Color(0xFFC9A962).withOpacity(0.2) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: on ? const Color(0xFFC9A962) : Colors.white24,
+          ),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: on ? const Color(0xFFC9A962) : Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.bold)),
       ),
     );
   }

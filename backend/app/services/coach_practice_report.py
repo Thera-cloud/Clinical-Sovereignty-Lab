@@ -385,4 +385,7 @@ def anonymize_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     out.pop("roster_members", None)
     out.pop("selected_clients", None)
     out["selected_count"] = len(selected)
+    sample = dict(out.get("sample") or {})
+    sample.pop("names", None)
+    out["sample"] = sample
     return out

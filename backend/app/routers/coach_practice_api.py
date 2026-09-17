@@ -25,6 +25,8 @@ from app.services.coach_practice_report import (
 from app.services.coach_practice_snapshot import (
     build_snapshot,
     parse_client_tokens,
+    parse_sample_mode,
+    parse_sample_size,
     resolve_coach_ids,
 )
 
@@ -37,6 +39,8 @@ class ReportRequest(BaseModel):
     days: int = 90
     coach_username: Optional[str] = None
     clients: Optional[List[str]] = None
+    sample_size: Optional[str] = None
+    sample_mode: Optional[str] = None
 
 
 def _pool(request: Request):
@@ -78,11 +82,15 @@ async def get_snapshot(
     days: int = 90,
     coach: Optional[str] = None,
     clients: Optional[str] = None,
+    sample_size: Optional[str] = None,
+    sample_mode: Optional[str] = None,
     user: Dict = Depends(require_coach),
 ):
     pool = _pool(request)
     ident = coach or _caller_ident(user)
     tokens = parse_client_tokens(clients)
+    size = parse_sample_size(sample_size)
+    mode = parse_sample_mode(sample_mode)
     async with pool.acquire() as conn:
         target_username = await _authorize_target(conn, user, ident)
         coach_row = await resolve_coach_ids(conn, target_username)
@@ -100,6 +108,8 @@ async def get_snapshot(
         days=days,
         include_names=True,
         client_tokens=tokens,
+        sample_size=size,
+        sample_mode=mode,
     )
     return {"status": "ok", "snapshot": snap}
 
@@ -157,6 +167,8 @@ async def create_report(
         days=req.days,
         include_names=False,
         client_tokens=parse_client_tokens(req.clients),
+        sample_size=req.sample_size,
+        sample_mode="pick" if req.clients else req.sample_mode,
     )
     banned = []
     consult = {"open": [], "completed": []}

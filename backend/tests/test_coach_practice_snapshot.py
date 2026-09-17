@@ -18,6 +18,9 @@ from app.services.coach_practice_snapshot import (
     compose_chart,
     filter_roster,
     parse_client_tokens,
+    parse_sample_mode,
+    parse_sample_size,
+    select_roster_sample,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -118,6 +121,26 @@ def test_compose_chart_fills_window_and_keeps_scatter():
     assert any(p.get("kind") == "live_session" for p in scatter)
 
 
+def test_select_roster_sample_pick_and_random():
+    book = [
+        {"username": n, "display_name": n.title()}
+        for n in ("alice", "bob", "cara", "drew", "eva", "finn", "gina", "hugo")
+    ]
+    assert parse_sample_size("ALL") is None
+    assert parse_sample_size("10") == 10
+    assert parse_sample_mode("ln") == "random"
+    picked = select_roster_sample(
+        book, mode="pick", size=5, tokens=["alice", "bob", "cara"]
+    )
+    assert [c["username"] for c in picked] == ["alice", "bob", "cara"]
+    assert select_roster_sample(book, mode="pick", size=5, tokens=[]) == []
+    grabbed = select_roster_sample(book, mode="random", size=5, tokens=[])
+    assert len(grabbed) == 5
+    assert {c["username"] for c in grabbed} <= {c["username"] for c in book}
+    full = select_roster_sample(book, mode="random", size=None, tokens=[])
+    assert {c["username"] for c in full} == {c["username"] for c in book}
+
+
 def test_filter_roster_by_typed_names():
     book = [
         {"username": "lisaw", "display_name": "Lisa West"},
@@ -174,11 +197,20 @@ def test_flutter_wires_practice_card():
     assert "Days $dayLo" in widget
     assert "Day $day" in widget
     assert "_x0 = 0" in widget
-    assert "Type a name" in widget
-    assert "person_search" in widget
+    assert "Sample" in widget
+    assert "Random grab" in widget
+    assert "Pick each" in widget
+    assert "sample_size" in widget
+    assert "sample_mode" in widget
     assert "q['clients']" in widget
+    assert "_addFromSearch" in widget
+    assert "picks stay" in widget
     assert "openPrintWindow" in widget
     assert "writePrintHtml" in widget
+    print_web = (REPO / "mobile/lib/widgets/print_html_web.dart").read_text()
+    assert "createObjectUrlFromBlob" in print_web
+    assert "closePrintWindow(handle)" in print_web
+    assert "location" in print_web
 
 
 def test_migration_adds_assistant_folder_type():
