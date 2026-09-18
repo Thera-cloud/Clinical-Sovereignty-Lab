@@ -11262,6 +11262,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   bool _cardCheckLoading = false;
   bool _paymentConsent = false;
   Timer? _cardPollTimer;
+  bool _negotiationBusy = false;
 
   bool get _hasCoach => _coachId.isNotEmpty;
 
@@ -11280,6 +11281,50 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
     } catch (_) {
       return startIso;
     }
+  }
+
+  List<Map<String, dynamic>> _altSlotsOf(Map<String, dynamic> session) {
+    final raw = session['alt_slots'];
+    if (raw is List) {
+      return raw.map((e) {
+        if (e is Map) return Map<String, dynamic>.from(e);
+        return <String, dynamic>{'start': e.toString()};
+      }).toList();
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          return decoded.map((e) {
+            if (e is Map) return Map<String, dynamic>.from(e);
+            return <String, dynamic>{'start': e.toString()};
+          }).toList();
+        }
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  String _formatAltStart(String startIso) {
+    try {
+      final a = DateTime.parse(startIso).toLocal();
+      return '${DateFormat('EEE, MMM d').format(a)} • ${DateFormat.jm().format(a)}';
+    } catch (_) {
+      return startIso;
+    }
+  }
+
+  void _respondNegotiation(Map<String, dynamic> session, String decision, {String? chosenStart}) {
+    final nid = (session['negotiation_id'] ?? '').toString();
+    if (nid.isEmpty || _negotiationBusy) return;
+    setState(() => _negotiationBusy = true);
+    _socket?.sink.add(jsonEncode({
+      'type': 'client_negotiation_respond',
+      'negotiation_id': nid,
+      'session_id': session['session_id'],
+      'decision': decision,
+      if (chosenStart != null && chosenStart.isNotEmpty) 'chosen_start': chosenStart,
+    }));
   }
 
   @override
@@ -11480,6 +11525,37 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
             SnackBar(content: Text(msg), backgroundColor: refund == 'refunded' ? Colors.green : Colors.orange),
           );
         }
+      } else if (type == 'session_negotiation_update' || type == 'booking_status_update') {
+        setState(() => _negotiationBusy = false);
+        final neg = data['negotiation'];
+        if (neg is Map) {
+          final sid = neg['session_id']?.toString();
+          setState(() {
+            _upcomingSessions = _upcomingSessions.map((s) {
+              if (sid != null && s['session_id'] == sid) {
+                return {
+                  ...s,
+                  if (data['session'] is Map) ...Map<String, dynamic>.from(data['session']),
+                  'negotiation_id': neg['id'] ?? s['negotiation_id'],
+                  'negotiation_status': neg['status'] ?? s['negotiation_status'],
+                  'alt_slots': neg['alt_slots'] ?? data['alt_slots'] ?? s['alt_slots'],
+                  'nate_message': data['nate_message'] ?? s['nate_message'],
+                };
+              }
+              return s;
+            }).toList();
+          });
+        }
+        _requestUpcomingSessions();
+        final msg = (data['nate_message'] ??
+                (neg is Map ? neg['nate_message'] : null) ??
+                '')
+            .toString();
+        if (mounted && msg.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: const Color(0xFF4ECDC4)),
+          );
+        }
       } else if (type == 'coach_request_status') {
         if (data['status'] == 'none') {
           setState(() { _pendingRequest = null; _requestMessages = []; _isLoading = false; });
@@ -11531,7 +11607,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
           _requestMessages.add(Map<String, dynamic>.from(data));
         });
       } else if (type == 'error') {
-        setState(() { _isBooking = false; _submittingRequest = false; });
+        setState(() { _isBooking = false; _submittingRequest = false; _negotiationBusy = false; });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(data['detail'] ?? data['message'] ?? 'Error'), backgroundColor: Colors.red),
@@ -12843,12 +12919,20 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
       formattedDate = start;
     }
 
+    final altSlots = _altSlotsOf(session);
+    final negStatus = (session['negotiation_status'] ?? '').toString();
+    final hasAlts = altSlots.isNotEmpty &&
+        (negStatus.isEmpty ||
+            negStatus == 'alt_proposed' ||
+            negStatus == 'awaiting_client');
+    final nateMsg = (session['nate_message'] ?? '').toString();
+
     Color statusColor;
     String statusLabel = status.toUpperCase();
     switch (status) {
       case 'pending_approval':
         statusColor = const Color(0xFFC9A962);
-        statusLabel = 'PENDING';
+        statusLabel = hasAlts ? 'NEW TIMES' : 'PENDING';
         break;
       case 'scheduled':
         statusColor = const Color(0xFF4ECDC4);
@@ -12931,8 +13015,56 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
               ),
             ),
           ],
+          if (hasAlts && nateMsg.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(nateMsg, style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12.5, height: 1.35)),
+          ],
           const SizedBox(height: 12),
-          Row(
+          if (hasAlts && status == 'pending_approval') ...[
+            ...altSlots.take(5).map((slot) {
+              final startIso = (slot['start'] ?? '').toString();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _negotiationBusy || startIso.isEmpty
+                        ? null
+                        : () => _respondNegotiation(session, 'accept_alt', chosenStart: startIso),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4ECDC4),
+                      foregroundColor: const Color(0xFF050505),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    child: Text('Accept ${_formatAltStart(startIso)}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              );
+            }),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _negotiationBusy
+                    ? null
+                    : () => _respondNegotiation(session, 'reject_alt'),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFC9A962)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                child: const Text('None of these', style: TextStyle(fontSize: 12, color: Color(0xFFC9A962))),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => _cancelSession(session['session_id'] ?? ''),
+                child: const Text('Cancel request', style: TextStyle(color: Colors.red, fontSize: 12)),
+              ),
+            ),
+          ] else
+            Row(
             children: [
               if (zoomLink.isNotEmpty && status != 'pending_approval')
                 Expanded(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -245,3 +246,120 @@ def test_staging_inbound_fallback_flag(monkeypatch):
     assert snn.staging_inbound_fallback_enabled() is False
     monkeypatch.setenv("ENABLE_STAGING_NEGOTIATION_INBOUND_FALLBACK", "true")
     assert snn.staging_inbound_fallback_enabled() is True
+
+
+@pytest.mark.asyncio
+async def test_list_open_for_client_returns_all():
+    rows = [
+        {
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "session_id": "SESS_A",
+            "status": "alt_proposed",
+            "alt_slots": [{"start": "t1"}],
+            "metadata": {},
+        },
+        {
+            "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "session_id": "SESS_B",
+            "status": "alt_proposed",
+            "alt_slots": [{"start": "t2"}],
+            "metadata": {},
+        },
+    ]
+    conn = AsyncMock()
+    conn.fetch = AsyncMock(return_value=rows)
+    pool = MagicMock()
+    cm = AsyncMock()
+    cm.__aenter__.return_value = conn
+    cm.__aexit__.return_value = False
+    pool.acquire.return_value = cm
+    out = await sns.list_open_for_client(pool, "CLIENT_HW")
+    assert len(out) == 2
+    assert out[0]["session_id"] == "SESS_A"
+
+
+@pytest.mark.asyncio
+async def test_attach_client_negotiations(monkeypatch):
+    upcoming = [{"session_id": "SESS_2", "status": "pending_approval"}]
+
+    async def fake_list(_pool, _cid):
+        return [
+            {
+                "id": "neg-1",
+                "session_id": "SESS_2",
+                "status": "alt_proposed",
+                "alt_slots": [{"start": "2026-10-09T15:00:00+00:00"}],
+                "metadata": {"client_nate_text": "pick a time"},
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.services.session_negotiation_service.list_open_for_client",
+        fake_list,
+    )
+    await snb.attach_client_negotiations(MagicMock(), "CLIENT_HW", upcoming)
+    assert upcoming[0]["negotiation_id"] == "neg-1"
+    assert upcoming[0]["alt_slots"][0]["start"].startswith("2026-10-09")
+    assert upcoming[0]["nate_message"] == "pick a time"
+
+
+def test_handle_redis_fanout_persists_session():
+    store = []
+    snb.handle_redis_fanout(
+        json.dumps(
+            {
+                "client_id": "C1",
+                "session": {
+                    "session_id": "S1",
+                    "status": "pending_approval",
+                    "alt_slots": [{"start": "t"}],
+                },
+                "client_nate_text": "hello",
+            }
+        ),
+        connected_clients={},
+        connected_coaches={},
+        load_sessions=lambda: list(store),
+        save_sessions=lambda s: store.clear() or store.extend(s),
+    )
+    assert store[0]["session_id"] == "S1"
+    assert store[0]["alt_slots"]
+
+
+@pytest.mark.asyncio
+async def test_send_client_channels_sms_when_no_email(monkeypatch):
+    monkeypatch.setattr(
+        snn,
+        "lookup_contact",
+        AsyncMock(
+            return_value={
+                "email": "",
+                "phone": "+15551212",
+                "name": "Bill",
+                "timezone": "America/New_York",
+            }
+        ),
+    )
+    mock_ns = MagicMock()
+    mock_ns.send_sms = AsyncMock(return_value=True)
+    with patch(
+        "app.websocket.notification_system.NotificationSystem",
+        return_value=mock_ns,
+    ), patch(
+        "app.services.session_negotiation_service.stamp_client_nate_text",
+        AsyncMock(),
+    ):
+        out = await snn.send_client_negotiation_channels(
+            MagicMock(),
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "client_id": "X",
+                "coach_id": "Y",
+                "alt_slots": [{"start": "2026-10-09T15:00:00+00:00"}],
+                "status": "alt_proposed",
+            },
+            nate_message="Coach isn't free.",
+        )
+    assert out["email"] is False
+    assert out["sms"] is True
+    mock_ns.send_sms.assert_awaited()

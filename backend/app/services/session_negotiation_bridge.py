@@ -38,8 +38,11 @@ async def dispatch_notifies(
     cn = result.get("client_notify")
     if cn:
         await _send(connected_clients.get(client_id), cn)
-        if primary_role == "CLIENT" and primary_ws and result.get("client_nate_text"):
-            await _send(primary_ws, {"type": "nate_response", "text": result["client_nate_text"]})
+    if result.get("client_nate_text") and client_id:
+        await _send(
+            connected_clients.get(client_id),
+            {"type": "nate_response", "text": result["client_nate_text"]},
+        )
 
     coach_n = result.get("coach_notify")
     if coach_n:
@@ -50,8 +53,6 @@ async def dispatch_notifies(
     # Coach-initiated decide: also nate_response to coach
     if primary_role == "COACH" and primary_ws and result.get("coach_nate_text") and not coach_n:
         await _send(primary_ws, {"type": "nate_response", "text": result["coach_nate_text"]})
-    if primary_role == "CLIENT" and primary_ws and result.get("client_nate_text") and not cn:
-        await _send(primary_ws, {"type": "nate_response", "text": result["client_nate_text"]})
 
 
 def _mutate_session(
@@ -142,6 +143,49 @@ async def apply_bridge_action(
                     "status": found.get("status"),
                 },
             )
+
+    live = result.get("negotiation") or {}
+    live_status = (live.get("status") or "").lower()
+    sid2 = result.get("session_id") or live.get("session_id") or session_id
+    if sid2 and live_status in ("alt_proposed", "awaiting_client"):
+        try:
+            sessions = load_sessions() or []
+            stamped = None
+            for s in sessions:
+                if s.get("session_id") != sid2:
+                    continue
+                s["negotiation_id"] = live.get("id")
+                s["negotiation_status"] = live.get("status")
+                s["alt_slots"] = live.get("alt_slots") or []
+                if result.get("client_nate_text"):
+                    s["nate_message"] = result["client_nate_text"]
+                stamped = s
+                break
+            if stamped:
+                save_sessions(sessions)
+                if db_pool:
+                    try:
+                        from app.services.pg_data_helpers import upsert_session_pg
+
+                        await upsert_session_pg(db_pool, stamped)
+                    except Exception as e:
+                        logger.warning("session_negotiation_bridge: alt stamp PG failed: %s", e)
+                if found is None:
+                    found = stamped
+        except Exception as e:
+            logger.warning("session_negotiation_bridge: alt stamp failed: %s", e)
+
+    if db_pool and live_status in ("alt_proposed", "awaiting_client", "busy", "declined"):
+        try:
+            from app.services.session_negotiation_notify import send_client_negotiation_channels
+
+            await send_client_negotiation_channels(
+                db_pool,
+                live,
+                nate_message=result.get("client_nate_text") or "",
+            )
+        except Exception as e:
+            logger.warning("session_negotiation_bridge: client channels failed: %s", e)
 
     await dispatch_notifies(
         result,
@@ -346,11 +390,84 @@ def handle_redis_fanout(
     if data.get("session_negotiation_update"):
         _push(client_id, data["session_negotiation_update"])
         _push(coach_id, data["session_negotiation_update"])
+    nate_txt = (data.get("client_nate_text") or "").strip()
+    if nate_txt:
+        _push(client_id, {"type": "nate_response", "text": nate_txt})
     logger.info(
         "session_negotiation_bridge: fanout client=%s coach=%s",
         (client_id[:8] if client_id else "-"),
         (coach_id[:8] if coach_id else "-"),
     )
+
+
+async def attach_client_negotiations(
+    db_pool: Any, client_id: str, upcoming: List[Dict[str, Any]]
+) -> None:
+    """QUANTUM-CRYSTAL-ARCH: overlay open alts onto client upcoming list."""
+    from app.services.session_negotiation_service import (
+        list_open_for_client,
+        negotiation_enabled,
+    )
+
+    if not negotiation_enabled() or not db_pool or not upcoming or not client_id:
+        return
+    rows = await list_open_for_client(db_pool, client_id)
+    by_sid: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        sid = r.get("session_id")
+        if sid and sid not in by_sid:
+            by_sid[sid] = r
+    for u in upcoming:
+        n = by_sid.get(u.get("session_id") or "")
+        if not n:
+            continue
+        u["negotiation_id"] = n.get("id")
+        u["negotiation_status"] = n.get("status")
+        u["alt_slots"] = n.get("alt_slots") or []
+        meta = n.get("metadata") or {}
+        if isinstance(meta, dict) and meta.get("client_nate_text"):
+            u["nate_message"] = meta["client_nate_text"]
+
+
+async def push_open_client_negotiations(
+    db_pool: Any, websocket: Any, client_id: str
+) -> None:
+    """Replay alt/busy coach replies as nate_response + negotiation_update after login."""
+    from app.services.session_negotiation_service import (
+        list_open_for_client,
+        negotiation_enabled,
+    )
+
+    if not negotiation_enabled() or not db_pool or not client_id or not websocket:
+        return
+    rows = await list_open_for_client(db_pool, client_id)
+    alts = [
+        r
+        for r in rows
+        if (r.get("status") or "").lower() in ("alt_proposed", "awaiting_client")
+    ]
+    if not alts:
+        return
+    texts: List[str] = []
+    for r in alts:
+        meta = r.get("metadata") or {}
+        t = ""
+        if isinstance(meta, dict):
+            t = (meta.get("client_nate_text") or "").strip()
+        if not t:
+            t = "Your coach responded about a session request. Open Schedule to pick a time."
+        texts.append(t)
+        await _send(
+            websocket,
+            {
+                "type": "session_negotiation_update",
+                "negotiation": r,
+                "alt_slots": r.get("alt_slots") or [],
+                "nate_message": t,
+                "ok": True,
+            },
+        )
+    await _send(websocket, {"type": "nate_response", "text": "\n\n".join(texts)[:2000]})
 
 
 async def try_chat_hooks(

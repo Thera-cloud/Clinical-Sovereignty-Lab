@@ -2216,8 +2216,8 @@ def _handle_session_negotiation_fanout(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
             raw_data,
             connected_clients=connected_clients,
             connected_coaches=connected_coaches,
-            load_sessions=lambda: load_json(SESSIONS_FILE, []) or [],
-            save_sessions=lambda s: save_json(SESSIONS_FILE, s),
+            load_sessions=lambda: load_json_file(SESSIONS_FILE, []) or [],
+            save_sessions=lambda s: save_json_file(SESSIONS_FILE, s),
         )
     except Exception as e:
         print(f"[NEGOTIATION FANOUT] {e}", flush=True)
@@ -13543,6 +13543,7 @@ async def handle_client(websocket, path=None):
                 "client_get_coach_month_overview",
                 "search_consent_approved", "search_request",
                 "client_get_upcoming_sessions",
+                "coach_negotiation_decide", "client_negotiation_respond",
                 "client_get_commitments",
                 # --- Coach data-fetch ---
                 "coach_get_clients", "fetch_coach_calendar", "fetch_coach_sessions",
@@ -14077,6 +14078,15 @@ async def handle_client(websocket, path=None):
                         login_payload["coach_ethics_needed"] = True
                         login_payload["required_coach_ethics_version"] = REQUIRED_COACH_ETHICS_VERSION
                     await websocket.send(json.dumps(login_payload))
+                    # QUANTUM-CRYSTAL-ARCH: replay open session-negotiation on this socket
+                    try:
+                        if (res.get("role") or "").upper() == "CLIENT" and db_pool:
+                            from app.services.session_negotiation_bridge import push_open_client_negotiations
+                            asyncio.create_task(push_open_client_negotiations(
+                                db_pool, websocket, res.get("hardware_id") or uid,
+                            ))
+                    except Exception:
+                        pass
                     # SOVEREIGN-VOICE: P6-002 — log successful login (schema-correct)
                     if db_pool:
                         try:
@@ -16172,6 +16182,13 @@ async def handle_client(websocket, path=None):
                                 "platform": s.get("platform", "Zoom"),
                             })
                         upcoming.sort(key=lambda x: x.get("scheduled_start") or "")
+                        # QUANTUM-CRYSTAL-ARCH: attach open alts so reconnect shows coach replies
+                        try:
+                            from app.services.session_negotiation_bridge import attach_client_negotiations
+                            if db_pool:
+                                await attach_client_negotiations(db_pool, client_id, upcoming)
+                        except Exception:
+                            pass
                         await websocket.send(json.dumps({
                             "type": "client_upcoming_sessions",
                             "sessions": upcoming,

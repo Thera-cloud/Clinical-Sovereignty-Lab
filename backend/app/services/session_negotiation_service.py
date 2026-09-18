@@ -248,6 +248,45 @@ async def get_open_for_user(
         return None
 
 
+async def list_open_for_client(db_pool: Any, client_id: str) -> List[Dict[str, Any]]:
+    """All active negotiations for a client (concurrent bookings)."""
+    if not db_pool or not client_id:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM session_negotiations
+                WHERE client_id = $1 AND status = ANY($2::text[])
+                ORDER BY updated_at DESC
+                """,
+                client_id,
+                list(ACTIVE_STATUSES),
+            )
+            return [_row_to_dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("session_negotiation: list_open failed: %s", e)
+        return []
+
+
+async def stamp_client_nate_text(db_pool: Any, negotiation_id: str, text: str) -> None:
+    if not db_pool or not negotiation_id or not text:
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE session_negotiations
+                SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
+                WHERE id = $1::uuid
+                """,
+                negotiation_id,
+                json.dumps({"client_nate_text": text[:2000]}),
+            )
+    except Exception as e:
+        logger.warning("session_negotiation: stamp nate text failed: %s", e)
+
+
 async def coach_decide(
     db_pool: Any,
     *,

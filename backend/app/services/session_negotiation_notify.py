@@ -316,62 +316,117 @@ async def send_coach_negotiation_notify(
     return out
 
 
-async def send_client_negotiation_update_email(
+async def send_client_negotiation_channels(
     db_pool: Any,
     negotiation: Dict[str, Any],
     *,
     nate_message: str = "",
-) -> bool:
+) -> Dict[str, bool]:
+    """Email + SMS the client after coach alt/busy. Works with email-only or SMS-only contacts."""
+    out = {"email": False, "sms": False}
+    if not db_pool or not negotiation:
+        return out
     client_id = negotiation.get("client_id") or ""
     client = await lookup_contact(db_pool, client_id)
-    if not client.get("email"):
-        return False
+    if not client:
+        return out
     neg_id = str(negotiation.get("id") or "")
     alts: List[Dict[str, Any]] = negotiation.get("alt_slots") or []
     alt_lines = []
     accept_links_html = []
+    first_accept_url = ""
     for i, slot in enumerate(alts[:5], 1):
         start = slot.get("start") if isinstance(slot, dict) else slot
         alt_lines.append(f"{i}. {start}")
         if neg_id and start:
             url = negotiation_action_url(neg_id, "accept_alt", slot=str(start))
+            if i == 1:
+                first_accept_url = url
             accept_links_html.append(
                 f'<a href="{url}" style="display:inline-block;background:#4ECDC4;color:#050505;'
                 f'font-weight:bold;padding:10px 16px;border-radius:6px;text-decoration:none;margin:4px;">'
                 f"Accept option {i}</a>"
             )
     reject_url = negotiation_action_url(neg_id, "reject_alt") if neg_id else ""
-    # Prefer ACCEPT 1 in mailto body when multiple alts (slot picker via index).
     mailto_accept = (
         mailto_action_url(neg_id, "accept 1", f"Session alts [#neg:{neg_id}]") if neg_id else ""
     )
     mailto_reject = (
         mailto_action_url(neg_id, "reject", f"Session alts [#neg:{neg_id}]") if neg_id else ""
     )
-    try:
-        from app.services.notifications_service import EmailService
+    msg = nate_message or "Your coach responded about the session."
 
-        coach = await lookup_contact(db_pool, negotiation.get("coach_id") or "")
-        return bool(
-            await EmailService().send_email(
-                to_email=client["email"],
-                template_name="session_negotiation_client",
-                context={
-                    "coach_name": coach.get("name") or "your coach",
-                    "nate_message": nate_message or "Your coach responded about the session.",
-                    "alt_slots_text": "\n".join(alt_lines) if alt_lines else "",
-                    "accept_links_html": " ".join(accept_links_html),
-                    "reject_url": reject_url,
-                    "mailto_accept": mailto_accept,
-                    "mailto_reject": mailto_reject,
-                    "status": negotiation.get("status") or "",
-                    "neg_token": f"[#neg:{neg_id}]" if neg_id else "",
-                },
+    if client.get("email"):
+        try:
+            from app.services.notifications_service import EmailService
+
+            coach = await lookup_contact(db_pool, negotiation.get("coach_id") or "")
+            out["email"] = bool(
+                await EmailService().send_email(
+                    to_email=client["email"],
+                    template_name="session_negotiation_client",
+                    context={
+                        "coach_name": coach.get("name") or "your coach",
+                        "nate_message": msg,
+                        "alt_slots_text": "\n".join(alt_lines) if alt_lines else "",
+                        "accept_links_html": " ".join(accept_links_html),
+                        "reject_url": reject_url,
+                        "mailto_accept": mailto_accept,
+                        "mailto_reject": mailto_reject,
+                        "status": negotiation.get("status") or "",
+                        "neg_token": f"[#neg:{neg_id}]" if neg_id else "",
+                    },
+                )
             )
-        )
-    except Exception as e:
-        logger.warning("session_negotiation_notify: client email failed: %s", e)
-        return False
+        except Exception as e:
+            logger.warning("session_negotiation_notify: client email failed: %s", e)
+
+    phone = (client.get("phone") or "").strip()
+    if phone:
+        try:
+            from app.websocket.notification_system import NotificationSystem
+
+            body = (
+                f"{msg[:240]} "
+                f"Open Sanctuary Schedule to pick a time, or reply ACCEPT 1 / REJECT. "
+                f"{('Pick: ' + first_accept_url + ' ') if first_accept_url else ''}"
+                f"{('Decline: ' + reject_url) if reject_url else ''}"
+            )
+            ns = NotificationSystem(
+                data_dir=os.environ.get("DATA_DIR", "/app/data"),
+                sendgrid_key=os.environ.get("SENDGRID_API_KEY"),
+            )
+            out["sms"] = bool(await ns.send_sms(phone, body[:1500]))
+        except Exception as e:
+            logger.warning("session_negotiation_notify: client SMS failed: %s", e)
+
+    if neg_id and msg:
+        try:
+            from app.services.session_negotiation_service import stamp_client_nate_text
+
+            await stamp_client_nate_text(db_pool, neg_id, msg)
+        except Exception as e:
+            logger.warning("session_negotiation_notify: stamp nate text failed: %s", e)
+
+    logger.info(
+        "session_negotiation_notify: client email=%s sms=%s id=%s",
+        out["email"],
+        out["sms"],
+        (neg_id[:8] if neg_id else "-"),
+    )
+    return out
+
+
+async def send_client_negotiation_update_email(
+    db_pool: Any,
+    negotiation: Dict[str, Any],
+    *,
+    nate_message: str = "",
+) -> bool:
+    channels = await send_client_negotiation_channels(
+        db_pool, negotiation, nate_message=nate_message
+    )
+    return bool(channels.get("email"))
 
 
 async def resolve_coach_open_negotiation(
@@ -680,6 +735,15 @@ async def _finalize_session_from_result(
             if result.get("new_end"):
                 found["scheduled_end"] = result["new_end"]
 
+        live_neg = result.get("negotiation") or neg
+        live_st = (live_neg.get("status") or "").lower()
+        if live_st in ("alt_proposed", "awaiting_client"):
+            found["negotiation_id"] = live_neg.get("id")
+            found["negotiation_status"] = live_neg.get("status")
+            found["alt_slots"] = live_neg.get("alt_slots") or []
+            if result.get("client_nate_text"):
+                found["nate_message"] = result["client_nate_text"]
+
         await enrich_approved_session(db_pool, found, action=action)
 
         if not skip_local_json:
@@ -717,6 +781,7 @@ async def _finalize_session_from_result(
             "negotiation": result.get("negotiation") or neg,
             "ok": True,
         },
+        "client_nate_text": result.get("client_nate_text") or "",
     }
     await publish_negotiation_fanout(fanout, environment=fanout_environment)
     return found
@@ -770,7 +835,7 @@ async def _apply_coach_on_pool(
         )
         if decision != "approve":
             client_msg = result.get("client_nate_text") or ""
-            await send_client_negotiation_update_email(
+            await send_client_negotiation_channels(
                 db_pool,
                 result.get("negotiation") or neg,
                 nate_message=client_msg,
