@@ -9,6 +9,7 @@ client is not in trauma repair — positive-psychology coaching.
 from __future__ import annotations
 
 import re
+import json
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 _GENERIC_CRYSTAL = re.compile(
@@ -88,6 +89,44 @@ COACH_MOVES: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
 
 REPAIR_PHASES = frozenset({"stabilize", "process"})
 COACH_PHASES = frozenset({"thrive", "generative"})
+
+FILL_REPAIR = (
+    "If a secondary shows — anxiety, shame, guilt, grief, frustration — go under it to fear, anger, sadness, disgust, or conviction.",
+    "Name one cycle from their chat history once. Don't interview the whole timeline.",
+    "Ask what feeling is still unfinished. Not the to-do list.",
+    "LN already has the chats. You hold the hour.",
+    "Open in sensation, not content. One feeling, then silence.",
+)
+FILL_COACH = (
+    "One completable task before next session. LN will ask if it actually closed.",
+    "Protect a calendar block or a creative hour — skill work, not a wound hunt.",
+    "If conflict is live: one repair sentence, then stop.",
+    "Ask what they want built, not what they want explained.",
+    "LN can remember the goal. You pick the one finish line.",
+)
+FILL_EMPTY = (
+    "LN has no personal thread yet. One question about why they booked, then one feeling.",
+    "Don't teach a framework. Follow the first feeling that shows.",
+    "If an image or panel is on file, start there — which figure do they feel closest to?",
+)
+
+NAMED_PARTS: Tuple[Tuple[str, str], ...] = (
+    ("wandering scholar", "Wandering Scholar"),
+    ("cloakless traveler", "Cloakless Traveler"),
+    ("orchard keeper", "Orchard Keeper"),
+    ("root tender", "Root Tender"),
+    ("bridgewright", "Bridgewright"),
+    ("archivist", "Archivist"),
+    ("curiosity", "Curiosity"),
+    ("seraph", "Seraph"),
+    ("scholar", "Scholar"),
+    ("protector", "Protector"),
+    ("firefighter", "Firefighter"),
+    ("exile", "Exile"),
+    ("manager", "Manager"),
+    ("explorer", "Explorer"),
+    ("keeper", "Keeper"),
+)
 
 
 def _plain(raw: Any) -> str:
@@ -240,13 +279,8 @@ def compose_session_prep_points(
         points.append(line)
 
     if not corpus:
-        add(
-            "LN has no personal thread yet. One question about why they booked, "
-            "then one feeling. Don't teach a framework."
-        )
-        return points[:5]
-
-    if repair:
+        add(FILL_EMPTY[0])
+    elif repair:
         if secondary:
             under = core[0] if core else (
                 "conviction" if "shame" in secondary else
@@ -324,8 +358,6 @@ def compose_session_prep_points(
             if any(w in blob for w in words):
                 add(line)
                 placed = True
-                if sum(1 for p in points if "LN can" in p or "completable" in p or "calendar" in p) >= 2:
-                    break
         if not placed:
             add(
                 "Positive coaching: pick one of goal forming, a finished task, "
@@ -339,16 +371,97 @@ def compose_session_prep_points(
                 )
                 break
 
-    if not points:
-        if not corpus:
-            add(
-                "LN has no personal thread yet. One question about why they booked, "
-                "then one feeling. Don't teach a framework."
-            )
-        else:
-            add(
-                "Follow the first feeling that shows. Framework stays on Growth. "
-                "LN already has the chat history."
-            )
-
+    fills = FILL_EMPTY if not corpus else (FILL_REPAIR if repair else FILL_COACH)
+    for line in fills:
+        if len(points) >= 3:
+            break
+        add(line)
+    n = 0
+    while len(points) < 3 and n < 5:
+        add(f"Stay with the next feeling that shows. LN holds the rest ({n + 1}).")
+        n += 1
     return points[:5]
+
+
+def _as_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]*\}", text)
+            if match:
+                try:
+                    parsed = json.loads(match.group())
+                    return parsed if isinstance(parsed, dict) else {}
+                except json.JSONDecodeError:
+                    return {}
+    return {}
+
+
+def _panel_texts(brief: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for raw in brief.get("recent_panel_insights") or []:
+        block = raw if isinstance(raw, dict) else _as_dict(raw)
+        if not block:
+            text = _plain(raw)
+            if text and not text.startswith("{"):
+                out.append(text)
+            continue
+        trans = block.get("clinical_translation")
+        trans_d = trans if isinstance(trans, dict) else _as_dict(trans)
+        for key in (
+            "clinical_summary",
+            "therapeutic_modality",
+            "recommended_follow_up",
+            "narrative_text",
+            "archetype_hint",
+        ):
+            val = trans_d.get(key) or block.get(key)
+            if val:
+                out.append(_plain(val))
+    return [t for t in out if t]
+
+
+def _parts_named(texts: Sequence[str]) -> List[str]:
+    blob = _blob(texts)
+    found: List[str] = []
+    seen: set[str] = set()
+    for needle, label in NAMED_PARTS:
+        if needle in blob and label.lower() not in seen:
+            seen.add(label.lower())
+            found.append(label)
+    return found
+
+
+def compose_panel_prep_points(brief: Optional[Dict[str, Any]] = None) -> List[str]:
+    """IFS + art-therapy + psychotherapeutic moves from panels — not the raw summary."""
+    brief = brief or {}
+    texts = _panel_texts(brief)
+    if not texts:
+        return []
+    names = _parts_named(texts)
+    named = ", ".join(names[:4]) if names else "whichever figure they cannot stop looking at"
+    return [
+        (
+            f"IFS: get to know the parts on the image — {named}. "
+            "Ask who protects, who structures, who explores. Don't interpret. "
+            "Let the part introduce itself."
+        ),
+        (
+            "Art therapy: the image is the door. Let them look first. "
+            "Ask what the scene already knows that their recent chats circled. "
+            "Curiosity on the panel is the reconsolidation cue — stay until a memory "
+            "or feeling updates, don't translate it for them."
+        ),
+        (
+            "Psychotherapeutic approaches in reach: IFS unblending (Self with the part), "
+            "art-as-witness (image before words), memory reconsolidation "
+            "(old chat + new felt sense in the picture). Pick one. Don't stack."
+        ),
+    ]

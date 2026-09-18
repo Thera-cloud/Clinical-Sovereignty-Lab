@@ -1,6 +1,9 @@
 """Client-specific session prep — insight, not last-chat echo."""
 
-from app.services.session_prep_composer import compose_session_prep_points
+from app.services.session_prep_composer import (
+    compose_panel_prep_points,
+    compose_session_prep_points,
+)
 
 
 def test_prep_splits_pattern_vs_secondary():
@@ -29,7 +32,7 @@ def test_prep_splits_pattern_vs_secondary():
     assert "open on what they last" not in joined_a
     assert not any(p.lower().startswith("register:") for p in a + b)
     assert not any("companion into the wound" in p.lower() for p in a + b)
-    assert len(a) <= 5 and len(b) <= 5
+    assert 3 <= len(a) <= 5 and 3 <= len(b) <= 5
 
 
 def test_skips_template_crystals():
@@ -45,6 +48,7 @@ def test_skips_template_crystals():
     joined = " ".join(points).lower()
     assert "synthesized insight crystal" not in joined
     assert "no personal thread" in joined
+    assert 3 <= len(points) <= 5
 
 
 def test_skips_zoom_hello_leftover():
@@ -69,7 +73,7 @@ def test_trauma_beats_thrive_coaching():
     joined = " ".join(points).lower()
     assert "traumatic" in joined
     assert "not in trauma repair" not in joined
-    assert len(points) <= 5
+    assert 3 <= len(points) <= 5
 
 
 def test_thrive_coaching_when_not_repair():
@@ -84,6 +88,7 @@ def test_thrive_coaching_when_not_repair():
     assert "calendar" in joined
     assert "register:" not in joined
     assert "companion into the wound" not in joined
+    assert 3 <= len(points) <= 5
 
 
 def test_unresolved_anxiety_and_depression():
@@ -95,3 +100,32 @@ def test_unresolved_anxiety_and_depression():
     joined = " ".join(points).lower()
     assert "anxiety" in joined
     assert "depressive" in joined or "sadness" in joined
+    assert 3 <= len(points) <= 5
+
+
+def test_panel_prep_is_ifs_art_not_raw_summary():
+    points = compose_panel_prep_points({
+        "recent_panel_insights": [
+            {
+                "source": "delivery",
+                "clinical_translation": {
+                    "clinical_summary": (
+                        "In this IFS-informed panel, the client engages an explorer "
+                        "archetype with Curiosity, the Orchard Keeper, and the Cloakless Traveler."
+                    ),
+                    "therapeutic_modality": "IFS",
+                },
+            }
+        ],
+        "recent_conversations": [
+            {"user": "I keep disappearing when Kristy asks what I need."},
+        ],
+    })
+    joined = " ".join(points).lower()
+    assert len(points) == 3
+    assert "ifs" in joined
+    assert "orchard keeper" in joined or "curiosity" in joined
+    assert "reconsolidation" in joined
+    assert "art-as-witness" in joined or "art therapy" in joined
+    assert '"clinical_summary"' not in joined
+    assert "ifs-informed panel" not in joined

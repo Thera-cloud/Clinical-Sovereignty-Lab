@@ -42,6 +42,7 @@ def test_flutter_coach_command_critical_wiring():
     assert "SESSION FOCUS" in src
     assert "SUGGESTED TALKING POINTS" in src
     assert "session_prep_points" in src
+    assert "panel_prep_points" in src
     talkingFn = src.split("List<String> _briefTalkingPoints(")[1].split("List<String> _briefKeywordTopics(")[0]
     assert "session_prep_points" in talkingFn
     assert "session_guidance" not in talkingFn

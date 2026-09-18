@@ -8413,14 +8413,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         'body',
         'topic',
         'theme',
-        'clinical_translation',
         'clinical_summary',
         'content_summary',
+        'clinical_translation',
       ]) {
         final v = raw[k];
-        if (v != null && v.toString().trim().isNotEmpty) {
-          return v.toString().trim();
+        if (v == null) continue;
+        if (v is Map) {
+          final nested = _briefPlainText(v);
+          if (nested.isNotEmpty) return nested;
+          continue;
         }
+        final s = v.toString().trim();
+        if (s.isEmpty) continue;
+        if (s.startsWith('{') && s.contains('clinical_summary')) {
+          try {
+            final decoded = jsonDecode(s);
+            if (decoded is Map) {
+              final nested = _briefPlainText(decoded);
+              if (nested.isNotEmpty) return nested;
+            }
+          } catch (_) {}
+        }
+        if (s.startsWith('{') || s.startsWith('[')) continue;
+        return s;
       }
     }
     final s = raw.toString().trim();
@@ -11899,11 +11915,26 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             ? 'Enroll available'
             : '';
     final panelLines = <String>[];
-    final panelRaw = brief['recent_panel_insights'];
-    if (panelRaw is List) {
-      for (final item in panelRaw.take(3)) {
-        final t = _briefClamp(_briefPlainText(item), 220);
-        if (t.isNotEmpty) panelLines.add(t);
+    final panelPrep = List<dynamic>.from(brief['panel_prep_points'] ?? const []);
+    if (panelPrep.isNotEmpty) {
+      for (final p in panelPrep.take(3)) {
+        final t = _briefClamp(_briefPlainText(p), 280);
+        if (t.isEmpty || t.startsWith('{') || t.contains('clinical_summary')) {
+          continue;
+        }
+        panelLines.add(t);
+      }
+    }
+    if (panelLines.isEmpty) {
+      final panelRaw = brief['recent_panel_insights'];
+      if (panelRaw is List) {
+        for (final item in panelRaw.take(3)) {
+          final t = _briefClamp(_briefPlainText(item), 280);
+          if (t.isEmpty || t.startsWith('{') || t.contains('"clinical_summary"')) {
+            continue;
+          }
+          panelLines.add(t);
+        }
       }
     }
     final mm = brief['multimodal_brief'] is Map
