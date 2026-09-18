@@ -377,6 +377,38 @@ async def overlay_presession_brief(
                     parsed = session_summary_from_row(row)
                     if parsed:
                         summaries.append(parsed)
+            try:
+                phase_ids = list(user_ids)
+                uname = ((client_profile or {}).get("username") or "").strip()
+                if uname and uname not in phase_ids:
+                    phase_ids.insert(0, uname)
+                for uid in phase_ids:
+                    if not uid:
+                        continue
+                    phase_row = await conn.fetchrow(
+                        "SELECT phase, sub_state FROM client_growth_phase WHERE username = $1",
+                        uid,
+                    )
+                    phase = None
+                    sub = None
+                    if phase_row is not None:
+                        try:
+                            phase = phase_row["phase"]
+                            sub = phase_row["sub_state"]
+                        except (KeyError, TypeError, IndexError):
+                            phase = None
+                    if isinstance(phase, str) and phase.strip():
+                        out["growth_phase"] = {
+                            "phase": phase.strip().lower(),
+                            "sub_state": (
+                                sub.strip().lower()
+                                if isinstance(sub, str) and sub
+                                else None
+                            ),
+                        }
+                        break
+            except Exception as e:
+                logger.debug("presession overlay: growth_phase: %s", e)
     except Exception as e:
         logger.warning("presession overlay: PG merge failed: %s", e)
 

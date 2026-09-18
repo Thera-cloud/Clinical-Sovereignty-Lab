@@ -8391,7 +8391,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   String _briefPlainText(dynamic raw) {
     if (raw == null) return '';
-    if (raw is String) return raw.trim();
+    if (raw is String) {
+      final t = raw.trim();
+      if (t.startsWith('{') && t.contains('clinical_summary')) {
+        try {
+          final decoded = jsonDecode(t);
+          if (decoded is Map) return _briefPlainText(decoded);
+        } catch (_) {}
+      }
+      return t;
+    }
     if (raw is Map) {
       for (final k in const [
         'text',
@@ -8405,6 +8414,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         'topic',
         'theme',
         'clinical_translation',
+        'clinical_summary',
+        'content_summary',
       ]) {
         final v = raw[k];
         if (v != null && v.toString().trim().isNotEmpty) {
@@ -8432,6 +8443,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     if (t.length > 80) return true;
     if (t.split(RegExp(r'\s+')).length > 12) return true;
     return false;
+  }
+
+  bool _briefIsPrepJunk(String s) {
+    final t = s.toLowerCase();
+    return t.contains('sovereign journey') ||
+        t.contains('story panel') ||
+        t.contains('zoom ai') ||
+        t.contains('quick recap') ||
+        t.contains('skills practice check-in') ||
+        t.contains('5-4-3-2-1') ||
+        t.contains('grounding and mindful');
   }
 
   List<Map<String, dynamic>> _briefCrystalRows(dynamic raw) {
@@ -8500,8 +8522,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       var t = raw.trim();
       if (t.isEmpty) return;
       if (t.startsWith('{') || t.contains('Instance of')) return;
+      if (_briefIsPrepJunk(t)) return;
       if (!allowLong && _briefLooksLikeBlob(t)) return;
-      if (allowLong && t.length > 120) t = _briefClamp(t, 120);
+      if (allowLong && t.length > 200) t = _briefClamp(t, 200);
       final key = t.toLowerCase();
       if (seen.contains(key)) return;
       seen.add(key);
@@ -8511,57 +8534,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     for (final p in List<dynamic>.from(brief['session_prep_points'] ?? const [])) {
       add(_briefPlainText(p), allowLong: true);
     }
-    final thrive = _clientThriveBrief;
-    if (thrive != null) {
-      final goals = thrive['goals_active'];
-      if (goals is List) {
-        for (final g in goals.take(1)) {
-          if (g is! Map) continue;
-          final text = _briefPlainText(g['text']);
-          if (text.isEmpty) continue;
-          final pct = g['progress_pct'];
-          final pctS = pct is num ? ' (${pct.round()}%)' : '';
-          add(
-            'Growth already has a goal$pctS: “$text”. Check it. Don\'t invent a new one.',
-            allowLong: true,
-          );
-        }
-      }
-      final harvests = thrive['recent_harvest'];
-      if (harvests is List && harvests.isNotEmpty) {
-        final h0 = harvests.first;
-        if (h0 is Map) {
-          final harvest = _briefPlainText(h0['harvest']);
-          final key = _briefPlainText(h0['practice_key']).replaceAll('_', ' ');
-          if (harvest.isNotEmpty) {
-            add(
-              'They already practiced ${key.isEmpty ? 'a practice' : key}: $harvest. Ask what shifted.',
-              allowLong: true,
-            );
-          }
-        }
-      }
-    }
-    if (out.isEmpty) {
-      final convos = List<dynamic>.from(brief['recent_conversations'] ?? const []);
-      for (final raw in convos.reversed) {
-        if (raw is! Map) continue;
-        final user = _briefPlainText(raw['user'] ?? raw['user_text']);
-        if (user.length < 18) continue;
-        add(
-          'Open on what they last brought: “${_briefClamp(user, 88)}” — stay there; don\'t start a new map.',
-          allowLong: true,
-        );
-        break;
-      }
-    }
     if (out.isEmpty) {
       add(
         'LN has no personal thread yet. Open with why they booked, then one feeling, then stop talking.',
         allowLong: true,
       );
     }
-    return out.take(6).toList();
+    return out.take(5).toList();
   }
 
   List<String> _briefKeywordTopics(Map<String, dynamic> brief) {
@@ -8600,7 +8579,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         .reversed) {
       if (raw is! Map) continue;
       final user = _briefPlainText(raw['user'] ?? raw['user_text']);
-      if (user.length < 12) continue;
+      if (user.length < 12 || _briefIsPrepJunk(user)) continue;
       addKeyword(_briefClamp(user, 40));
       if (out.length >= 6) return out.take(6).toList();
     }

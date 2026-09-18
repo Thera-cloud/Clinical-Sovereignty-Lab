@@ -1,9 +1,9 @@
-"""Client-specific session prep — not Growth EFT slogans."""
+"""Client-specific session prep — insight, not last-chat echo."""
 
 from app.services.session_prep_composer import compose_session_prep_points
 
 
-def test_prep_uses_last_words_not_framework():
+def test_prep_splits_pattern_vs_secondary():
     a = compose_session_prep_points({
         "recent_conversations": [
             {"user": "I keep disappearing when Kristy asks what I need."},
@@ -22,11 +22,14 @@ def test_prep_uses_last_words_not_framework():
     })
     joined_a = " ".join(a).lower()
     joined_b = " ".join(b).lower()
-    assert "disappearing" in joined_a
+    assert "withdraw" in joined_a
     assert "shame" in joined_b
-    assert "disappearing" not in joined_b
+    assert "secondary" in joined_b
+    assert "conviction" in joined_b
+    assert "open on what they last" not in joined_a
     assert not any(p.lower().startswith("register:") for p in a + b)
     assert not any("companion into the wound" in p.lower() for p in a + b)
+    assert len(a) <= 5 and len(b) <= 5
 
 
 def test_skips_template_crystals():
@@ -41,26 +44,54 @@ def test_skips_template_crystals():
     })
     joined = " ".join(points).lower()
     assert "synthesized insight crystal" not in joined
-    assert "no personal thread" in joined or "intake is still blank" in joined
+    assert "no personal thread" in joined
 
 
-def test_thrive_goal_joins_without_repeating_questions():
-    points = compose_session_prep_points(
-        {
-            "recent_conversations": [
-                {"user": "I told my father I was done being the family fixer."},
-            ]
-        },
-        thrive={
-            "goals_active": [{"text": "Tell dad one true sentence a week", "progress_pct": 20}],
-            "core_questions": ["What happened, and what did it mean about you?"],
-            "session_guidance": [
-                "Register: companion into the wound, steady, unhurried.",
-                "EFT: Stage 1 Steps 3-4.",
-            ],
-        },
-    )
+def test_skips_zoom_hello_leftover():
+    points = compose_session_prep_points({
+        "recent_conversations": [{"user": "Hello?"}],
+        "prior_session_summaries": [
+            {"summary": "Quick recap The meeting began with Nathaniel saying Hello?"},
+        ],
+    })
     joined = " ".join(points).lower()
-    assert "tell dad one true sentence" in joined
-    assert "what happened, and what did it mean" not in joined
+    assert "quick recap" not in joined
+    assert "saying hello" not in joined
+
+
+def test_trauma_beats_thrive_coaching():
+    points = compose_session_prep_points({
+        "growth_phase": {"phase": "thrive"},
+        "recent_conversations": [
+            {"user": "The flashback came back last night after they hurt me."},
+        ],
+    })
+    joined = " ".join(points).lower()
+    assert "traumatic" in joined
+    assert "not in trauma repair" not in joined
+    assert len(points) <= 5
+
+
+def test_thrive_coaching_when_not_repair():
+    points = compose_session_prep_points({
+        "growth_phase": {"phase": "thrive"},
+        "recent_conversations": [
+            {"user": "I want to finish my calendar this week and get the deadline off my back."},
+        ],
+    })
+    joined = " ".join(points).lower()
+    assert "not in trauma repair" in joined
+    assert "calendar" in joined
+    assert "register:" not in joined
     assert "companion into the wound" not in joined
+
+
+def test_unresolved_anxiety_and_depression():
+    points = compose_session_prep_points({
+        "recent_conversations": [
+            {"user": "I'm still anxious and the panic came back. I feel hopeless and can't get out of bed."},
+        ],
+    })
+    joined = " ".join(points).lower()
+    assert "anxiety" in joined
+    assert "depressive" in joined or "sadness" in joined

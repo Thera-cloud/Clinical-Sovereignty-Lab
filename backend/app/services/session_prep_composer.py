@@ -1,13 +1,15 @@
-"""Client-specific View Brief session-prep talking points.
+"""View Brief session-prep: LN clinical/coaching direction, not last-chat echo.
 
-Growth keeps the phase framework. Memory keeps crystals. Prep is the
-coach's next-hour direction from what Little Nate already heard.
+Growth keeps the phase framework. Memory keeps crystals. Prep is up to five
+coach moves: how to bring feeling in, history patterns LN can hold, trauma /
+unresolved anxiety / depression, secondary vs core emotion, or — when the
+client is not in trauma repair — positive-psychology coaching.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 _GENERIC_CRYSTAL = re.compile(
     r"here(?:'s| is) the (?:synthesized |crystallized )?insight"
@@ -20,7 +22,72 @@ _FRAMEWORK_LINE = re.compile(
     r"^(register:|eft:|watch for:|time focus|companion into the wound)",
     re.I,
 )
+_JUNK = re.compile(
+    r"sovereign journey|story panel|zoom ai|quick recap"
+    r"|the meeting began with|saying ['\"]hello"
+    r"|skills practice check-in|5-4-3-2-1|grounding and mindful"
+    r"|asking about my .*image",
+    re.I,
+)
 _WS = re.compile(r"\s+")
+
+SECONDARY: Dict[str, Tuple[str, ...]] = {
+    "shame": ("shame", "ashamed", "humiliat", "embarrass", "worthless", "pathetic"),
+    "guilt": ("guilt", "guilty", "my fault", "i ruined", "i should have"),
+    "anxiety": (
+        "anxi", "panic", "worried", "worry", "nervous", "can't sleep",
+        "cant sleep", "racing", "on edge", "spiral",
+    ),
+    "grief": ("grief", "grieving", "mourning", "i miss", "passed away", "died"),
+    "frustration": ("frustrat", "fed up", "sick of", "irritat", "this again"),
+}
+CORE: Dict[str, Tuple[str, ...]] = {
+    "fear": ("afraid", "scared", "terror", "unsafe", "i'm scared", "im scared"),
+    "anger": ("angry", "anger", "rage", "furious", "i hate"),
+    "sadness": ("sad", "heartbroken", "cry", "tears", "empty"),
+    "disgust": ("disgust", "revolted", "sickened", "repulsed"),
+    "joy": ("joy", "grateful", "proud of", "light", "alive"),
+    "conviction": ("i won't go back", "i will not", "this is true", "i know what i need"),
+    "positive sexual excitement": ("turned on", "desire for", "wanted him", "wanted her", "felt desire"),
+}
+TRAUMA = (
+    "trauma", "flashback", "triggered", "assault", "abused", "abuse",
+    "molest", "rape", "raped", "childhood", "war", "ptsd",
+    "they hurt me", "he hurt me", "she hurt me",
+)
+TRAUMA_SEX = ("raped", "molest", "sexual abuse", "assaulted")
+DEPRESSION = (
+    "depress", "hopeless", "can't get out of bed", "cant get out of bed",
+    "no point", "what's the point", "numb", "don't want to be here",
+)
+ANXIETY_UNRESOLVED = (
+    "still anxious", "still worried", "panic came back", "can't settle",
+    "cant settle", "hasn't gone", "keeps coming back",
+)
+PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("withdraw / shut down when asked to need", ("disappear", "shut down", "go quiet", "withdraw", "i freeze")),
+    ("caretaker / fixer", ("fix it", "take care of", "family fixer", "everyone else first")),
+    ("people-please / can't say no", ("can't say no", "cant say no", "let them down", "people pleas")),
+    ("conflict avoidance", ("don't want a fight", "keep the peace", "just drop it")),
+    ("work / schedule overwhelm", ("behind at work", "too many", "no time", "calendar", "deadline")),
+    ("unfinished tasks", ("didn't finish", "still haven't", "keep putting off", "procrastin")),
+    ("creative stall", ("blocked", "can't create", "nothing comes", "stuck creat")),
+)
+COACH_MOVES: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
+    ("scheduling", ("calendar", "schedule", "late", "deadline", "time"),
+     "They're buildable, not in repair. One calendar commitment they can finish this week — LN can hold the follow-through."),
+    ("task completion", ("finish", "didn't finish", "still haven't", "to-do", "homework"),
+     "Lead with one completable task, then stop. LN can track whether it actually closed."),
+    ("goal forming", ("i want", "goal", "next year", "if i could"),
+     "Form one concrete goal from what they already want. Don't open a wound hunt."),
+    ("conflict resolution", ("fight", "argument", "we keep", "they never listen"),
+     "Conflict is the work: one repair sentence, not a trauma excavation."),
+    ("creativity", ("create", "write", "paint", "music", "idea"),
+     "Protect a short creative block this week. LN can ask what they actually made."),
+)
+
+REPAIR_PHASES = frozenset({"stabilize", "process"})
+COACH_PHASES = frozenset({"thrive", "generative"})
 
 
 def _plain(raw: Any) -> str:
@@ -28,8 +95,9 @@ def _plain(raw: Any) -> str:
         return ""
     if isinstance(raw, dict):
         for key in (
-            "text", "summary", "content_summary", "user", "user_text",
-            "topic_summary", "note", "harvest",
+            "text", "summary", "content_summary", "clinical_summary",
+            "clinical_translation", "user", "user_text", "topic_summary",
+            "note", "harvest",
         ):
             val = raw.get(key)
             if val:
@@ -38,7 +106,7 @@ def _plain(raw: Any) -> str:
     return _WS.sub(" ", str(raw)).strip()
 
 
-def _clip(text: str, n: int = 100) -> str:
+def _clip(text: str, n: int = 90) -> str:
     t = _plain(text)
     if len(t) <= n:
         return t
@@ -46,182 +114,241 @@ def _clip(text: str, n: int = 100) -> str:
     return (cut or t[:n]) + "…"
 
 
-def _is_generic_crystal(text: str) -> bool:
+def _is_junk(text: str) -> bool:
     t = _plain(text)
-    if len(t) < 24:
+    if len(t) < 12 or t.startswith("{") or t.startswith("["):
         return True
-    return bool(_GENERIC_CRYSTAL.search(t))
+    return bool(_JUNK.search(t) or _GENERIC_CRYSTAL.search(t))
 
 
-def _last_user_lines(turns: Iterable[Any], n: int = 3, min_len: int = 18) -> List[str]:
+def _blob(texts: Iterable[str]) -> str:
+    return " ".join(t.lower() for t in texts if t)
+
+
+def _hits(blob: str, words: Sequence[str]) -> List[str]:
+    found: List[str] = []
+    for w in words:
+        if w in blob:
+            found.append(w)
+    return found
+
+
+def _label_hits(blob: str, table: Dict[str, Tuple[str, ...]]) -> List[str]:
     out: List[str] = []
-    for raw in reversed(list(turns or [])):
-        if not isinstance(raw, dict):
-            continue
-        user = _plain(raw.get("user") or raw.get("user_text") or raw.get("preview"))
-        if len(user) < min_len or user.startswith("{") or user.startswith("["):
-            continue
-        out.append(user)
-        if len(out) >= n:
-            break
-    out.reverse()
+    for label, words in table.items():
+        if any(w in blob for w in words):
+            out.append(label)
     return out
 
 
-def _risk(metrics: Any) -> str:
-    if not isinstance(metrics, dict):
-        return ""
-    return str(
-        metrics.get("risk_level")
-        or (metrics.get("nevedal_state") or {}).get("risk_level")
-        or ""
-    ).upper()
-
-
-def _mood_trend(metrics: Any) -> str:
-    if not isinstance(metrics, dict):
-        return ""
-    return str(
-        metrics.get("mood_trend")
-        or metrics.get("moodTrend")
-        or ""
-    ).lower()
-
-
-def _reconsolidation(metrics: Any) -> float:
-    if not isinstance(metrics, dict):
-        return 0.0
-    pmb = metrics.get("pmb")
-    if not isinstance(pmb, dict):
-        return 0.0
+def _num(metrics: Dict[str, Any], *keys: str) -> float:
+    cur: Any = metrics
+    for key in keys:
+        if not isinstance(cur, dict):
+            return 0.0
+        cur = cur.get(key)
     try:
-        return float(pmb.get("reconsolidation_readiness") or 0)
+        return float(cur or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _phase(brief: Dict[str, Any], thrive: Dict[str, Any]) -> Tuple[str, str]:
+    block = brief.get("growth_phase")
+    if not isinstance(block, dict):
+        raw = thrive.get("phase")
+        block = raw if isinstance(raw, dict) else {}
+    phase = str(block.get("phase") or "process").strip().lower()
+    sub = str(block.get("sub_state") or "").strip().lower()
+    return phase, sub
+
+
+def _user_corpus(brief: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for raw in brief.get("recent_conversations") or []:
+        if not isinstance(raw, dict):
+            continue
+        user = _plain(raw.get("user") or raw.get("user_text") or raw.get("preview"))
+        if user and not _is_junk(user):
+            out.append(user)
+    for crystal in brief.get("crystal_memory") or []:
+        text = _plain(crystal)
+        if text and not _is_junk(text):
+            out.append(text)
+    for raw in brief.get("prior_session_summaries") or []:
+        text = _plain(raw)
+        if text and not _is_junk(text):
+            out.append(text)
+    return out
+
+
+def _in_repair(
+    brief: Dict[str, Any],
+    thrive: Dict[str, Any],
+    blob: str,
+    metrics: Dict[str, Any],
+) -> bool:
+    phase, sub = _phase(brief, thrive)
+    if sub in ("crisis_hold", "working_through"):
+        return True
+    if phase in REPAIR_PHASES:
+        return True
+    if _hits(blob, TRAUMA) or _hits(blob, TRAUMA_SEX):
+        return True
+    risk = str(metrics.get("risk_level") or "").upper()
+    if risk in ("HIGH", "CRITICAL", "CRISIS"):
+        return True
+    if _num(metrics, "anxiety_level") >= 0.55 or _num(metrics, "depression_indicators") >= 0.55:
+        return True
+    if phase in COACH_PHASES:
+        return False
+    return bool(_label_hits(blob, SECONDARY) or _label_hits(blob, CORE))
 
 
 def compose_session_prep_points(
     brief: Optional[Dict[str, Any]],
     thrive: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
-    """Directional prep lines. Never the Growth EFT/register slogans."""
     brief = brief or {}
     thrive = thrive or {}
+    metrics = brief.get("metrics") if isinstance(brief.get("metrics"), dict) else {}
+    corpus = _user_corpus(brief)
+    blob = _blob(corpus)
+    secondary = _label_hits(blob, SECONDARY)
+    shame = metrics.get("shame_profile")
+    if isinstance(shame, dict):
+        try:
+            if float(shame.get("shame_index") or 0) >= 0.4 and "shame" not in secondary:
+                secondary.append("shame")
+        except (TypeError, ValueError):
+            pass
+    core = _label_hits(blob, CORE)
+    if "positive sexual excitement" in core and _hits(blob, TRAUMA_SEX):
+        core = [c for c in core if c != "positive sexual excitement"]
+    repair = _in_repair(brief, thrive, blob, metrics)
     points: List[str] = []
     seen: set[str] = set()
 
     def add(raw: str) -> None:
         line = _plain(raw)
-        if not line or _FRAMEWORK_LINE.search(line):
+        if not line or _FRAMEWORK_LINE.search(line) or _is_junk(line):
             return
-        key = line.lower()[:90]
+        key = line.lower()[:80]
         if key in seen:
             return
         seen.add(key)
         points.append(line)
 
-    last_lines = _last_user_lines(brief.get("recent_conversations") or [])
-    if last_lines:
+    if not corpus:
         add(
-            f"Open on what they last brought: “{_clip(last_lines[-1], 88)}” "
-            "— stay there; don't start a new map."
+            "LN has no personal thread yet. One question about why they booked, "
+            "then one feeling. Don't teach a framework."
         )
-        if len(last_lines) > 1:
+        return points[:5]
+
+    if repair:
+        if secondary:
+            under = core[0] if core else (
+                "conviction" if "shame" in secondary else
+                "fear" if "anxiety" in secondary else
+                "sadness" if "grief" in secondary else
+                "anger" if "frustration" in secondary else
+                "sadness"
+            )
             add(
-                f"Second thread still live: “{_clip(last_lines[-2], 80)}”. "
-                "Name it only if the first one lands."
+                f"Secondary in the room: {', '.join(secondary)}. "
+                f"Don't coach the cover. Bring them toward the core under it "
+                f"({under}"
+                f"{', ' + ', '.join(c for c in core if c != under) if len(core) > 1 else ''}) "
+                "— body first, story second."
+            )
+        elif core:
+            add(
+                f"Core affect already named: {', '.join(core)}. "
+                "Stay with the feeling in the body before any plan."
+            )
+        else:
+            add(
+                "Open in sensation, not content. One feeling, then silence. "
+                "LN can hold the history so you don't have to recap it."
             )
 
-    focus = _plain(brief.get("session_focus"))
-    if focus:
-        add(f"They already named this hour: {_clip(focus, 100)}.")
+        for label, words in PATTERNS:
+            if any(w in blob for w in words):
+                add(
+                    f"History pattern LN can hold: {label}. "
+                    "Name the cycle once; don't interview the whole timeline."
+                )
+                break
 
-    summaries = brief.get("prior_session_summaries") or []
-    if summaries:
-        leftover = _plain(summaries[0])
-        if leftover:
+        if _hits(blob, TRAUMA) or _hits(blob, TRAUMA_SEX):
             add(
-                f"Last session leftover: {_clip(leftover, 100)}. "
-                "Ask what landed, not what you taught."
+                "A traumatic thread is live in their chat history. "
+                "Consent, slow, no technique dump. LN already has the details."
             )
-
-    for crystal in brief.get("crystal_memory") or []:
-        text = _plain(crystal)
-        if _is_generic_crystal(text):
-            continue
-        domain = ""
-        if isinstance(crystal, dict):
-            domain = _plain(crystal.get("domain"))
-        tag = f" ({domain})" if domain and domain not in ("general", "clinical") else ""
-        add(
-            f"LN already holds this{tag}: {_clip(text, 92)}. "
-            "Use it as the through-line; Memory has the rest."
-        )
-        break
-
-    breakthroughs = brief.get("recent_breakthroughs") or []
-    if breakthroughs:
-        last_br = breakthroughs[-1]
-        br_text = _plain(last_br)
-        if br_text and not _is_generic_crystal(br_text):
-            add(f"Build on what they already realized: “{_clip(br_text, 80)}”.")
-
-    for goal in (thrive.get("goals_active") or [])[:1]:
-        if not isinstance(goal, dict):
-            continue
-        gtext = _plain(goal.get("text"))
-        if not gtext:
-            continue
-        pct = goal.get("progress_pct")
-        pct_s = f" ({int(pct)}%)" if isinstance(pct, (int, float)) else ""
-        add(
-            f"Growth already has a goal{pct_s}: “{_clip(gtext, 72)}”. "
-            "Check it. Don't invent a new one."
-        )
-
-    harvests = thrive.get("recent_harvest") or []
-    if harvests:
-        h0 = harvests[0]
-        htext = _plain(h0.get("harvest") if isinstance(h0, dict) else h0)
-        key = _plain(h0.get("practice_key") if isinstance(h0, dict) else "")
-        if htext:
-            label = key.replace("_", " ") if key else "a practice"
+        anx_metric = _num(metrics, "anxiety_level")
+        if _hits(blob, ANXIETY_UNRESOLVED) or "anxiety" in secondary or anx_metric >= 0.45:
             add(
-                f"They already practiced {label}: {_clip(htext, 80)}. "
-                "Ask what shifted."
+                "Anxiety is still unresolved. Treat it as a secondary. "
+                "Ask what fear or anger sits under the spin — then stop solving."
             )
-
-    metrics = brief.get("metrics") if isinstance(brief.get("metrics"), dict) else {}
-    risk = _risk(metrics)
-    if risk in ("HIGH", "CRITICAL", "CRISIS"):
-        add("Safety first this hour — last-session carryover before any growth talk.")
-    if _mood_trend(metrics) in ("declining", "down", "worsening"):
-        add("Mood is sliding — name that before technique.")
-    if _reconsolidation(metrics) >= 0.6:
+        dep_metric = _num(metrics, "depression_indicators")
+        if _hits(blob, DEPRESSION) or dep_metric >= 0.45:
+            add(
+                "Depressive weight is in the history. "
+                "Go toward sadness or disgust underneath numbness, not a goal list."
+            )
+        if "shame" in secondary:
+            add(
+                "Shame is covering. Invite conviction — what they already know is true — "
+                "instead of another confession."
+            )
+        ready = _num(metrics, "pmb", "reconsolidation_readiness")
+        if ready >= 0.6:
+            add(
+                "Reconsolidation window is open. Stay in the charge. "
+                "Don't soothe it away."
+            )
+    else:
         add(
-            "Reconsolidation window is open — stay in the charge they named, "
-            "don't soothe it away."
+            "Not in trauma repair this hour. Lead with what they want to build — "
+            "one goal, one finish line — not a wound hunt."
         )
-
-    homework = brief.get("pending_homework") or []
-    if homework:
-        hw = homework[0]
-        add(f"Homework still open: {_clip(hw, 80)}. Close or drop it on purpose.")
+        if "joy" in core or "conviction" in core or "positive sexual excitement" in core:
+            add(
+                f"Positive core is available: {', '.join(c for c in core if c in ('joy', 'conviction', 'positive sexual excitement'))}. "
+                "Amplify that. Don't drag them back into shame."
+            )
+        placed = False
+        for _key, words, line in COACH_MOVES:
+            if any(w in blob for w in words):
+                add(line)
+                placed = True
+                if sum(1 for p in points if "LN can" in p or "completable" in p or "calendar" in p) >= 2:
+                    break
+        if not placed:
+            add(
+                "Positive coaching: pick one of goal forming, a finished task, "
+                "a calendar block, a conflict repair, or a creative hour. LN will remember which."
+            )
+        for label, words in PATTERNS:
+            if any(w in blob for w in words):
+                add(
+                    f"LN can coach the {label} pattern as a skill, not a diagnosis. "
+                    "One experiment before next session."
+                )
+                break
 
     if not points:
-        turns = brief.get("recent_conversations") or []
-        intake = brief.get("intake_summary") if isinstance(brief.get("intake_summary"), dict) else {}
-        has_intake = bool(intake.get("has_any_answers")) or int(
-            intake.get("section_1_completion_pct") or 0
-        ) > 0
-        if not turns:
+        if not corpus:
             add(
-                "LN has no personal thread yet. Open with why they booked, "
-                "then one feeling, then stop talking."
+                "LN has no personal thread yet. One question about why they booked, "
+                "then one feeling. Don't teach a framework."
             )
-        if not has_intake:
-            add("Intake is still blank — one question about what they need from this hour.")
-        if not points:
-            add("Follow their first sentence. Framework stays on Growth, not in your opening.")
+        else:
+            add(
+                "Follow the first feeling that shows. Framework stays on Growth. "
+                "LN already has the chat history."
+            )
 
-    return points[:6]
+    return points[:5]
