@@ -103,7 +103,7 @@ def test_unresolved_anxiety_and_depression():
     assert 3 <= len(points) <= 5
 
 
-def test_panel_prep_is_ifs_art_not_raw_summary():
+def test_panel_prep_is_client_thera_world_not_slogans():
     points = compose_panel_prep_points({
         "recent_panel_insights": [
             {
@@ -114,18 +114,82 @@ def test_panel_prep_is_ifs_art_not_raw_summary():
                         "archetype with Curiosity, the Orchard Keeper, and the Cloakless Traveler."
                     ),
                     "therapeutic_modality": "IFS",
+                    "narrative_text": (
+                        "The Cloakless Traveler sets the cloak on a stone in the dark forest "
+                        "and does not pick it back up."
+                    ),
                 },
             }
+        ],
+        "thera_world_scene": {
+            "biome": "dark_forest",
+            "character": "Cloakless Traveler",
+            "narrative": (
+                "The Cloakless Traveler sets the cloak on a stone in the dark forest "
+                "and does not pick it back up."
+            ),
+            "npcs": ["Bridgewright", "Archivist"],
+        },
+        "crystal_memory": [
+            {"domain": "clinical", "content_summary": "John withdraws when asked to name a need."},
         ],
         "recent_conversations": [
             {"user": "I keep disappearing when Kristy asks what I need."},
         ],
     })
     joined = " ".join(points).lower()
-    assert len(points) == 3
-    assert "ifs" in joined
-    assert "orchard keeper" in joined or "curiosity" in joined
-    assert "reconsolidation" in joined
-    assert "art-as-witness" in joined or "art therapy" in joined
+    assert 3 <= len(points) <= 3
+    assert "cloakless" in joined
+    assert "withdraw" in joined or "disappear" in joined or "need" in joined
+    assert "dark forest" in joined or "cloak" in joined
+    assert "who protects, who structures" not in joined
+    assert "the image is the door" not in joined
+    assert "art-as-witness" not in joined
     assert '"clinical_summary"' not in joined
     assert "ifs-informed panel" not in joined
+
+
+def test_panel_prep_differs_by_client_memory():
+    a = compose_panel_prep_points({
+        "thera_world_scene": {
+            "biome": "dark_forest",
+            "character": "Cloakless Traveler",
+            "narrative": "The traveler leaves the cloak on a stone.",
+            "npcs": ["Bridgewright"],
+        },
+        "crystal_memory": [
+            {"domain": "clinical", "content_summary": "John withdraws when asked to name a need."},
+        ],
+        "recent_conversations": [
+            {"user": "I keep disappearing when Kristy asks what I need."},
+        ],
+        "recent_panel_insights": [{"clinical_translation": {"narrative_text": "cloak on a stone"}}],
+    })
+    b = compose_panel_prep_points({
+        "thera_world_scene": {
+            "biome": "river_valley",
+            "character": "Serpent",
+            "narrative": "Ripples circle the bank and never strike.",
+            "npcs": ["The Stillwater Monk"],
+        },
+        "crystal_memory": [
+            {"domain": "clinical", "content_summary": "Lisa's shame spike arrives at the doorway."},
+        ],
+        "recent_conversations": [
+            {"user": "The shame hits before I even walk into the room."},
+        ],
+        "recent_panel_insights": [{"clinical_translation": {"narrative_text": "ripples on the bank"}}],
+    })
+    ja, jb = " ".join(a).lower(), " ".join(b).lower()
+    assert a != b
+    assert "cloakless" in ja or "withdraw" in ja
+    assert "shame" in jb
+    assert "serpent" in jb or "stillwater" in jb or "ripples" in jb
+    assert "who protects, who structures" not in ja + jb
+    assert "the image is the door" not in ja + jb
+
+
+def test_panel_prep_empty_without_world():
+    assert compose_panel_prep_points({
+        "recent_conversations": [{"user": "I keep disappearing when asked."}],
+    }) == []

@@ -10,6 +10,7 @@ summaries. Payment identifiers never enter the brief.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Dict, Iterable, List, Optional
@@ -216,6 +217,153 @@ async def _history_user_ids(
     return ids
 
 
+def _jsonish(raw: Any) -> Any:
+    if raw is None:
+        return None
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
+    return None
+
+
+async def load_thera_world_scene(conn: Any, user_ids: List[str]) -> Dict[str, Any]:
+    """Latest SSE panel + journey/quest/mission for this client. Empty dict if none."""
+    ids = [i for i in (user_ids or []) if i]
+    if not conn or not ids:
+        return {}
+    scene: Dict[str, Any] = {}
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT biome, character_manifest,
+                   LEFT(COALESCE(narrative_text, ''), 500) AS narrative_text,
+                   panel_tone, crystal_domains_used
+              FROM sse_panel_log
+             WHERE user_id = ANY($1::text[])
+             ORDER BY generated_at DESC NULLS LAST
+             LIMIT 1
+            """,
+            ids,
+        )
+        if row:
+            biome = _row_get(row, "biome")
+            character = _row_get(row, "character_manifest")
+            narrative = _row_get(row, "narrative_text")
+            tone = _row_get(row, "panel_tone")
+            if isinstance(biome, str) and biome.strip():
+                scene["biome"] = biome.strip()
+            if isinstance(character, str) and character.strip():
+                scene["character"] = character.strip()
+                scene["character_manifest"] = character.strip()
+            if isinstance(narrative, str) and narrative.strip():
+                scene["narrative"] = narrative.strip()
+            if isinstance(tone, str) and tone.strip():
+                scene["tone"] = tone.strip()
+            domains = _jsonish(_row_get(row, "crystal_domains_used"))
+            if domains:
+                scene["crystal_domains"] = domains
+    except Exception as e:
+        logger.debug("presession overlay: sse_panel_log scene: %s", e)
+    try:
+        journey = await conn.fetchrow(
+            """
+            SELECT current_biome, dominant_character, last_panel_summary,
+                   last_panel_npcs, therapeutic_arc
+              FROM sse_user_journeys
+             WHERE user_id = ANY($1::text[])
+             ORDER BY last_panel_at DESC NULLS LAST
+             LIMIT 1
+            """,
+            ids,
+        )
+        if journey:
+            if not scene.get("biome"):
+                biome = _row_get(journey, "current_biome")
+                if isinstance(biome, str) and biome.strip():
+                    scene["biome"] = biome.strip()
+            if not scene.get("character"):
+                character = _row_get(journey, "dominant_character")
+                if isinstance(character, str) and character.strip():
+                    scene["character"] = character.strip()
+            if not scene.get("narrative"):
+                summary = _row_get(journey, "last_panel_summary")
+                if isinstance(summary, str) and summary.strip():
+                    scene["narrative"] = summary.strip()
+                    scene["last_panel_summary"] = summary.strip()
+            npcs = _jsonish(_row_get(journey, "last_panel_npcs"))
+            if npcs:
+                scene["npcs"] = npcs
+            arc = _row_get(journey, "therapeutic_arc")
+            if isinstance(arc, str) and arc.strip():
+                scene["therapeutic_arc"] = arc.strip()
+    except Exception as e:
+        logger.debug("presession overlay: sse_user_journeys scene: %s", e)
+    try:
+        quest = await conn.fetchrow(
+            """
+            SELECT goal, goal_domain
+              FROM sse_quests
+             WHERE user_id = ANY($1::text[]) AND status = 'active'
+             ORDER BY started_at DESC
+             LIMIT 1
+            """,
+            ids,
+        )
+        if quest:
+            goal = _row_get(quest, "goal")
+            if isinstance(goal, str) and goal.strip():
+                scene["quest"] = goal.strip()
+                scene["goal"] = goal.strip()
+    except Exception as e:
+        logger.debug("presession overlay: sse_quests scene: %s", e)
+    try:
+        mission = await conn.fetchrow(
+            """
+            SELECT relationship_target, relationship_type
+              FROM sse_missions
+             WHERE user_id = ANY($1::text[]) AND status = 'active'
+             ORDER BY started_at DESC
+             LIMIT 1
+            """,
+            ids,
+        )
+        if mission:
+            target = _row_get(mission, "relationship_target")
+            if isinstance(target, str) and target.strip():
+                scene["mission"] = target.strip()
+                scene["relationship_target"] = target.strip()
+    except Exception as e:
+        logger.debug("presession overlay: sse_missions scene: %s", e)
+    if not scene.get("narrative"):
+        try:
+            drow = await conn.fetchrow(
+                """
+                SELECT LEFT(COALESCE(NULLIF(btrim(client_narrative_text), ''), ''), 500)
+                           AS client_narrative_text
+                  FROM sse_delivery_generation_log
+                 WHERE user_id = ANY($1::text[])
+                   AND COALESCE(status, 'success') = 'success'
+                   AND COALESCE(NULLIF(btrim(client_narrative_text), ''), '') <> ''
+                 ORDER BY generated_at DESC
+                 LIMIT 1
+                """,
+                ids,
+            )
+            nar = _row_get(drow, "client_narrative_text") if drow else None
+            if isinstance(nar, str) and nar.strip():
+                scene["narrative"] = nar.strip()
+        except Exception as e:
+            logger.debug("presession overlay: delivery narrative: %s", e)
+    return scene
+
+
 async def enrich_dual_coo_insights(
     db_pool: Any,
     client_id: str,
@@ -413,6 +561,18 @@ async def overlay_presession_brief(
                         break
             except Exception as e:
                 logger.debug("presession overlay: growth_phase: %s", e)
+            try:
+                scene_ids = list(user_ids)
+                uname = ((client_profile or {}).get("username") or "").strip()
+                hw = ((client_profile or {}).get("hardware_id") or client_id or "").strip()
+                for extra in (uname, hw, (client_id or "").strip()):
+                    if extra and extra not in scene_ids:
+                        scene_ids.append(extra)
+                scene = await load_thera_world_scene(conn, scene_ids)
+                if scene:
+                    out["thera_world_scene"] = scene
+            except Exception as e:
+                logger.debug("presession overlay: thera_world_scene: %s", e)
     except Exception as e:
         logger.warning("presession overlay: PG merge failed: %s", e)
 

@@ -323,3 +323,38 @@ async def test_enrich_dual_coo_attaches_and_marks_targeted_delivered():
     assert 11 in ids
     assert 12 not in ids
 
+
+@pytest.mark.asyncio
+async def test_load_thera_world_scene_from_panel_and_journey():
+    from app.services.presession_brief_overlay import load_thera_world_scene
+
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(
+        side_effect=[
+            {
+                "biome": "dark_forest",
+                "character_manifest": "Cloakless Traveler",
+                "narrative_text": "The cloak rests on a stone.",
+                "panel_tone": "meditative",
+                "crystal_domains_used": {"domains": ["attachment"], "themes": ["need"]},
+            },
+            {
+                "current_biome": "dark_forest",
+                "dominant_character": "Cloakless Traveler",
+                "last_panel_summary": "The cloak rests on a stone.",
+                "last_panel_npcs": [{"name": "Bridgewright"}],
+                "therapeutic_arc": "exploration",
+            },
+            {"goal": "name a need without leaving", "goal_domain": "attachment"},
+            {"relationship_target": "Kristy", "relationship_type": "partner"},
+        ]
+    )
+    scene = await load_thera_world_scene(conn, ["audit_client"])
+    assert scene["biome"] == "dark_forest"
+    assert scene["character"] == "Cloakless Traveler"
+    assert "cloak" in scene["narrative"].lower()
+    assert scene["npcs"] == [{"name": "Bridgewright"}]
+    assert scene["quest"] == "name a need without leaving"
+    assert scene["mission"] == "Kristy"
+    assert conn.fetchrow.await_count == 4
+

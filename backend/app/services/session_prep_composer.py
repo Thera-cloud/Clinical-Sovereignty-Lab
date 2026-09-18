@@ -416,16 +416,47 @@ def _panel_texts(brief: Dict[str, Any]) -> List[str]:
         trans = block.get("clinical_translation")
         trans_d = trans if isinstance(trans, dict) else _as_dict(trans)
         for key in (
-            "clinical_summary",
-            "therapeutic_modality",
-            "recommended_follow_up",
             "narrative_text",
             "archetype_hint",
+            "recommended_follow_up",
+            "clinical_summary",
+            "therapeutic_modality",
         ):
             val = trans_d.get(key) or block.get(key)
             if val:
                 out.append(_plain(val))
     return [t for t in out if t]
+
+
+_SKIP_NARR = re.compile(
+    r"ifs-informed|therapeutic_modality|clinical_summary|recommended_follow",
+    re.I,
+)
+
+
+BIOME_CUE: Dict[str, str] = {
+    "dark_forest": "fog path / lantern cairn — one more step or stop",
+    "fortress_plains": "open door or rope bridge — one plank, not the whole crossing",
+    "river_valley": "still water or the bench that remembers company — what looks back",
+    "crystal_mountains": "cave glow or overlook — what they can finally see",
+    "open_sky": "cloak set down / first dawn — what they no longer need to carry",
+}
+CORE_CHAR_MOVE: Dict[str, str] = {
+    "mirror": "Ask which reflection they are standing in. Don't pick it for them.",
+    "serpent": "The circling is the charge. Don't slay it; ask what it is guarding.",
+    "pride/shame": "Warm and cold in one frame. Ask which side they live in at the door.",
+    "reflection": "The picture already shows a slightly different self. Stay until they feel it.",
+    "holy spirit": "The seam of light is enough. Don't preach; ask if they can let it be there.",
+    "curiosity": "The open path is Curiosity. Ask what they want to look at, not what it means.",
+}
+GENERIC_PANEL = re.compile(
+    r"who protects, who structures"
+    r"|the image is the door"
+    r"|art-as-witness"
+    r"|whichever figure they cannot stop looking at"
+    r"|psychotherapeutic approaches in reach",
+    re.I,
+)
 
 
 def _parts_named(texts: Sequence[str]) -> List[str]:
@@ -439,29 +470,230 @@ def _parts_named(texts: Sequence[str]) -> List[str]:
     return found
 
 
+def _scene(brief: Dict[str, Any]) -> Dict[str, Any]:
+    raw = brief.get("thera_world_scene")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _npc_names(scene: Dict[str, Any]) -> List[str]:
+    found: List[str] = []
+    seen: set[str] = set()
+    raw = scene.get("npcs") or scene.get("last_panel_npcs") or []
+    items: List[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                items.append(str(item.get("name") or item.get("label") or ""))
+            else:
+                items.append(str(item or ""))
+    elif isinstance(raw, str):
+        items.append(raw)
+    for name in items:
+        label = _plain(name)
+        key = label.lower()
+        if len(label) < 3 or key in seen:
+            continue
+        seen.add(key)
+        found.append(label)
+    return found
+
+
+def _crystal_thread(brief: Dict[str, Any]) -> Tuple[str, str]:
+    for crystal in brief.get("crystal_memory") or []:
+        if isinstance(crystal, dict):
+            text = _plain(crystal)
+            domain = str(crystal.get("domain") or "clinical").strip().lower()
+        else:
+            text = _plain(crystal)
+            domain = "clinical"
+        if text and not _is_junk(text):
+            return domain or "clinical", text
+    return "", ""
+
+
+def _chat_thread(brief: Dict[str, Any]) -> str:
+    for raw in brief.get("recent_conversations") or []:
+        if not isinstance(raw, dict):
+            continue
+        user = _plain(raw.get("user") or raw.get("user_text") or raw.get("preview"))
+        if user and not _is_junk(user) and len(user) >= 18:
+            return user
+    return ""
+
+
+def _pattern_label(blob: str) -> str:
+    for label, words in PATTERNS:
+        if any(w in blob for w in words):
+            return label
+    return ""
+
+
+def _biome_key(raw: str) -> str:
+    return _plain(raw).lower().replace(" ", "_")
+
+
+def _character_key(raw: str) -> str:
+    return _plain(raw).lower().replace("pride/shame", "pride/shame")
+
+
 def compose_panel_prep_points(brief: Optional[Dict[str, Any]] = None) -> List[str]:
-    """IFS + art-therapy + psychotherapeutic moves from panels — not the raw summary."""
+    """Coach moves from this client's Thera-world panel + LN memory — not IFS slogans."""
     brief = brief or {}
+    scene = _scene(brief)
     texts = _panel_texts(brief)
-    if not texts:
+    narrative = _plain(scene.get("narrative") or scene.get("last_panel_summary") or "")
+    if not narrative:
+        narrative = next(
+            (
+                t for t in texts
+                if t and not _is_junk(t) and len(t) >= 24 and not _SKIP_NARR.search(t)
+            ),
+            "",
+        )
+    biome = _plain(scene.get("biome") or scene.get("current_biome") or "")
+    character = _plain(
+        scene.get("character")
+        or scene.get("character_manifest")
+        or scene.get("dominant_character")
+        or ""
+    )
+    names = _npc_names(scene) + _parts_named(
+        texts + [narrative, character, " ".join(_npc_names(scene))]
+    )
+    # de-dupe names, keep order
+    uniq: List[str] = []
+    seen_n: set[str] = set()
+    for name in names:
+        key = name.lower()
+        if key in seen_n:
+            continue
+        seen_n.add(key)
+        uniq.append(name)
+    names = uniq[:4]
+    if character and character.lower() not in seen_n:
+        names = [character] + names
+        names = names[:4]
+    domain, crystal = _crystal_thread(brief)
+    chat = _chat_thread(brief)
+    corpus = _user_corpus(brief)
+    blob = _blob(corpus + texts + [narrative, biome, character])
+    secondary = _label_hits(blob, SECONDARY)
+    core = _label_hits(blob, CORE)
+    pattern = _pattern_label(blob)
+    has_world = bool(narrative or biome or character or names or texts)
+    if not has_world:
         return []
-    names = _parts_named(texts)
-    named = ", ".join(names[:4]) if names else "whichever figure they cannot stop looking at"
-    return [
-        (
-            f"IFS: get to know the parts on the image — {named}. "
-            "Ask who protects, who structures, who explores. Don't interpret. "
-            "Let the part introduce itself."
-        ),
-        (
-            "Art therapy: the image is the door. Let them look first. "
-            "Ask what the scene already knows that their recent chats circled. "
-            "Curiosity on the panel is the reconsolidation cue — stay until a memory "
-            "or feeling updates, don't translate it for them."
-        ),
-        (
-            "Psychotherapeutic approaches in reach: IFS unblending (Self with the part), "
-            "art-as-witness (image before words), memory reconsolidation "
-            "(old chat + new felt sense in the picture). Pick one. Don't stack."
-        ),
-    ]
+
+    points: List[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        line = _plain(raw)
+        if not line or _FRAMEWORK_LINE.search(line) or _is_junk(line):
+            return
+        if GENERIC_PANEL.search(line):
+            return
+        key = line.lower()[:90]
+        if key in seen:
+            return
+        seen.add(key)
+        points.append(_clip(line, 220) if len(line) > 220 else line)
+
+    part = names[0] if names else (character or "the figure LN placed")
+    others = ", ".join(names[1:3])
+    ifs = f"IFS / Thera-world: {part} is in their last panel"
+    if others:
+        ifs += f" with {others}"
+    if biome:
+        ifs += f" ({biome.replace('_', ' ')})"
+    ifs += "."
+    if pattern:
+        ifs += (
+            f" LN's chats show {pattern}. Ask if {part} is that cycle on the image. "
+            "Don't interpret."
+        )
+    elif secondary:
+        under = core[0] if core else (
+            "fear" if "anxiety" in secondary else
+            "conviction" if "shame" in secondary else
+            "sadness"
+        )
+        ifs += (
+            f" Memory is carrying {', '.join(secondary[:2])} as cover. "
+            f"Unblend {part}; go toward {under}. Don't coach the cover."
+        )
+    else:
+        move = CORE_CHAR_MOVE.get(_character_key(character))
+        ifs += " " + (move or "Let the part speak from the picture. Don't name it for them.")
+    add(ifs)
+
+    bkey = _biome_key(biome)
+    cue = BIOME_CUE.get(bkey, "")
+    mem = crystal or chat
+    art = "Thera-world: "
+    if narrative:
+        art += _clip(narrative, 110)
+        if not art.endswith("."):
+            art += "."
+    elif cue:
+        art += cue + "."
+    else:
+        art += f"Stay with {part} until a feeling updates."
+    if mem:
+        art += (
+            f" Hold the image against what LN already holds — {_clip(mem, 80)}. "
+            "Don't translate the scene for them."
+        )
+    elif cue and narrative:
+        art += f" Art move: {cue}. Stay until the body answers."
+    add(art)
+
+    approach = ""
+    if _hits(blob, TRAUMA) or _hits(blob, TRAUMA_SEX):
+        approach = (
+            f"Consent, slow. Image before the trauma story. {part} already knows the pace."
+        )
+    elif "shame" in secondary:
+        approach = (
+            "Conviction, not another confession. Stay with what they already know is true "
+            f"while looking at {part}."
+        )
+    elif "anxiety" in secondary:
+        approach = (
+            "Don't solve the spin. Ask what fear sits under it while they stay with the image."
+        )
+    elif pattern:
+        approach = (
+            f"One experiment on {pattern} — skill in the hour, not a diagnosis of the picture."
+        )
+    else:
+        approach = CORE_CHAR_MOVE.get(_character_key(character)) or (
+            f"One move with {part}. Don't stack modalities."
+        )
+    learn = "LN learning"
+    if domain:
+        learn += f" ({domain})"
+    learn += ": "
+    if crystal:
+        learn += _clip(crystal, 90)
+        if not learn.endswith("."):
+            learn += "."
+        learn += " " + approach
+    elif chat:
+        learn += _clip(chat, 80) + ". " + approach
+    else:
+        quest = _plain(scene.get("quest") or scene.get("goal") or "")
+        mission = _plain(scene.get("mission") or scene.get("relationship_target") or "")
+        if quest:
+            learn += f"Active quest thread: {_clip(quest, 70)}. {approach}"
+        elif mission:
+            learn += f"Active mission thread: {_clip(mission, 70)}. {approach}"
+        else:
+            learn += approach
+    add(learn)
+
+    if len(points) < 3 and cue:
+        add(f"Stay in {biome.replace('_', ' ') or 'Thera-world'}: {cue}. LN holds the chats.")
+    if len(points) < 3 and part:
+        add(f"Ask {part} what it needs before any plan. LN already has the history.")
+    return points[:3]
