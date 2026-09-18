@@ -202,6 +202,8 @@ def test_flutter_wires_practice_card():
     assert "Pick each" in widget
     assert "sample_size" in widget
     assert "sample_mode" in widget
+    assert "_sampleMode = 'random'" in widget
+    assert "if (size != null && _picked.isEmpty)" in widget
     assert "q['clients']" in widget
     assert "_addFromSearch" in widget
     assert "picks stay" in widget

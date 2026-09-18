@@ -41,7 +41,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   final _nameCtrl = TextEditingController();
   final List<String> _picked = [];
   int? _sampleSize;
-  String _sampleMode = 'pick';
+  String _sampleMode = 'random';
   double _x0 = 0;
   double _x1 = 1;
   double _y0 = 0;
@@ -66,7 +66,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
       _picked.clear();
       _nameCtrl.clear();
       _sampleSize = null;
-      _sampleMode = 'pick';
+      _sampleMode = 'random';
       _load();
     }
   }
@@ -259,6 +259,9 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   void _setSampleSize(int? size) {
     setState(() {
       _sampleSize = size;
+      if (size != null && _picked.isEmpty) {
+        _sampleMode = 'random';
+      }
       if (_sampleMode == 'pick' && size != null && _picked.length > size) {
         _picked.removeRange(size, _picked.length);
       }
