@@ -308,6 +308,12 @@ async def overlay_presession_brief(
         out["client"] = client_block
     if not overlay_enabled() or not db_pool:
         out["recent_conversations"] = merge_conversation_turns(vault, [], limit=limit)
+        try:
+            from app.services.session_prep_composer import compose_session_prep_points
+
+            out["session_prep_points"] = compose_session_prep_points(out)
+        except Exception as e:
+            logger.warning("presession overlay: session_prep_points failed: %s", e)
         return strip_payment_secrets(out)
     pg_turns: List[Dict[str, Any]] = []
     summaries: List[Dict[str, Any]] = []
@@ -380,4 +386,10 @@ async def overlay_presession_brief(
         out["recent_conversation_topics"] = rebuild_conversation_topics(merged)
     if summaries:
         out["prior_session_summaries"] = summaries
+    try:
+        from app.services.session_prep_composer import compose_session_prep_points
+
+        out["session_prep_points"] = compose_session_prep_points(out)
+    except Exception as e:
+        logger.warning("presession overlay: session_prep_points failed: %s", e)
     return strip_payment_secrets(out)

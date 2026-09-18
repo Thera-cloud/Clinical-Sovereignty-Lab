@@ -8508,43 +8508,60 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       out.add(t);
     }
 
-    add(_briefPlainText(brief['session_focus']), allowLong: true);
+    for (final p in List<dynamic>.from(brief['session_prep_points'] ?? const [])) {
+      add(_briefPlainText(p), allowLong: true);
+    }
     final thrive = _clientThriveBrief;
     if (thrive != null) {
-      final guide = thrive['live_session_guidance'] ?? thrive['session_guidance'];
-      if (guide is List) {
-        for (final p in guide.take(4)) {
-          add(_briefPlainText(p), allowLong: true);
+      final goals = thrive['goals_active'];
+      if (goals is List) {
+        for (final g in goals.take(1)) {
+          if (g is! Map) continue;
+          final text = _briefPlainText(g['text']);
+          if (text.isEmpty) continue;
+          final pct = g['progress_pct'];
+          final pctS = pct is num ? ' (${pct.round()}%)' : '';
+          add(
+            'Growth already has a goal$pctS: “$text”. Check it. Don\'t invent a new one.',
+            allowLong: true,
+          );
         }
-      } else {
-        add(_briefPlainText(guide), allowLong: true);
       }
-      final pts = thrive['talking_points'];
-      if (pts is List) {
-        for (final p in pts.take(4)) {
-          add(_briefPlainText(p));
+      final harvests = thrive['recent_harvest'];
+      if (harvests is List && harvests.isNotEmpty) {
+        final h0 = harvests.first;
+        if (h0 is Map) {
+          final harvest = _briefPlainText(h0['harvest']);
+          final key = _briefPlainText(h0['practice_key']).replaceAll('_', ' ');
+          if (harvest.isNotEmpty) {
+            add(
+              'They already practiced ${key.isEmpty ? 'a practice' : key}: $harvest. Ask what shifted.',
+              allowLong: true,
+            );
+          }
         }
       }
     }
-    final metrics = brief['metrics'];
-    if (metrics is Map) {
-      final mood = (metrics['mood_current'] ?? '').toString().trim();
-      final trend = (metrics['mood_trend'] ?? '').toString().trim();
-      if (mood.isNotEmpty || trend.isNotEmpty) {
-        add([
-          if (mood.isNotEmpty) 'Current mood: $mood',
-          if (trend.isNotEmpty) 'trend $trend',
-        ].join(' — '));
-      }
-      final risk = (metrics['risk_level'] ?? '').toString().toUpperCase();
-      if (risk == 'HIGH' || risk == 'CRITICAL' || risk == 'CRISIS') {
-        add('Risk flag $risk — open with safety and last-session carryover.');
+    if (out.isEmpty) {
+      final convos = List<dynamic>.from(brief['recent_conversations'] ?? const []);
+      for (final raw in convos.reversed) {
+        if (raw is! Map) continue;
+        final user = _briefPlainText(raw['user'] ?? raw['user_text']);
+        if (user.length < 18) continue;
+        add(
+          'Open on what they last brought: “${_briefClamp(user, 88)}” — stay there; don\'t start a new map.',
+          allowLong: true,
+        );
+        break;
       }
     }
-    for (final t in recentTopics.take(6)) {
-      add('Topic in play: $t');
+    if (out.isEmpty) {
+      add(
+        'LN has no personal thread yet. Open with why they booked, then one feeling, then stop talking.',
+        allowLong: true,
+      );
     }
-    return out.take(8).toList();
+    return out.take(6).toList();
   }
 
   List<String> _briefKeywordTopics(Map<String, dynamic> brief) {
@@ -8579,6 +8596,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       out.add(t);
     }
 
+    for (final raw in List<dynamic>.from(brief['recent_conversations'] ?? const [])
+        .reversed) {
+      if (raw is! Map) continue;
+      final user = _briefPlainText(raw['user'] ?? raw['user_text']);
+      if (user.length < 12) continue;
+      addKeyword(_briefClamp(user, 40));
+      if (out.length >= 6) return out.take(6).toList();
+    }
     for (final t in List<dynamic>.from(brief['recent_topics'] ?? const [])) {
       addKeyword(_briefPlainText(t));
     }
