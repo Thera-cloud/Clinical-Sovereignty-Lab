@@ -58,6 +58,7 @@ from app.constants.tiers import (
     can_access_nate,
     initial_grant_tokens,
     monthly_cap_tokens,
+    promo_applies_to_plan,
     normalize_tier,
     tier_rank,
 )
@@ -757,25 +758,22 @@ class StripeService:
             return None
         try:
             row = await self.db.fetchrow("""
-                SELECT id, stripe_coupon_id, discount_type, discount_value
+                SELECT id, stripe_coupon_id, discount_type, discount_value, applicable_tiers
                 FROM promotional_specials
                 WHERE promo_code = $1 AND active = TRUE
                   AND starts_at <= NOW() AND ends_at > NOW()
                   AND (max_redemptions IS NULL OR current_redemptions < max_redemptions)
-                  AND (
-                    applicable_tiers IS NULL
-                    OR cardinality(applicable_tiers) = 0
-                    OR $2 = ANY(applicable_tiers)
-                  )
-            """, cleaned, tier)
-            if row and row["stripe_coupon_id"]:
-                return {
-                    "id": str(row["id"]),
-                    "code": cleaned,
-                    "source": "promotional_specials",
-                    "stripe_coupon_id": row["stripe_coupon_id"],
-                    "is_full_discount": row["discount_type"] == "percent" and int(row["discount_value"] or 0) >= 100,
-                }
+            """, cleaned)
+            if row:
+                if row["stripe_coupon_id"] and promo_applies_to_plan(row["applicable_tiers"], tier):
+                    return {
+                        "id": str(row["id"]),
+                        "code": cleaned,
+                        "source": "promotional_specials",
+                        "stripe_coupon_id": row["stripe_coupon_id"],
+                        "is_full_discount": row["discount_type"] == "percent" and int(row["discount_value"] or 0) >= 100,
+                    }
+                return None
 
             row = await self.db.fetchrow("""
                 SELECT stripe_coupon_id FROM school_codes

@@ -17,6 +17,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.constants.consent import REQUIRED_CONSENT_VERSION, stamp_signup_consent
+from app.constants.tiers import promo_applies_to_plan
 from app.services.trial_signup_redis_keys import trial_contact_key, trial_signup_session_key
 
 try:
@@ -979,16 +980,25 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
         try:
             async with db_pool.acquire() as conn:
                 disc = await conn.fetchrow(
-                    "SELECT discount_type, discount_value, stripe_coupon_id "
+                    "SELECT discount_type, discount_value, stripe_coupon_id, applicable_tiers "
                     "FROM promotional_specials WHERE promo_code = $1 AND active = true "
-                    "AND ends_at > NOW()",
+                    "AND starts_at <= NOW() AND ends_at > NOW() "
+                    "AND (max_redemptions IS NULL OR current_redemptions < max_redemptions)",
                     body.discount_code.strip().upper(),
                 )
-                if disc and disc["stripe_coupon_id"]:
-                    discounts = [{"coupon": disc["stripe_coupon_id"]}]
-                    pricing_snapshot["discount_code"] = body.discount_code
-                    pricing_snapshot["discount_type"] = disc["discount_type"]
-                    pricing_snapshot["discount_value"] = float(disc["discount_value"] or 0)
+                if disc:
+                    if not promo_applies_to_plan(disc["applicable_tiers"], body.tier):
+                        raise HTTPException(
+                            400,
+                            "This discount code is not valid for the selected plan",
+                        )
+                    if disc["stripe_coupon_id"]:
+                        discounts = [{"coupon": disc["stripe_coupon_id"]}]
+                        pricing_snapshot["discount_code"] = body.discount_code
+                        pricing_snapshot["discount_type"] = disc["discount_type"]
+                        pricing_snapshot["discount_value"] = float(disc["discount_value"] or 0)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning("Discount lookup failed for %s: %s", body.discount_code, e)
 

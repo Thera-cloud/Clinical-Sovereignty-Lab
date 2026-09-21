@@ -25,6 +25,7 @@ from app.services.pg_data_helpers import (
     get_transactions_pg,
     update_user_field_pg,
 )
+from app.constants.tiers import normalize_promo_plans, promo_applies_to_plan
 
 logger = logging.getLogger("billing_router")
 
@@ -1635,23 +1636,16 @@ async def verify_promo_code(code: str, request: Request,
             allowed_tiers = []
     if not isinstance(allowed_tiers, list):
         allowed_tiers = []
-    allowed_norm = {_normalize_tier(str(t)) for t in allowed_tiers if str(t).strip()}
-    if allowed_norm:
-        if not tier or not str(tier).strip():
-            raise HTTPException(
-                400,
-                "This promo code is limited to specific subscription tiers; open billing from the app with your current plan, or contact support.",
-            )
-        norm_tier = _normalize_tier(str(tier))
-        if norm_tier not in allowed_norm:
-            raise HTTPException(400, "Promo code is not valid for this subscription tier")
+    allowed_norm = normalize_promo_plans(allowed_tiers)
+    if allowed_norm and not promo_applies_to_plan(allowed_norm, tier):
+        raise HTTPException(400, "Promo code is not valid for this subscription plan")
 
     return {
         "valid": True,
         "name": row["name"],
         "discount_type": row["discount_type"],
         "discount_value": row["discount_value"],
-        "applicable_tiers": allowed_tiers,
+        "applicable_tiers": allowed_norm,
         "expires": row["ends_at"].isoformat(),
     }
 
@@ -2602,18 +2596,16 @@ async def verify_discount_code(code: str, request: Request,
                     allowed_tiers = []
             if not isinstance(allowed_tiers, list):
                 allowed_tiers = []
-            allowed_norm = {_normalize_tier(str(t)) for t in allowed_tiers if str(t).strip()}
-            if allowed_norm and tier:
-                norm_tier = _normalize_tier(str(tier))
-                if norm_tier not in allowed_norm:
-                    raise HTTPException(400, "Code is not valid for this subscription tier")
+            allowed_norm = normalize_promo_plans(allowed_tiers)
+            if allowed_norm and not promo_applies_to_plan(allowed_norm, tier):
+                raise HTTPException(400, "Code is not valid for this subscription plan")
             return {
                 "valid": True,
                 "source": "promotional_specials",
                 "name": promo["name"],
                 "discount_type": promo["discount_type"],
                 "discount_value": promo["discount_value"],
-                "applicable_tiers": allowed_tiers,
+                "applicable_tiers": allowed_norm,
             }
 
         # 2. Check school_codes

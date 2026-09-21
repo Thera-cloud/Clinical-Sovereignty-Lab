@@ -21,6 +21,7 @@ logger = logging.getLogger("nate.admin")
 
 from app.services.blob_storage import upload_bytes
 from app.services.api_server import require_admin
+from app.constants.tiers import normalize_promo_plans
 from app.services.pg_data_helpers import (
     load_registry_pg, find_user_pg, find_user_by_username_pg,
     load_sessions_pg, load_metrics_pg, get_subscription_pg,
@@ -3181,8 +3182,14 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
         if not req.ends_at:
             raise HTTPException(400, "100% promo codes require ends_at")
     for tier in req.applicable_tiers:
-        if tier not in _VALID_TIERS:
+        if str(tier).strip().upper() not in _VALID_TIERS:
             raise HTTPException(400, f"Invalid tier: {tier}")
+    promo_plans = normalize_promo_plans(req.applicable_tiers)
+    if not promo_plans:
+        raise HTTPException(
+            400,
+            "Select at least one plan: Coach Only, Inner Chamber, or Sovereign Circle",
+        )
 
     safe_code = _validate_admin_code(req.code)
     coach_id = req.coach_id.strip()[:128] if req.coach_id else None
@@ -3214,11 +3221,11 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
                  stripe_coupon_id, duration, duration_in_months, active)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE)
             RETURNING id, name, promo_code, discount_type, discount_value,
-                      coach_id,
+                      coach_id, applicable_tiers,
                       starts_at, ends_at, max_redemptions, current_redemptions,
                       stripe_coupon_id, duration, duration_in_months, active, created_at
         """, req.name[:200], req.discount_type, req.discount_value, coach_id,
-             req.applicable_tiers or [],
+             promo_plans,
              starts_dt, ends_dt,
              safe_code, req.max_redemptions, coupon_id,
              req.duration, req.duration_in_months)
@@ -3230,6 +3237,7 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
         "discount_type": row["discount_type"],
         "discount_value": row["discount_value"],
         "coach_id": row["coach_id"],
+        "applicable_tiers": list(row["applicable_tiers"] or []),
         "starts_at": row["starts_at"].isoformat() if row["starts_at"] else None,
         "ends_at": row["ends_at"].isoformat() if row["ends_at"] else None,
         "max_redemptions": row["max_redemptions"],
@@ -3283,7 +3291,7 @@ async def list_promo_codes(request: Request, coach_id: Optional[str] = None):
             "discount_type": r["discount_type"],
             "discount_value": r["discount_value"],
             "coach_id": r["coach_id"],
-            "applicable_tiers": r["applicable_tiers"] or [],
+            "applicable_tiers": normalize_promo_plans(r["applicable_tiers"]),
             "starts_at": r["starts_at"].isoformat() if r["starts_at"] else None,
             "ends_at": r["ends_at"].isoformat() if r["ends_at"] else None,
             "max_redemptions": r["max_redemptions"],
@@ -3301,10 +3309,40 @@ async def list_promo_codes(request: Request, coach_id: Optional[str] = None):
 
 @router.patch("/discounts/promo/{promo_id}")
 async def toggle_promo_code(promo_id: str, request: Request):
-    """Toggle a promo code active/inactive. Deactivates Stripe promotion code too."""
+    """Toggle a promo active/inactive, or set applicable_tiers when a JSON body is sent."""
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
         raise HTTPException(503, "Database unavailable")
+    body: Dict[str, Any] = {}
+    try:
+        raw = await request.body()
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                body = parsed
+    except Exception:
+        body = {}
+    if "applicable_tiers" in body:
+        promo_plans = normalize_promo_plans(body.get("applicable_tiers"))
+        if not promo_plans:
+            raise HTTPException(
+                400,
+                "Select at least one plan: Coach Only, Inner Chamber, or Sovereign Circle",
+            )
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """UPDATE promotional_specials SET applicable_tiers = $1
+                   WHERE id = $2::uuid
+                   RETURNING id, applicable_tiers, active""",
+                promo_plans, promo_id)
+        if not row:
+            raise HTTPException(404, "Promo code not found")
+        return {
+            "status": "updated",
+            "id": promo_id,
+            "applicable_tiers": list(row["applicable_tiers"] or []),
+            "active": row["active"],
+        }
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT active, stripe_coupon_id FROM promotional_specials WHERE id = $1::uuid",

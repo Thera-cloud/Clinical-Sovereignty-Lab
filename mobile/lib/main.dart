@@ -9152,6 +9152,33 @@ class _SignUpWizardState extends State<SignUpWizard> {
     }
   }
 
+  String _discountSuccessText() {
+    final name = (_discountDetails['name'] ?? '').toString();
+    String core;
+    if (_discountDetails['discount_type'] == 'pays_full') {
+      core = "$name — Fully sponsored";
+    } else if (_discountDetails['discount_type'] == 'percent') {
+      core = "$name — ${_discountDetails['discount_value']}% off";
+    } else {
+      core = "$name — \$${((_discountDetails['discount_value'] ?? 0) / 100).toStringAsFixed(2)} off";
+    }
+    final raw = _discountDetails['applicable_tiers'];
+    if (raw is! List || raw.isEmpty) return core;
+    const labels = {
+      'COACH_ONLY': 'Coach Only',
+      'STANDARD': 'Inner Chamber',
+      'INNER_CHAMBER': 'Inner Chamber',
+      'TOP_TIER': 'Sovereign Circle',
+      'SOVEREIGN_CIRCLE': 'Sovereign Circle',
+    };
+    final names = raw
+        .map((t) => labels[t.toString().toUpperCase()] ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (names.isEmpty || names.length >= 3) return core;
+    return "$core · ${names.join(', ')} only";
+  }
+
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -9485,11 +9512,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              _discountDetails['discount_type'] == 'pays_full'
-                                  ? "${_discountDetails['name']} — Fully sponsored"
-                                  : _discountDetails['discount_type'] == 'percent'
-                                      ? "${_discountDetails['name']} — ${_discountDetails['discount_value']}% off"
-                                      : "${_discountDetails['name']} — \$${((_discountDetails['discount_value'] ?? 0) / 100).toStringAsFixed(2)} off",
+                              _discountSuccessText(),
                               style: const TextStyle(color: Color(0xFF22C55E), fontSize: 13, fontWeight: FontWeight.w600),
                             ),
                           ),
@@ -9541,7 +9564,12 @@ class _SignUpWizardState extends State<SignUpWizard> {
   Widget _buildTierOption(String name, String value, String price, String desc, IconData icon, Color accent, List<String> features) {
     final isSelected = _selectedTier == value;
     return GestureDetector(
-      onTap: () => setState(() => _selectedTier = value),
+      onTap: () {
+        setState(() => _selectedTier = value);
+        if (_discountCodeCtrl.text.trim().isNotEmpty) {
+          _verifyDiscountCode();
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(16),
@@ -9951,11 +9979,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                _discountDetails['discount_type'] == 'pays_full'
-                                    ? "${_discountDetails['name']} — Fully sponsored"
-                                    : _discountDetails['discount_type'] == 'percent'
-                                        ? "${_discountDetails['name']} — ${_discountDetails['discount_value']}% off"
-                                        : "${_discountDetails['name']} — \$${((_discountDetails['discount_value'] ?? 0) / 100).toStringAsFixed(2)} off",
+                                _discountSuccessText(),
                                 style: const TextStyle(color: Color(0xFF22C55E), fontSize: 13, fontWeight: FontWeight.w600),
                               ),
                             ),

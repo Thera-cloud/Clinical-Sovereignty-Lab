@@ -6,7 +6,7 @@ SOVEREIGN-VOICE / onboarding-billing Phase 2 — single source of truth.
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, Dict, Iterable, List, Optional
 
 # Column values for users.tier (CHECK-aligned)
 TIER_TRIAL = "TRIAL"
@@ -123,6 +123,71 @@ def can_access_nate(tier: str | None) -> bool:
     if raw == TIER_COACH_ONLY or normalize_tier(tier) == TIER_COACH_ONLY:
         return False
     return True
+
+
+# Promo codes target paid client plans only (not Threshold/Trial, not DOJO).
+PROMO_PLAN_KEYS = (TIER_COACH_ONLY, TIER_STANDARD, TIER_TOP_TIER)
+PROMO_PLAN_LABELS: Dict[str, str] = {
+    TIER_COACH_ONLY: "Coach Only",
+    TIER_STANDARD: "Inner Chamber",
+    TIER_TOP_TIER: "Sovereign Circle",
+}
+
+
+def canonicalize_promo_plan(raw: Optional[str]) -> Optional[str]:
+    """Map a plan alias onto Coach Only / Inner Chamber / Sovereign Circle."""
+    key = str(raw or "").upper().strip().replace(" ", "_")
+    if not key:
+        return None
+    if key in ("COACH_ONLY", "COACH"):
+        return TIER_COACH_ONLY
+    if key in ("STANDARD", "INNER_CHAMBER", "INNER", "CHAMBER"):
+        return TIER_STANDARD
+    if key in ("TOP_TIER", "SOVEREIGN_CIRCLE", "SOVEREIGN", "TOP"):
+        return TIER_TOP_TIER
+    return None
+
+
+def _iter_promo_plan_raw(applicable_tiers: Any) -> List[Any]:
+    if applicable_tiers is None:
+        return []
+    if isinstance(applicable_tiers, str):
+        text = applicable_tiers.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                import json
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                return [text]
+        return [text]
+    if isinstance(applicable_tiers, (list, tuple, set)):
+        return list(applicable_tiers)
+    return []
+
+
+def normalize_promo_plans(applicable_tiers: Optional[Iterable[Any]] = None) -> List[str]:
+    """Canonical unique plan keys. Empty input stays empty (legacy = all packages)."""
+    out: List[str] = []
+    seen = set()
+    for raw in _iter_promo_plan_raw(applicable_tiers):
+        key = canonicalize_promo_plan(str(raw) if raw is not None else "")
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def promo_applies_to_plan(applicable_tiers: Any, plan: Optional[str]) -> bool:
+    """Empty/NULL applicable_tiers = every package (legacy). Else plan must match."""
+    allowed = normalize_promo_plans(applicable_tiers)
+    if not allowed:
+        return True
+    target = canonicalize_promo_plan(plan)
+    return bool(target and target in allowed)
 
 
 # users.tier CHECK (019_check_constraint_fixes): MASTER/SUPERVISOR/TOP/TOP_TIER/STANDARD/TRIAL/DEPENDENT
