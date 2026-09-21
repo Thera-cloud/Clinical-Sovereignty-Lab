@@ -59,6 +59,7 @@ import 'config/app_config.dart';
 import 'services/tombstone_sync.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
+import 'widgets/thera_panel_image.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/coach_integrations_hub.dart';
 
@@ -3025,14 +3026,43 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     } catch (_) {}
   }
 
+  static final _sseImageTagRe = RegExp(r'\[SSE Image:([^\]]+)\]');
+  static final _ssePanelTagRe =
+      RegExp(r'\[SSE Panel:([a-fA-F0-9\-]+)\]', caseSensitive: false);
+
   /// Message used by the Thera-World hot button — identical to the Sovereign
-  /// Vault "Ask Nate About This" flow so the bridge resolves the panel via
+  /// Vault "Go deeper with Nate" flow so the bridge resolves the panel via
   /// `sse_panel_chat_context` ([SSE Panel:<uuid>]).
-  String _theraWorldAskMessage(String panelId) =>
-      "[SSE Panel:$panelId] I'd like to understand the characters and symbols in this journey image — "
-      "what my memory brought forward, why this core character appeared, and how it connects to my recent conversations. "
-      "If you're willing, walk me through your reasoning and three focus topics for today; "
-      "I may also want a deeper SIFT pass on the imagery.";
+  String _theraWorldAskMessage(String panelId, {String? imageUrl}) {
+    final imgTag =
+        (imageUrl != null && imageUrl.isNotEmpty) ? '[SSE Image:$imageUrl]' : '';
+    return "$imgTag[SSE Panel:$panelId] I want to go deeper with you on this panel. "
+        "Sit with the figures with me — what your inner world is showing, "
+        "how this scene continues from what came before, and what you're beginning to understand.";
+  }
+
+  String _stripSseImageTag(String text) =>
+      text.replaceAll(_sseImageTagRe, '').replaceAll(RegExp(r' +'), ' ').trim();
+
+  String _userFacingChatText(String text) {
+    final cleaned = _stripSseImageTag(text)
+        .replaceAll(_ssePanelTagRe, '')
+        .replaceAll(RegExp(r'\[Story Panel:[^\]]+\]'), '')
+        .replaceAll(RegExp(r' +'), ' ')
+        .trim();
+    return cleaned.isEmpty ? 'Going deeper on this Thera-World panel.' : cleaned;
+  }
+
+  void _injectTheraPanelImage(String text) {
+    final img = _sseImageTagRe.firstMatch(text);
+    if (img == null) return;
+    final url = (img.group(1) ?? '').trim();
+    if (url.isEmpty) return;
+    final pid = _ssePanelTagRe.firstMatch(text)?.group(1) ?? '';
+    final marker = '[THERA_PANEL_IMG]|$url|$pid';
+    if (_chatHistory.contains(marker)) return;
+    _chatHistory.add(marker);
+  }
 
   /// LN's app-open greeting: one blended "Little Nate:" line (welcome,
   /// history check-in, one next step). Fetched once per screen lifetime
@@ -3069,6 +3099,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           _recapData ??= {'user_name': widget.currentUserProfile?['name']};
           _recapData!['last_panel_id'] ??= panel['panel_id'];
           _recapData!['last_panel_biome'] ??= panel['biome'];
+          _recapData!['last_panel_url'] ??=
+              panel['image_url'] ?? panel['r2_url'];
         }
         final due = data['due_practices'];
         if (due is List && due.isNotEmpty) {
@@ -3165,6 +3197,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   void _sendPresetMessage(String text) {
     _chatController.text = text;
     _sendMessage();
+  }
+
+  void _sendTheraWorldAsk(String panelId, {String? imageUrl}) {
+    _sendPresetMessage(_theraWorldAskMessage(panelId, imageUrl: imageUrl));
   }
 
   void _showNewQuestDialog() {
@@ -4601,24 +4637,27 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     }
 
     if (kDebugMode) print(">>> SENDING: $text");
-    _lastUserMessage = text;
+    _injectTheraPanelImage(text);
+    final outbound = _stripSseImageTag(text);
+    _lastUserMessage = outbound;
     _preferServerAvatar = false;
-    final panelDepth = text.contains('[SSE Panel:') ||
-        text.contains('[Story Panel:') ||
-        text.toLowerCase().contains('three focus topics') ||
-        text.toLowerCase().contains('sovereign journey') ||
-        text.toLowerCase().contains('focus topics got cut');
+    final panelDepth = outbound.contains('[SSE Panel:') ||
+        outbound.contains('[Story Panel:') ||
+        outbound.toLowerCase().contains('three focus topics') ||
+        outbound.toLowerCase().contains('sovereign journey') ||
+        outbound.toLowerCase().contains('go deeper with you on this panel') ||
+        outbound.toLowerCase().contains('focus topics got cut');
     _wsSend(jsonEncode({
       // FIX-H
       "type": "nate_query",
-      "nate_query": text,
+      "nate_query": outbound,
       "modality": "General",
       "client_platform": isNativeIOS ? "ios" : "other",
       "depth_mode": panelDepth ? 'extra' : _chatDepthMode,
     }));
 
     setState(() {
-      _chatHistory.add("You: $text");
+      _chatHistory.add("You: ${_userFacingChatText(outbound)}");
       _chatController.clear();
       _scrollToBottom();
     });
@@ -5729,8 +5768,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                       if (_recapData!["last_panel_id"] != null)
                         _recapBtn('\u{1F30D} Thera-World', () {
                           _dismissRecap();
-                          _sendPresetMessage(_theraWorldAskMessage(
-                              _recapData!["last_panel_id"].toString()));
+                          _sendTheraWorldAsk(
+                            _recapData!["last_panel_id"].toString(),
+                            imageUrl:
+                                (_recapData!["last_panel_url"] ?? '').toString(),
+                          );
                         }),
                       ..._duePracticeRecapButtons(),
                       if ((_recapData!["active_quests"] as List?)?.isNotEmpty ==
@@ -5958,11 +6000,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                         socket: _wsCh,
                         onVaultItemSelected: (itemId) {
                           if (itemId != null && itemId.isNotEmpty) {
-                            final attach =
-                                itemId.startsWith('[SSE Panel:') ||
-                                        itemId.startsWith('[Story Panel:')
-                                    ? itemId
-                                    : '[Vault:$itemId] ';
+                            final isTheraAsk = itemId.contains('[SSE Panel:') ||
+                                itemId.contains('[Story Panel:') ||
+                                itemId.contains('[SSE Image:');
+                            if (isTheraAsk) {
+                              _sendPresetMessage(itemId);
+                              return;
+                            }
+                            final attach = '[Vault:$itemId] ';
                             _chatController.text =
                                 '${_chatController.text}$attach'.trim();
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -6077,6 +6122,30 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemBuilder: (ctx, i) {
               final msg = _chatHistory[i];
+              if (msg.startsWith('[THERA_PANEL_IMG]|')) {
+                final parts = msg.split('|');
+                final url = parts.length > 1 ? parts[1] : '';
+                if (url.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Thera-World panel',
+                        style: TextStyle(
+                          fontFamily: 'Courier',
+                          color: Color(0xFFE8D5A3),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TheraPanelImage(url: url, height: 220),
+                    ],
+                  ),
+                );
+              }
               final isNate = msg.startsWith("Little Nate:");
               final isYou = msg.startsWith("You:");
               final isSystem = msg.startsWith("[SYSTEM]");

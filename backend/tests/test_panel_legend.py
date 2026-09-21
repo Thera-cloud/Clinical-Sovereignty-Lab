@@ -1,0 +1,81 @@
+"""Offline C3 legend enrichment — figure descriptives + prior-panel journey thread."""
+from app.sse.symbol_safety import (
+    compose_figure_in_panel,
+    compose_journey_thread,
+    compose_prior_note,
+    enrich_panel_legend,
+)
+
+
+def test_figure_in_panel_names_core_and_role():
+    text = compose_figure_in_panel(
+        "The Torchbearer",
+        role="carries light a few steps ahead",
+        narrative="The Torchbearer waits at the edge of the dark.",
+        is_core=True,
+        biome="night_path",
+    )
+    assert "core figure" in text
+    assert "carries light" in text
+    assert "Torchbearer waits" in text
+
+
+def test_prior_note_links_earlier_biome():
+    note = compose_prior_note("The Weaver", [
+        {"character_manifest": "The Weaver", "narrative_text": "", "biome": "woven_grove"},
+    ])
+    assert "woven grove" in note.lower()
+    assert "prior panel" in note.lower()
+    assert compose_prior_note("The Weaver", []) == ""
+
+
+def test_journey_thread_continues_from_prior():
+    thread = compose_journey_thread(
+        panel_sequence=4,
+        biome="stillwater_shore",
+        narrative="A lantern rests on the bank.",
+        character_name="The Ferryman",
+        prior_panels=[{
+            "character_manifest": "The Torchbearer",
+            "narrative_text": "Light held at the ridge.",
+            "biome": "night_path",
+        }],
+        last_panel_summary="",
+    )
+    assert "Panel 4" in thread
+    assert "continuing read" in thread
+    assert "Torchbearer" in thread
+    assert "night path" in thread
+    assert "Ferryman" in thread
+
+
+def test_enrich_adds_descriptives_and_empty_scene_fallback():
+    bundle = enrich_panel_legend(
+        [{"display_name": "The Mender", "meaning": "Shown ordinarily."}],
+        character_name="The Mender",
+        narrative_text="The Mender stitches gold into torn cloth.",
+        biome="healing_atelier",
+        npc_details=[{"name": "The Mender", "role": "stitches torn places with gold"}],
+        prior_panels=[{
+            "character_manifest": "The Mender",
+            "narrative_text": "Yesterday the seam was still open.",
+            "biome": "quiet_room",
+        }],
+        panel_sequence=3,
+    )
+    assert bundle["panel_sequence"] == 3
+    entry = bundle["legend"][0]
+    assert entry["is_core"] is True
+    assert entry["seen_before"] is True
+    assert "gold" in (entry["role"] + entry["figure_in_panel"])
+    assert "quiet room" in entry["prior_note"].lower()
+    assert "Panel 3" in bundle["journey_thread"]
+
+    empty = enrich_panel_legend(
+        [],
+        narrative_text="Mist over the water.",
+        biome="stillwater_shore",
+    )
+    assert empty["legend"]
+    assert empty["legend"][0]["display_name"] == "The scene"
+    assert "biome" in empty["legend"][0]["meaning"].lower()

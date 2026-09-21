@@ -5700,30 +5700,87 @@ async def sse_client_storyboard(request: Request, _user: dict = Depends(_sse_aut
 async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = Depends(_sse_auth)):
     """Thera-World Global Symbol Safety System — Layer C3: tap-to-reveal legend
     for one delivered panel. Every character/symbol in the scene, named and
-    explained in this user's own consented posture. No unexplained figures."""
+    explained in this user's own consented posture. No unexplained figures.
+    Includes figure-in-panel descriptives and a journey thread connecting this
+    panel to prior ones (Little Nate's continuing subconscious read)."""
     pool = request.app.state.db_pool
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [i for i in {uid, uname} if i]
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT user_id, character_manifest FROM sse_panel_log WHERE panel_id = $1", panel_id)
-        if not row or row["user_id"] != uid:
+            "SELECT user_id, character_manifest, narrative_text, biome, generated_at, panel_tone "
+            "FROM sse_panel_log WHERE panel_id = $1", panel_id)
+        if not row or row["user_id"] not in ids:
             raise HTTPException(404, "panel not found")
+        owner = row["user_id"]
         idrow = await conn.fetchrow(
-            "SELECT cultural_context, spiritual_framework FROM sse_identity_forge WHERE user_id = $1", uid)
+            "SELECT cultural_context, spiritual_framework FROM sse_identity_forge WHERE user_id = $1", owner)
         jrow = await conn.fetchrow(
-            "SELECT last_panel_npcs FROM sse_user_journeys WHERE user_id = $1", uid)
-    npcs = []
+            "SELECT last_panel_npcs, last_panel_summary, panel_sequence, current_biome "
+            "FROM sse_user_journeys WHERE user_id = $1", owner)
+        prior_rows = await conn.fetch(
+            "SELECT panel_id::text AS panel_id, character_manifest, narrative_text, biome, generated_at "
+            "FROM sse_panel_log WHERE user_id = $1 AND panel_id::text <> $2 "
+            "ORDER BY generated_at DESC LIMIT 5",
+            owner, panel_id)
+        latest_at = await conn.fetchval(
+            "SELECT MAX(generated_at) FROM sse_panel_log WHERE user_id = $1", owner)
+    npc_details: list = []
     if jrow and jrow["last_panel_npcs"]:
         raw = jrow["last_panel_npcs"]
         raw = json.loads(raw) if isinstance(raw, str) else raw
-        npcs = [n.get("name") for n in (raw or []) if isinstance(n, dict) and n.get("name")]
-    from app.sse.symbol_safety import build_panel_codex
+        npc_details = [
+            {"name": n.get("name"), "role": n.get("role") or ""}
+            for n in (raw or []) if isinstance(n, dict) and n.get("name")
+        ]
+    this_at = row["generated_at"]
+    is_latest = bool(this_at and latest_at and this_at >= latest_at)
+    from app.sse.symbol_safety import (
+        build_panel_codex, enrich_panel_legend, figures_named_in_narrative,
+    )
+    narrative = row["narrative_text"] or ""
+    npc_names = [n["name"] for n in npc_details] if is_latest else []
+    for extra in figures_named_in_narrative(narrative):
+        if extra not in npc_names:
+            npc_names.append(extra)
     legend = await build_panel_codex(
-        row["character_manifest"] or "", npcs, uid, pool,
+        row["character_manifest"] or "", npc_names, owner, pool,
         cultural_context=(idrow["cultural_context"] if idrow else "") or "",
         spiritual_framework=(idrow["spiritual_framework"] if idrow else "") or "",
     )
-    return {"panel_id": panel_id, "legend": legend}
+    prior_panels = [
+        {
+            "panel_id": r["panel_id"],
+            "character_manifest": r["character_manifest"] or "",
+            "narrative_text": r["narrative_text"] or "",
+            "biome": r["biome"] or "",
+            "generated_at": r["generated_at"].isoformat() if r["generated_at"] else None,
+        }
+        for r in prior_rows
+    ]
+    bundle = enrich_panel_legend(
+        legend,
+        character_name=row["character_manifest"] or "",
+        narrative_text=narrative,
+        biome=row["biome"] or ((jrow["current_biome"] if jrow else "") or ""),
+        npc_details=npc_details,
+        prior_panels=prior_panels,
+        panel_sequence=int(jrow["panel_sequence"] or 0) if jrow and is_latest else (len(prior_panels) + 1),
+        last_panel_summary=(jrow["last_panel_summary"] if jrow else "") or "",
+    )
+    return {
+        "panel_id": panel_id,
+        "legend": bundle["legend"],
+        "journey_thread": bundle["journey_thread"],
+        "panel_sequence": bundle["panel_sequence"],
+        "biome": bundle["biome"],
+        "character": bundle["character"],
+        "prior_panels": [
+            {"biome": p["biome"], "character": p["character_manifest"], "generated_at": p["generated_at"]}
+            for p in prior_panels
+        ],
+    }
 
 @sse_client_router.get("/codex/symbols")
 async def sse_client_codex_symbols(request: Request, _user: dict = Depends(_sse_auth)):

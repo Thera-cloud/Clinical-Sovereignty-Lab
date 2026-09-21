@@ -461,7 +461,10 @@ def _codex_entry_for_character(character_name: str, posture: Dict[str, str]) -> 
             "display_name": character_name,
             "tier": "low_risk",
             "state": "allowed",
-            "meaning": "A recurring figure in your story.",
+            "meaning": (
+                f"{character_name} is one of Little Nate's figures for what is "
+                "emerging in you — a presence in the panel, not a random extra."
+            ),
         }
     state = posture.get(symbol_id, "excluded")
     entry = _codex_entry_for_symbol(symbol_id, state)
@@ -501,3 +504,210 @@ async def build_panel_codex(
         seen.add(name)
         legend.append(_codex_entry_for_character(name, posture))
     return legend
+
+
+def _npc_catalog() -> List[Dict[str, str]]:
+    """Lazy DOMAIN_TO_NPC read — avoids importing the engine at module load."""
+    try:
+        from app.sse.thera_world_engine import DOMAIN_TO_NPC
+        return list(DOMAIN_TO_NPC.values())
+    except Exception:
+        return []
+
+
+def npc_role_for_name(name: str) -> str:
+    if not name:
+        return ""
+    for spec in _npc_catalog():
+        if (spec.get("name") or "") == name:
+            return (spec.get("role") or "").strip()
+    return ""
+
+
+def figures_named_in_narrative(narrative: str) -> List[str]:
+    text = (narrative or "").lower()
+    if not text:
+        return []
+    found: List[str] = []
+    for spec in _npc_catalog():
+        n = (spec.get("name") or "").strip()
+        if n and n.lower() in text and n not in found:
+            found.append(n)
+    return found
+
+
+def _excerpt(text: str, limit: int = 160) -> str:
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if not raw:
+        return ""
+    if len(raw) <= limit:
+        return raw
+    cut = raw[:limit].rsplit(" ", 1)[0]
+    return (cut or raw[:limit]).rstrip(".,;:") + "…"
+
+
+def _sentence_mentioning(name: str, narrative: str) -> str:
+    if not name or not narrative:
+        return ""
+    needle = name.lower()
+    for chunk in re.split(r"(?<=[.!?])\s+", narrative.strip()):
+        if needle in chunk.lower():
+            return _excerpt(chunk, 180)
+    return ""
+
+
+def compose_figure_in_panel(
+    name: str,
+    *,
+    role: str = "",
+    narrative: str = "",
+    is_core: bool = False,
+    biome: str = "",
+) -> str:
+    """Client-facing description of what this figure is doing in THIS panel."""
+    biome_h = (biome or "").replace("_", " ").strip()
+    bits: List[str] = []
+    if is_core:
+        bits.append(
+            f"{name} is the core figure in this panel — the presence Little Nate "
+            "placed at the center of what is emerging."
+        )
+    else:
+        bits.append(
+            f"{name} is in this panel as a companion figure, not decoration."
+        )
+    if role:
+        bits.append(f"In your story they {role}.")
+    mention = _sentence_mentioning(name, narrative)
+    if mention:
+        bits.append(f"In this scene: {mention}")
+    elif biome_h:
+        bits.append(f"They appear in {biome_h}.")
+    return " ".join(bits)
+
+
+def compose_prior_note(name: str, prior_panels: Optional[List[Dict[str, Any]]]) -> str:
+    if not name:
+        return ""
+    hits: List[str] = []
+    needle = name.lower()
+    for p in prior_panels or []:
+        blob = " ".join(
+            filter(None, [p.get("character_manifest") or "", p.get("narrative_text") or ""])
+        ).lower()
+        if needle not in blob:
+            continue
+        biome = (p.get("biome") or "").replace("_", " ").strip()
+        hits.append(biome or "an earlier scene")
+    if not hits:
+        return ""
+    if len(hits) == 1:
+        return (
+            f"Returned from a prior panel in {hits[0]}. Little Nate is still "
+            "working this figure with you across time."
+        )
+    return (
+        f"Has appeared across {len(hits)} earlier panels (most recently {hits[0]}). "
+        "A continuing thread in Little Nate's reading of your inner world."
+    )
+
+
+def compose_journey_thread(
+    *,
+    panel_sequence: int = 0,
+    biome: str = "",
+    narrative: str = "",
+    character_name: str = "",
+    prior_panels: Optional[List[Dict[str, Any]]] = None,
+    last_panel_summary: str = "",
+) -> str:
+    """How this panel continues Little Nate's subconscious read over time."""
+    biome_h = (biome or "Thera-world").replace("_", " ").strip()
+    prior = list(prior_panels or [])
+    seq = panel_sequence or (len(prior) + 1)
+    parts = [
+        f"Panel {seq} of your journey — {biome_h}.",
+        "This is Little Nate's continuing read of what is emerging in you, "
+        "not a one-off illustration.",
+    ]
+    if prior:
+        prev = prior[0]
+        prev_biome = (prev.get("biome") or "").replace("_", " ").strip() or "the last scene"
+        prev_char = (prev.get("character_manifest") or "").strip() or "the previous panel"
+        excerpt = _excerpt(prev.get("narrative_text") or last_panel_summary or "", 140)
+        cont = f"It continues from {prev_char} in {prev_biome}"
+        parts.append(f"{cont}: {excerpt}" if excerpt else f"{cont}.")
+    if character_name:
+        parts.append(f"The core figure here is {character_name}.")
+    scene = _excerpt(narrative, 140)
+    if scene:
+        parts.append(f"What this panel is holding: {scene}")
+    return " ".join(parts)
+
+
+def enrich_panel_legend(
+    legend: List[Dict[str, Any]],
+    *,
+    character_name: str = "",
+    narrative_text: str = "",
+    biome: str = "",
+    npc_details: Optional[List[Dict[str, Any]]] = None,
+    prior_panels: Optional[List[Dict[str, Any]]] = None,
+    panel_sequence: int = 0,
+    last_panel_summary: str = "",
+) -> Dict[str, Any]:
+    """C3 payload: figure-level descriptives + journey continuity.
+
+    Pure (no DB). `legend` is the consent-posture list from build_panel_codex.
+    """
+    role_by_name: Dict[str, str] = {}
+    for spec in npc_details or []:
+        n = (spec.get("name") or "").strip()
+        if n:
+            role_by_name[n] = (spec.get("role") or "").strip() or npc_role_for_name(n)
+    core = (character_name or "").strip()
+    entries = list(legend or [])
+    if not entries and (narrative_text or biome or core):
+        entries = [{
+            "symbol_id": None,
+            "display_name": core or "The scene",
+            "tier": "low_risk",
+            "state": "allowed",
+            "meaning": (
+                "No named companion is foregrounded. The biome and atmosphere "
+                "are the language of this panel."
+            ),
+        }]
+    enriched: List[Dict[str, Any]] = []
+    for entry in entries:
+        row = dict(entry)
+        name = (row.get("display_name") or "").strip()
+        is_core = bool(core) and name == core
+        role = role_by_name.get(name) or npc_role_for_name(name)
+        prior_note = compose_prior_note(name, prior_panels)
+        row["role"] = role
+        row["is_core"] = is_core
+        row["seen_before"] = bool(prior_note)
+        row["prior_note"] = prior_note
+        row["figure_in_panel"] = compose_figure_in_panel(
+            name or "This figure",
+            role=role,
+            narrative=narrative_text,
+            is_core=is_core,
+            biome=biome,
+        )
+        enriched.append(row)
+    return {
+        "legend": enriched,
+        "journey_thread": compose_journey_thread(
+            panel_sequence=panel_sequence,
+            biome=biome,
+            narrative=narrative_text,
+            character_name=core,
+            prior_panels=prior_panels,
+            last_panel_summary=last_panel_summary,
+        ),
+        "panel_sequence": panel_sequence or (len(prior_panels or []) + 1),
+        "biome": biome,
+        "character": core,
+    }

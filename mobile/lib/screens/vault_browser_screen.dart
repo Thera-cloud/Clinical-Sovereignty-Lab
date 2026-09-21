@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
 import '../config/app_config.dart';
 import '../widgets/vault_preview_window.dart';
+import '../widgets/thera_panel_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/web_download.dart';
 import 'nate_organizer_screen.dart';
@@ -243,19 +244,22 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
   }
 
   String _sseAskNateMessage(Map<String, dynamic> item) {
+    final sse = item['_sse'] as Map<String, dynamic>? ?? {};
+    final imgUrl = sse['r2_url']?.toString() ??
+        item['thumbnail_url']?.toString() ??
+        '';
+    final imgTag = imgUrl.isNotEmpty ? '[SSE Image:$imgUrl]' : '';
     final panelId = item['id']?.toString() ?? '';
     if (panelId.isNotEmpty && panelId != 'archetype') {
-      return "[SSE Panel:$panelId] I'd like to understand the characters and symbols in this journey image — "
-          "what my memory brought forward, why this core character appeared, and how it connects to my recent conversations. "
-          "If you're willing, walk me through your reasoning and three focus topics for today; "
-          "I may also want a deeper SIFT pass on the imagery.";
+      return "$imgTag[SSE Panel:$panelId] I want to go deeper with you on this panel. "
+          "Sit with the figures with me — what your inner world is showing, "
+          "how this scene continues from what came before, and what you're beginning to understand.";
     }
-    final sse = item['_sse'] as Map<String, dynamic>? ?? {};
     final pType = sse['panel_type']?.toString() ?? 'journey';
     final biome = sse['biome']?.toString() ?? '';
     final fmtBiome = biome.replaceAll('_', ' ');
-    return "[Story Panel: $pType] Biome: $fmtBiome. "
-        "I'd like to understand the characters and symbols in this image.";
+    return "$imgTag[Story Panel: $pType] Biome: $fmtBiome. "
+        "I want to go deeper with you on this image.";
   }
 
   Future<void> _searchItems() async {
@@ -918,10 +922,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
                 child: const Center(child: Icon(Icons.play_circle_fill, color: Color(0xFFC9A962), size: 72))),
             )
           else if (imgUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(imgUrl, fit: BoxFit.cover, height: 300, width: double.infinity),
-            ),
+            TheraPanelImage(url: imgUrl, height: 300),
           const SizedBox(height: 16),
           if (narrative.isNotEmpty)
             Text(narrative, style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 15, height: 1.6)),
@@ -933,8 +934,8 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               if (tone.isNotEmpty) Chip(label: Text(tone, style: const TextStyle(fontSize: 11, color: _VaultDesign.gold)), backgroundColor: _VaultDesign.gold.withOpacity(0.12)),
             ]),
           const SizedBox(height: 16),
-          Row(children: [
-            if (imgUrl.isNotEmpty) Padding(padding: const EdgeInsets.only(right: 8), child: OutlinedButton.icon(
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (imgUrl.isNotEmpty) OutlinedButton.icon(
               icon: const Icon(Icons.download, size: 18),
               label: const Text('Download'),
               style: OutlinedButton.styleFrom(foregroundColor: _VaultDesign.gold, side: BorderSide(color: _VaultDesign.gold.withOpacity(0.5))),
@@ -946,22 +947,22 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
                   launchUrl(Uri.parse(imgUrl), mode: LaunchMode.externalApplication);
                 }
               },
-            )),
-            if (panelId.isNotEmpty && panelId != 'archetype') Padding(padding: const EdgeInsets.only(right: 8), child: OutlinedButton.icon(
+            ),
+            if (panelId.isNotEmpty && panelId != 'archetype') OutlinedButton.icon(
               icon: const Icon(Icons.menu_book_outlined, size: 18),
               label: const Text('Legend'),
               style: OutlinedButton.styleFrom(foregroundColor: _VaultDesign.purple, side: BorderSide(color: _VaultDesign.purple.withOpacity(0.5))),
-              onPressed: () => _showCodexLegend(panelId),
-            )),
-            Expanded(child: ElevatedButton.icon(
-              icon: const Icon(Icons.chat_bubble_outline, size: 18),
-              label: const Text('Ask Nate About This'),
+              onPressed: () => _showCodexLegend(panelId, item: item),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.forum_outlined, size: 18),
+              label: const Text('Go deeper with Nate'),
               style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
               onPressed: () {
                 Navigator.pop(ctx);
                 Navigator.pop(context, _sseAskNateMessage(item));
               },
-            )),
+            ),
           ]),
         ]),
       ),
@@ -984,7 +985,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     return null;
   }
 
-  void _showCodexLegend(String panelId) {
+  void _showCodexLegend(String panelId, {Map<String, dynamic>? item}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -999,27 +1000,94 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               child: Center(child: CircularProgressIndicator(color: _VaultDesign.purple)),
             );
           }
-          final legend = (snapshot.data?['legend'] as List?) ?? [];
+          final data = snapshot.data;
+          final legend = (data?['legend'] as List?) ?? [];
+          final thread = (data?['journey_thread'] ?? '').toString();
+          final seq = data?['panel_sequence'];
           return DraggableScrollableSheet(
-            initialChildSize: 0.5, minChildSize: 0.3, maxChildSize: 0.9, expand: false,
+            initialChildSize: 0.62, minChildSize: 0.35, maxChildSize: 0.95, expand: false,
             builder: (_, scrollCtrl) => ListView(controller: scrollCtrl, padding: const EdgeInsets.all(20), children: [
-              const Text('Legend', style: TextStyle(color: _VaultDesign.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(
+                seq != null ? 'Legend — panel $seq' : 'Legend',
+                style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 4),
-              const Text('Every recurring figure in your story, explained for you.',
-                  style: TextStyle(color: _VaultDesign.textSecondary, fontSize: 13)),
+              const Text(
+                'How to read the figures in this panel, and how this scene continues Little Nate\'s understanding of you over time.',
+                style: TextStyle(color: _VaultDesign.textSecondary, fontSize: 13, height: 1.4),
+              ),
+              if (thread.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF9D4EDD).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.25)),
+                  ),
+                  child: Text(thread,
+                      style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13, height: 1.45)),
+                ),
+              ],
               const SizedBox(height: 16),
               if (legend.isEmpty)
-                const Text('No recurring figures in this panel.', style: TextStyle(color: _VaultDesign.textSecondary)),
-              ...legend.map((e) => Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(e['display_name']?.toString() ?? '',
-                      style: const TextStyle(color: _VaultDesign.purple, fontWeight: FontWeight.bold, fontSize: 15)),
-                  const SizedBox(height: 4),
-                  Text(e['meaning']?.toString() ?? '',
-                      style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4)),
-                ]),
-              )),
+                const Text(
+                  'The landscape itself is the figure here. Go deeper with Nate to sit with the scene.',
+                  style: TextStyle(color: _VaultDesign.textSecondary),
+                ),
+              ...legend.map((e) {
+                final name = e['display_name']?.toString() ?? '';
+                final inPanel = e['figure_in_panel']?.toString() ?? '';
+                final role = e['role']?.toString() ?? '';
+                final prior = e['prior_note']?.toString() ?? '';
+                final meaning = e['meaning']?.toString() ?? '';
+                final isCore = e['is_core'] == true;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Expanded(
+                        child: Text(name,
+                            style: const TextStyle(color: _VaultDesign.purple, fontWeight: FontWeight.bold, fontSize: 15)),
+                      ),
+                      if (isCore)
+                        const Text('core',
+                            style: TextStyle(color: Color(0xFFC9A962), fontSize: 11, fontWeight: FontWeight.w600)),
+                    ]),
+                    if (role.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(role, style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 12, fontStyle: FontStyle.italic)),
+                    ],
+                    if (inPanel.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(inPanel, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45)),
+                    ],
+                    if (prior.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(prior, style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12, height: 1.4)),
+                    ],
+                    if (meaning.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(meaning, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4)),
+                    ],
+                  ]),
+                );
+              }),
+              if (item != null) ...[
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.forum_outlined, size: 18),
+                  label: const Text('Go deeper with Nate'),
+                  style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
+                  onPressed: () {
+                    final msg = _sseAskNateMessage(item);
+                    final nav = Navigator.of(this.context);
+                    Navigator.pop(ctx);
+                    nav.pop();
+                    nav.pop(msg);
+                  },
+                ),
+              ],
             ]),
           );
         },
