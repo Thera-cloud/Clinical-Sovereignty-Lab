@@ -10475,6 +10475,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
         'name': _nameCtrl.text.trim(),
         'dob': _dob != null ? DateFormat('yyyy-MM-dd').format(_dob!) : '',
         'phone': _phoneCtrl.text.trim(),
+        'consent_version': 'v13.1_2026',
+        'timezone': _timezoneCtrl.text.trim(),
       };
 
       _syncFamilyJoinContext();

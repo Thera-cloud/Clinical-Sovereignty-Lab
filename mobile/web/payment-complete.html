@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Card Saved — Sovereign Sanctuary</title>
+<title>Payment Complete — Sovereign Sanctuary</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #050505; color: #E8D5A3; font-family: 'DM Sans', system-ui, sans-serif;
@@ -20,21 +20,42 @@
 <body>
 <div class="card">
   <div class="icon">&#10003;</div>
-  <h1>Card Saved</h1>
-  <p>Your payment method was saved. Return to Schedule to book your session.</p>
-  <p class="subtle">If booking still asks for a card, tap <strong>Refresh</strong> on the payment banner.</p>
+  <h1 id="title">Card Saved</h1>
+  <p id="lead">Your payment method was saved. Return to Schedule to book your session.</p>
+  <p class="subtle" id="hint">If booking still asks for a card, tap <strong>Refresh</strong> on the payment banner.</p>
   <a class="btn" id="continue" href="https://app.sovereignsanctuary.net/?card_setup=complete">Continue to app</a>
 </div>
 <script>
 (function () {
-  var dest = 'https://app.sovereignsanctuary.net/?card_setup=complete';
+  var params = new URLSearchParams(location.search || '');
+  var isSignup = !!(params.get('session_id'));
   var host = (location.hostname || '').toLowerCase();
-  if (host.indexOf('coach.') === 0) {
-    dest = 'https://coach.sovereignsanctuary.net/?card_setup=complete';
+  var dest;
+  var delay = 1600;
+  if (isSignup) {
+    dest = 'https://app.sovereignsanctuary.net/?registration=success';
+    if (host.indexOf('coach.') === 0) {
+      dest = 'https://coach.sovereignsanctuary.net/?registration=success';
+    }
+    document.title = 'Account Ready — Sovereign Sanctuary';
+    var t = document.getElementById('title');
+    var lead = document.getElementById('lead');
+    var hint = document.getElementById('hint');
+    var btn = document.getElementById('continue');
+    if (t) t.textContent = "You're in";
+    if (lead) lead.textContent = 'Payment received. Sign in with the username you just created to finish onboarding and book.';
+    if (hint) hint.textContent = 'If login says the account is not ready, wait 15 seconds and try again — the payment is still being recorded.';
+    if (btn) { btn.textContent = 'Sign in'; btn.href = dest; }
+    delay = 4000;
+  } else {
+    dest = 'https://app.sovereignsanctuary.net/?card_setup=complete';
+    if (host.indexOf('coach.') === 0) {
+      dest = 'https://coach.sovereignsanctuary.net/?card_setup=complete';
+    }
+    var link = document.getElementById('continue');
+    if (link) link.href = dest;
   }
-  var link = document.getElementById('continue');
-  if (link) link.href = dest;
-  setTimeout(function () { location.replace(dest); }, 1600);
+  setTimeout(function () { location.replace(dest); }, delay);
 })();
 </script>
 </body>

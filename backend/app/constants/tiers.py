@@ -125,6 +125,33 @@ def can_access_nate(tier: str | None) -> bool:
     return True
 
 
+# users.tier CHECK (019_check_constraint_fixes): MASTER/SUPERVISOR/TOP/TOP_TIER/STANDARD/TRIAL/DEPENDENT
+_USERS_TIER_ALLOWED = frozenset({
+    "MASTER",
+    "SUPERVISOR",
+    "TOP",
+    TIER_TOP_TIER,
+    TIER_STANDARD,
+    TIER_TRIAL,
+    TIER_DEPENDENT,
+})
+
+_USERS_TIER_REMAP = {
+    TIER_COACH_ONLY: TIER_STANDARD,
+    TIER_COACH: TIER_STANDARD,
+    TIER_SPOUSE: TIER_STANDARD,
+}
+
+
+def users_tier_column(tier: str | None) -> str:
+    """Value safe for users.tier CHECK. Plan-only labels live in profile_data.subscription_plan."""
+    t = normalize_tier(tier)
+    t = _USERS_TIER_REMAP.get(t, t)
+    if t not in _USERS_TIER_ALLOWED:
+        return TIER_STANDARD
+    return t
+
+
 def session_plan_bucket(plan: str | None) -> str:
     """IC / SC / NONE for session-charge discounts (family dependents included)."""
     raw = str(plan or "").upper()

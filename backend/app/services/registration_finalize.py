@@ -10,6 +10,7 @@ import secrets
 from pathlib import Path
 from typing import Optional, Tuple
 
+from app.constants.consent import stamp_signup_consent
 from app.constants.tiers import (
     TIER_COACH,
     TIER_COACH_ONLY,
@@ -19,6 +20,7 @@ from app.constants.tiers import (
     TIER_TRIAL,
     initial_grant_tokens,
     normalize_tier,
+    users_tier_column,
 )
 
 try:
@@ -166,11 +168,7 @@ async def finalize_signup(
         role, registration_type
     )
 
-    _ALLOWED_TIER_COL = frozenset({
-        TIER_TRIAL, TIER_STANDARD, TIER_TOP_TIER, TIER_DEPENDENT,
-        TIER_COACH_ONLY, TIER_COACH,
-    })
-    valid_tier = tier_val if tier_val in _ALLOWED_TIER_COL else TIER_STANDARD
+    valid_tier = users_tier_column(tier_val)
 
     sub_amt = int(token_balance or 0)
     purch_amt = 0
@@ -191,7 +189,7 @@ async def finalize_signup(
         "tier": valid_tier,
         "registration_type": registration_type if role == "CLIENT" else None,
         "dob": profile_fields.get("dob"),
-        "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
+        "consent_version": stamp_signup_consent(profile_fields.get("consent_version")),
         "timezone": profile_fields.get("timezone", "America/New_York"),
         "profile_photo_url": "",
         "emergency_contact": profile_fields.get("emergency_contact", ""),
@@ -279,7 +277,7 @@ async def finalize_signup(
             dob_date = datetime.datetime.strptime(str(dob_str), "%Y-%m-%d").date()
         except (ValueError, TypeError):
             dob_date = None
-    consent_version = profile_fields.get("consent_version", "v13.0_2026")
+    consent_version = stamp_signup_consent(profile_fields.get("consent_version"))
 
     valid_status = sub_status if sub_status in (
         "ACTIVE", "TRIAL_ACTIVE", "PENDING_VERIFICATION", "FAMILY_PLAN_ACTIVE",
@@ -623,7 +621,7 @@ def _build_dependent_profile(
         "registration_type": "DEPENDENT",
         "dob": profile_fields.get("dob"),
         "is_minor": is_minor,
-        "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
+        "consent_version": stamp_signup_consent(profile_fields.get("consent_version")),
         "timezone": profile_fields.get("timezone", "America/New_York"),
         "subscription_status": "FAMILY_PLAN_ACTIVE",
         "subscription_plan": plan_label,
@@ -715,7 +713,7 @@ async def _insert_dependent_user(
         family_id,
         parent["id"],
         is_minor,
-        profile_fields.get("consent_version", "v13.0_2026"),
+        stamp_signup_consent(profile_fields.get("consent_version")),
         json.dumps(new_profile),
         f"CLIENT_{username.upper()}_ID",
         json.dumps({
@@ -751,7 +749,7 @@ def _build_spouse_profile(
         "registration_type": "FAMILY_MEMBER",
         "dob": profile_fields.get("dob"),
         "is_minor": False,
-        "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
+        "consent_version": stamp_signup_consent(profile_fields.get("consent_version")),
         "timezone": profile_fields.get("timezone", "America/New_York"),
         "subscription_status": "FAMILY_PLAN_ACTIVE",
         "subscription_plan": "FAMILY_SPOUSE",
@@ -829,7 +827,7 @@ async def _insert_spouse_user(
         0,
         family_id,
         parent["id"],
-        profile_fields.get("consent_version", "v13.0_2026"),
+        stamp_signup_consent(profile_fields.get("consent_version")),
         json.dumps(new_profile),
         f"CLIENT_{username.upper()}_ID",
         json.dumps({"goals": [], "modality": profile_fields.get("modality", "General")}),

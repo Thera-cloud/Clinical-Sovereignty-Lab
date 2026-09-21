@@ -471,6 +471,8 @@ services:
       - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      # QUANTUM-CRYSTAL-ARCH — paid Inner Chamber / Sovereign Circle must go Stripe-first (WS bypass blocked)
+      - REGISTRATION_STRIPE_FIRST=true
       # QUANTUM-CRYSTAL-ARCH — heal→thrive phase model (bridge addendum)
       - ENABLE_GROWTH_PHASE=${ENABLE_GROWTH_PHASE:-true}
       # QUANTUM-CRYSTAL-ARCH — LN7 Step 0 weld tree (W13); host dir is SA-unwritable

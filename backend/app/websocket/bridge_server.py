@@ -14861,6 +14861,14 @@ async def handle_client(websocket, path=None):
                             "required_consent_version": REQUIRED_CONSENT_VERSION,
                         }))
                         continue
+                    # QUANTUM-CRYSTAL-ARCH — same COACH_ONLY gate as nate_query (no AI via chat_message)
+                    if (current_profile.get("subscription_plan") or "").upper() == "COACH_ONLY" or current_profile.get("can_access_nate") == False:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "COACH_ONLY_NO_AI",
+                            "detail": "Your plan is scheduling-only. AI features are not available."
+                        }))
+                        continue
                     # QUANTUM-CRYSTAL-ARCH: DOJO per-type tier override (forward dojo_type to cortex)
                     # QUANTUM-CRYSTAL-ARCH: scope response to originating socket context
                     await cortex.process_interaction(current_profile, d.get("text", ""), dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
+from app.constants.consent import REQUIRED_CONSENT_VERSION, stamp_signup_consent
 from app.services.trial_signup_redis_keys import trial_contact_key, trial_signup_session_key
 
 try:
@@ -466,8 +467,10 @@ class PrepareRequest(BaseModel):
     name: str
     dob: Optional[str] = None
     phone: Optional[str] = None
-    consent_version: str = "v13.0_2026"
+    consent_version: str = REQUIRED_CONSENT_VERSION
     consent_agreed: bool = True
+    timezone: Optional[str] = None
+    coach_invite_token: Optional[str] = None
     tier: Optional[str] = None
     billing_cycle: str = "monthly"
     selected_dojos: Optional[List[str]] = None
@@ -709,7 +712,13 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
     profile_fields["email"] = email
     profile_fields["dob"] = body.dob
     profile_fields["phone"] = (body.phone or "").strip()
-    profile_fields["consent_version"] = body.consent_version
+    profile_fields["consent_version"] = stamp_signup_consent(body.consent_version)
+    tz = (body.timezone or "").strip()
+    if tz:
+        profile_fields["timezone"] = tz
+    invite = (body.coach_invite_token or "").strip()
+    if invite:
+        profile_fields["coach_invite_token"] = invite
 
     # ------------------------------------------------------------------
     # Dependent path: a CLIENT signing up under a parent on Sovereign Circle.
