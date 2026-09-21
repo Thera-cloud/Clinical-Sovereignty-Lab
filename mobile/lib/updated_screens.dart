@@ -6267,6 +6267,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<Map<String, dynamic>> _clientSkillPlans = [];
   // ── Growth-phase (thrive) coaching layer ─────────────────────────────────
   // /api/thrive/{client}/brief — phase, coach focus, goals, session guidance
+  int? _briefSessionRateCents;
+  bool _briefSessionRateCustom = false;
+  String _briefSessionRateClientId = '';
+  bool _briefSessionRateSaving = false;
   Map<String, dynamic>? _clientThriveBrief;
   // /api/thrive/coach/{coach}/roster — phase badge per client (keyed by
   // canonical username AND by hardware_id when the roster row carries one)
@@ -8381,6 +8385,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         jsonEncode({"type": "get_presession_brief", "client_id": clientId}));
     _loadClientSkillPlans(clientId);
     _loadClientThriveBrief(_usernameForClientId(clientId));
+    _loadClientSessionRate(clientId);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Preparing briefing…'),
@@ -8721,6 +8726,119 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         ],
       ),
     );
+  }
+
+  Future<void> _loadClientSessionRate(String clientId) async {
+    if (clientId.isEmpty) return;
+    try {
+      final resp = await http.get(
+        _apiUri('/api/coach/clients/$clientId/session-rate'),
+        headers: _restHeaders(json: false),
+      );
+      if (resp.statusCode != 200 || !mounted) return;
+      final j = jsonDecode(resp.body);
+      if (j is! Map) return;
+      final custom = j['custom_session_rate_cents'];
+      setState(() {
+        _briefSessionRateClientId = clientId;
+        _briefSessionRateCustom =
+            custom is num && custom > 0 && j['using_plan_default'] != true;
+        _briefSessionRateCents =
+            custom is num && custom > 0 ? custom.toInt() : null;
+      });
+      if (_briefSheetOpen) _briefSheetTick.value++;
+    } catch (_) {}
+  }
+
+  Future<void> _promptClientSessionRate(String clientId) async {
+    if (clientId.isEmpty || _briefSessionRateSaving) return;
+    final ctrl = TextEditingController(
+      text: _briefSessionRateCustom && _briefSessionRateCents != null
+          ? (_briefSessionRateCents! / 100).toStringAsFixed(0)
+          : '',
+    );
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111118),
+        title: const Text('Session rate',
+            style: TextStyle(color: Color(0xFFE8D5A3))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Special agreed rate for this client. Replaces membership discounts on unpaid live sessions.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                prefixText: r'$',
+                prefixStyle: TextStyle(color: Color(0xFFC9A962)),
+                hintText: '100',
+                hintStyle: TextStyle(color: Colors.white38),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'clear'),
+            child: const Text('Plan default'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'save'),
+            child: const Text('Save',
+                style: TextStyle(color: Color(0xFFC9A962))),
+          ),
+        ],
+      ),
+    );
+    if (action == null || !mounted) {
+      ctrl.dispose();
+      return;
+    }
+    setState(() => _briefSessionRateSaving = true);
+    try {
+      final body = action == 'clear'
+          ? {'clear': true}
+          : {
+              'rate_dollars': double.tryParse(ctrl.text.trim()) ?? 0,
+            };
+      final resp = await http.put(
+        _apiUri('/api/coach/clients/$clientId/session-rate'),
+        headers: _restHeaders(),
+        body: jsonEncode(body),
+      );
+      if (!mounted) return;
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        await _loadClientSessionRate(clientId);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Session rate updated'),
+          duration: Duration(seconds: 2),
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Rate save failed (${resp.statusCode})'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Rate save failed: $e')));
+      }
+    } finally {
+      ctrl.dispose();
+      if (mounted) setState(() => _briefSessionRateSaving = false);
+    }
   }
 
   Widget _briefGlanceTile(String label, String value, {Color? color}) {
@@ -12074,6 +12192,26 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             .replaceAll('_', ' '))
                         : (_thriveLoading ? 'Loading…' : 'process'),
                     color: const Color(0xFF4ECDC4)),
+                GestureDetector(
+                  onTap: () {
+                    final id = (client['id'] ??
+                            client['hardware_id'] ??
+                            client['client_id'] ??
+                            _briefSessionRateClientId)
+                        .toString();
+                    _promptClientSessionRate(id);
+                  },
+                  child: _briefGlanceTile(
+                    'Session rate',
+                    _briefSessionRateSaving
+                        ? 'Saving…'
+                        : (_briefSessionRateCustom &&
+                                _briefSessionRateCents != null)
+                            ? '\$${(_briefSessionRateCents! / 100).toStringAsFixed(0)} · special'
+                            : 'Tap to set',
+                    color: const Color(0xFFC9A962),
+                  ),
+                ),
                 if (showSensitive)
                   _briefGlanceTile('Sensitive Bridge', sbGlance,
                       color: const Color(0xFF4ECDC4)),

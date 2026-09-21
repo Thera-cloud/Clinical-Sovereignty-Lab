@@ -417,7 +417,10 @@ class UserStore:
                                                 'head_of_household_id',
                                                 'guardian_id',
                                                 'linked_by',
-                                                'program_id'
+                                                'program_id',
+                                                'custom_session_rate_cents',
+                                                'custom_session_rate_set_by',
+                                                'custom_session_rate_set_at'
                                             ])
                                         ),
                                         '{}'::jsonb

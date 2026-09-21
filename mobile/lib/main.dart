@@ -11254,8 +11254,10 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
       'By booking, you agree to pay your membership session rate '
       '(Inner Chamber: \$50 off every session; Sovereign Circle: \$50 off the '
       'household\'s first session each month, then \$85 off each additional). '
-      'After your coach accepts, your card on file will be charged in the '
-      '72-hour window before the session. Payment is due before the session. '
+      'After your coach accepts, your default card is charged automatically '
+      'in the 72-hour window BEFORE the session — not after. Open invoices '
+      'are under Billing → Invoices; unpaid Stripe invoices are emailed '
+      'every 7 days until paid. Payment is due before the session. '
       'Cancel at least 24 hours before the start time for a full refund. '
       'Cancellations inside 24 hours are not refundable.';
   bool _hasCardOnFile = false;
@@ -12378,7 +12380,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Add a card before requesting a session. You are charged after your coach accepts, in the 72-hour window before the appointment.',
+                    'Add a card before requesting a session. Your default card is charged in the 72 hours before the appointment — not after. Pay open invoices in Billing → Invoices.',
                     style: TextStyle(color: Colors.grey, fontSize: 11, height: 1.3),
                   ),
                   const SizedBox(height: 8),

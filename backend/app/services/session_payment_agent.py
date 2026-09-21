@@ -112,6 +112,15 @@ class SessionPaymentAgent:
         unpaid_cancel_sessions = []
 
         async with self.db_pool.acquire() as conn:
+            try:
+                from app.services.session_booking_billing import APPLY_CUSTOM_SESSION_RATE_SQL
+                from app.services.session_invoice_ledger import HYDRATE_SESSION_PRICE_SQL
+
+                await conn.execute(APPLY_CUSTOM_SESSION_RATE_SQL)
+                await conn.execute(HYDRATE_SESSION_PRICE_SQL)
+            except Exception as e:
+                logger.warning("SessionPaymentAgent: price hydrate skipped: %s", e)
+
             # Find sessions in the payment window that need charging
             # QUANTUM-CRYSTAL-ARCH: charge only after coach accepts (scheduled/confirmed/active)
             sessions_to_charge = await conn.fetch(
@@ -137,6 +146,7 @@ class SessionPaymentAgent:
                    WHERE {_APPT_TIME} BETWEEN $1 AND $2
                    AND cs.payment_status = 'pending'
                    AND COALESCE(cs.price_cents, 0) > 0
+                   AND COALESCE(cs.session_data->>'stripe_invoice_id', '') = ''
                    AND UPPER(cs.status) IN ('SCHEDULED', 'CONFIRMED', 'ACTIVE')
                    AND {_NOT_CANCELLED}""",
                 window_start, window_end,
@@ -164,9 +174,11 @@ class SessionPaymentAgent:
                         charged += 1
                     else:
                         await self._send_payment_reminder(conn, session, charge_amount)
+                        await self._ensure_open_invoice(conn, session, charge_amount)
                         reminded += 1
                 else:
                     await self._send_payment_reminder(conn, session, charge_amount)
+                    await self._ensure_open_invoice(conn, session, charge_amount)
                     reminded += 1
 
             # Auto-cancel unpaid sessions past the 24-hour deadline
@@ -177,6 +189,7 @@ class SessionPaymentAgent:
                    WHERE {_APPT_TIME_BARE} <= $1
                    AND payment_status = 'pending'
                    AND COALESCE(price_cents, 0) > 0
+                   AND COALESCE(session_data->>'stripe_invoice_id', '') = ''
                    AND {_NOT_CANCELLED_BARE}""",
                 cancel_deadline,
             )
@@ -261,6 +274,11 @@ class SessionPaymentAgent:
             for s in newly_paid:
                 await self._send_confirmation(conn, s)
 
+            try:
+                await self._issue_unpaid_session_invoices(conn)
+            except Exception as e:
+                logger.warning("SessionPaymentAgent: unpaid session invoices skipped: %s", e)
+
             if charged or reminded or cancelled:
                 logger.info(
                     "SessionPaymentAgent: cycle complete — %d charged, %d reminded, %d cancelled",
@@ -291,6 +309,99 @@ class SessionPaymentAgent:
                     sess.get("session_id"),
                     e,
                 )
+
+        try:
+            from app.services.session_invoice_ledger import remind_open_stripe_invoices
+
+            notify = getattr(self.app_state, "notification_system", None) if self.app_state else None
+            n = await remind_open_stripe_invoices(self.db_pool, notify)
+            if n:
+                logger.info("SessionPaymentAgent: sent %d unpaid-invoice reminders", n)
+        except Exception as e:
+            logger.warning("SessionPaymentAgent: invoice dunning skipped: %s", e)
+
+    async def _issue_unpaid_session_invoices(self, conn):
+        """Capture unpaid priced sessions as Stripe send_invoice (no second charge)."""
+        rows = await conn.fetch(
+            f"""SELECT cs.id, cs.session_id AS session_id_str, cs.price_cents,
+                       cs.session_data, cs.payment_status, cs.coach_id,
+                       COALESCE(NULLIF(u.stripe_customer_id, ''),
+                                u.profile_data->>'stripe_customer_id') as stripe_customer_id,
+                       u.profile_data->>'email' as client_email,
+                       u.profile_data->>'name' as client_name
+                  FROM coaching_sessions cs
+                  LEFT JOIN users u ON u.hardware_id = cs.client_id::text
+                     OR u.id::text = cs.client_id::text
+                 WHERE cs.payment_status = 'pending'
+                   AND COALESCE(cs.price_cents, 0) > 0
+                   AND COALESCE(cs.stripe_payment_intent_id, '') = ''
+                   AND COALESCE(cs.session_data->>'stripe_invoice_id', '') = ''
+                   AND {_NOT_CANCELLED}
+                   AND {_APPT_TIME} < NOW()
+                 LIMIT 25"""
+        )
+        for session in rows:
+            amount = int(session["price_cents"] or 0)
+            await self._ensure_open_invoice(conn, session, amount)
+
+    async def _ensure_open_invoice(self, conn, session, amount_cents: int):
+        """Create one Stripe send_invoice for a pending session. Idempotent."""
+        data = session.get("session_data") or {}
+        if isinstance(data, str):
+            try:
+                data = json.loads(data) if data else {}
+            except Exception:
+                data = {}
+        if isinstance(data, dict) and data.get("stripe_invoice_id"):
+            return
+        customer = (session.get("stripe_customer_id") or "").strip()
+        sid = session.get("session_id_str") or str(session.get("id") or "")
+        if not customer or amount_cents <= 0:
+            return
+        import stripe
+        from app.services.session_invoice_ledger import (
+            create_open_session_invoice,
+            persist_session_invoice,
+        )
+
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+        if not stripe.api_key:
+            return
+        try:
+            inv = create_open_session_invoice(
+                customer_id=customer,
+                amount_cents=amount_cents,
+                session_id_str=sid,
+                description=f"Coaching session {sid}",
+            )
+            if not inv:
+                return
+            await persist_session_invoice(conn, session["id"], inv)
+            hosted = getattr(inv, "hosted_invoice_url", None) or ""
+            email = (session.get("client_email") or "").strip()
+            notify = getattr(self.app_state, "notification_system", None) if self.app_state else None
+            if email and notify and hasattr(notify, "_send_email"):
+                name = session.get("client_name") or "there"
+                await notify._send_email(
+                    email,
+                    "Invoice for unpaid coaching session",
+                    f"<p>Hello {name},</p>"
+                    f"<p>An invoice for ${amount_cents / 100:.2f} is ready for session {sid}.</p>"
+                    "<p>This is not an extra charge — it is the session fee that was not "
+                    "collected automatically. Pay from Billing → Invoices or this link:</p>"
+                    f"<p><a href=\"{hosted}\">Pay invoice</a></p>"
+                    "<p>We will remind you every 7 days until this is paid.</p>"
+                    "<p>Sovereign Sanctuary</p>",
+                )
+            await self._log_event(
+                conn, session["id"], "invoice_issued", amount_cents,
+                stripe_id=inv.id, note=hosted,
+            )
+        except Exception as e:
+            logger.warning(
+                "SessionPaymentAgent: invoice issue failed sid=%s: %s",
+                sid, e,
+            )
 
     async def _charge_card(self, conn, session, stripe_customer_id: str, amount_cents: int) -> bool:
         """Charge client default PM; Connect destination + app fee when coach linked; receipt email."""
@@ -465,8 +576,10 @@ class SessionPaymentAgent:
                 subject = "Payment Due — Upcoming Session"
                 body = f"""<p>Hello {client_name},</p>
 <p>Your coaching session is scheduled for <strong>{when_str}</strong>.</p>
-<p>Payment of ${amount_cents / 100:.2f} is due.</p>
-<p>Please ensure your payment method is up to date in the app.</p>
+<p>Payment of ${amount_cents / 100:.2f} is due <strong>before</strong> the session
+(your card is charged in the 72 hours leading up to it, not after).</p>
+<p>Open <strong>Billing → Invoices</strong> in the app to pay any open invoice
+or confirm your default card for automatic payment.</p>
 <p>Thank you,<br>Sovereign Sanctuary</p>"""
                 await notify._send_email(client_email, subject, body)
                 await conn.execute(
@@ -500,7 +613,7 @@ class SessionPaymentAgent:
             try:
                 payment_note = ""
                 if payment_status != "paid":
-                    payment_note = "<p><strong>Payment reminder:</strong> Please ensure your payment is completed before the session. Sessions with outstanding payment may be cancelled within 24 hours.</p>"
+                    payment_note = "<p><strong>Payment reminder:</strong> Your card is charged in the 72 hours <em>before</em> the session, not after. Open invoices are in Billing → Invoices. Unpaid Stripe invoices are emailed every 7 days until paid.</p>"
 
                 from app.services.calendar_invite import html_cta_fragment, invite_from_session
 

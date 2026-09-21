@@ -2021,6 +2021,51 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     if (mounted) setState(() => _loadingInvoices = false);
   }
 
+  Future<void> _openUrl(String? raw) async {
+    if (raw == null || raw.isEmpty) return;
+    final url = Uri.parse(raw);
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _openBillingPortal() async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/portal'),
+        headers: _authHeaders(widget.currentUserProfile, json: true),
+        body: '{}',
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        await _openUrl(data['portal_url']?.toString());
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _payInvoice(Map<String, dynamic> inv) async {
+    final hosted = inv['hosted_url']?.toString();
+    if (hosted != null && hosted.isNotEmpty) {
+      await _openUrl(hosted);
+      return;
+    }
+    final id = inv['id']?.toString() ?? '';
+    if (!id.startsWith('in_')) return;
+    try {
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/invoices/pay'),
+        headers: _authHeaders(widget.currentUserProfile, json: true),
+        body: jsonEncode({'user_id': _userId, 'invoice_id': id}),
+      );
+      if (resp.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Payment submitted'),
+            backgroundColor: Color(0xFF22C55E)));
+        _loadInvoices();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _deleteMethod(String pmId) async {
     try {
       final resp = await http.delete(
@@ -2382,6 +2427,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             style: const TextStyle(
                                 color: _D.textSecondary, fontSize: 11),
                           ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Your default card is charged automatically in the 72 hours before each session with your assigned coach — not after. Coach-only pays the listed coach fee; Inner Chamber is \$50 off; Sovereign Circle is \$50 off the first household session each month, then \$85 off.',
+                            style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.35),
+                          ),
                         ],
                       ),
                     ),
@@ -2496,6 +2546,21 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    OutlinedButton.icon(
+                      onPressed: _openBillingPortal,
+                      icon: const Icon(Icons.open_in_new, size: 16, color: _D.gold),
+                      label: const Text('Stripe billing history',
+                          style: TextStyle(color: _D.gold, fontSize: 13)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: _D.gold),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Open invoices can be paid here. Session fees use your default card 72 hours before the appointment. Unpaid Stripe invoices are emailed every 7 days until paid.',
+                      style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.35),
+                    ),
+                    const SizedBox(height: 16),
                     if (_invoices.isEmpty)
                       Container(
                         padding: const EdgeInsets.all(20),
@@ -2511,22 +2576,31 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                         ),
                       )
                     else
-                      ..._invoices.map((inv) => Container(
+                      ..._invoices.map((inv) {
+                        final status = (inv['status'] ?? '').toString().toLowerCase();
+                        final unpaid = status == 'open' ||
+                            status == 'unpaid' ||
+                            status == 'draft' ||
+                            status == 'pending';
+                        final due = inv['amount_due'] ?? 0;
+                        final paidAmt = inv['amount_paid'] ?? 0;
+                        final displayAmt = unpaid ? due : paidAmt;
+                        final hosted = inv['hosted_url']?.toString();
+                        return Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
                               color: _D.bgCard,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: _D.border),
+                              border: Border.all(
+                                  color: unpaid ? _D.gold : _D.border),
                             ),
                             child: Row(children: [
                               Icon(
-                                inv['status'] == 'paid'
-                                    ? Icons.check_circle
-                                    : Icons.pending,
-                                color: inv['status'] == 'paid'
-                                    ? _D.green
-                                    : _D.textSecondary,
+                                unpaid
+                                    ? Icons.pending
+                                    : Icons.check_circle,
+                                color: unpaid ? _D.gold : _D.green,
                                 size: 20,
                               ),
                               const SizedBox(width: 12),
@@ -2536,14 +2610,14 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                       CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '\$${inv['amount_paid'] ?? inv['amount_due'] ?? '0.00'}',
+                                      '\$${displayAmt ?? '0.00'}',
                                       style: const TextStyle(
                                           color: _D.textPrimary,
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold),
                                     ),
                                     Text(
-                                      '${inv['created'] ?? inv['timestamp'] ?? ''} · ${(inv['status'] ?? '').toString().toUpperCase()}',
+                                      '${inv['description'] ?? inv['session_id'] ?? ''} ${inv['created'] ?? inv['timestamp'] ?? ''} · ${status.toUpperCase()}',
                                       style: const TextStyle(
                                           color: _D.textSecondary,
                                           fontSize: 10),
@@ -2551,21 +2625,31 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                   ],
                                 ),
                               ),
+                              if (unpaid)
+                                TextButton(
+                                  onPressed: () => _payInvoice(inv),
+                                  child: const Text('Pay now',
+                                      style: TextStyle(
+                                          color: _D.gold, fontSize: 12)),
+                                ),
                               if (inv['pdf_url'] != null)
                                 IconButton(
-                                  onPressed: () async {
-                                    final url = Uri.parse(inv['pdf_url']);
-                                    if (await canLaunchUrl(url)) {
-                                      await launchUrl(url,
-                                          mode:
-                                              LaunchMode.externalApplication);
-                                    }
-                                  },
+                                  onPressed: () =>
+                                      _openUrl(inv['pdf_url']?.toString()),
                                   icon: const Icon(Icons.download,
+                                      color: _D.gold, size: 18),
+                                )
+                              else if (hosted != null &&
+                                  hosted.isNotEmpty &&
+                                  !unpaid)
+                                IconButton(
+                                  onPressed: () => _openUrl(hosted),
+                                  icon: const Icon(Icons.open_in_new,
                                       color: _D.gold, size: 18),
                                 ),
                             ]),
-                          )),
+                        );
+                      }),
                     const SizedBox(height: 16),
                     Container(
                       padding: const EdgeInsets.all(14),

@@ -2136,7 +2136,19 @@ class StripeWebhookHandler:
                 )
 
     async def _handle_invoice_paid(self, invoice: Dict, event_id: str = ""):
-        """Handle successful invoice payment — subscription monthly cap top-up."""
+        """Handle successful invoice payment — session fees then subscription top-up."""
+        meta = invoice.get("metadata") or {}
+        if meta.get("type") == "session_fee" or meta.get("session_id"):
+            try:
+                from app.services.session_invoice_ledger import mark_session_paid_from_invoice
+
+                await mark_session_paid_from_invoice(self.db, invoice)
+            except Exception:
+                _logger.exception(
+                    "session invoice.paid mark failed id=%s", invoice.get("id")
+                )
+            if not invoice.get("subscription"):
+                return
         subscription_id = invoice.get("subscription")
         try:
             if not subscription_id:

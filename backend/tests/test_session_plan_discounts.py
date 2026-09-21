@@ -10,6 +10,8 @@ from app.constants.tiers import (
 )
 from app.services.session_booking_billing import (
     billed_session_cents,
+    effective_price_cents,
+    resolve_session_price_cents,
     session_discount_cents,
 )
 
@@ -61,3 +63,32 @@ def test_coach_only_pays_full_coach_rate():
     disc = session_discount_cents("COACH_ONLY", 0)
     assert disc == 0
     assert billed_session_cents(175, disc) == 17500
+
+
+def test_effective_price_prefers_session_data_when_column_wiped():
+    from app.services.session_booking_billing import effective_price_cents
+
+    assert effective_price_cents(0, {"price_cents": 12500}) == 12500
+    assert effective_price_cents(17500, {"price_cents": 12500}) == 17500
+    assert effective_price_cents(0, None) == 0
+
+
+def test_custom_session_rate_skips_membership_discount():
+    assert resolve_session_price_cents(
+        custom_cents=10000, plan="STANDARD", coach_fee_dollars=175, prior_family_sessions=0
+    ) == 10000
+    assert resolve_session_price_cents(
+        custom_cents=None, plan="STANDARD", coach_fee_dollars=175, prior_family_sessions=0
+    ) == 12500
+    assert resolve_session_price_cents(
+        custom_cents=0, plan="COACH_ONLY", coach_fee_dollars=175, prior_family_sessions=0
+    ) == 17500
+
+
+def test_effective_price_custom_rate_not_greatest_with_stale_quote():
+    assert effective_price_cents(
+        12500, {"price_cents": 10000, "custom_rate": True}
+    ) == 10000
+    assert effective_price_cents(
+        0, {"price_cents": 10000, "custom_rate": True}
+    ) == 10000

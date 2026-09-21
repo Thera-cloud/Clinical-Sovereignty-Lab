@@ -331,7 +331,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      nate_summary = EXCLUDED.nate_summary,
                      recording_url = EXCLUDED.recording_url,
                      payment_status = EXCLUDED.payment_status,
-                     price_cents = COALESCE(EXCLUDED.price_cents, coaching_sessions.price_cents),
+                     price_cents = COALESCE(NULLIF(EXCLUDED.price_cents, 0), coaching_sessions.price_cents, 0),
                      intake_note = EXCLUDED.intake_note,
                      session_data = COALESCE(coaching_sessions.session_data, '{}'::jsonb)
                                     || COALESCE(EXCLUDED.session_data, '{}'::jsonb)""",

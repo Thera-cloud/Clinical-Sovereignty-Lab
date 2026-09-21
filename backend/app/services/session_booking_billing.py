@@ -18,14 +18,18 @@ logger = logging.getLogger("nate.session_booking_billing")
 
 # Shown in client schedule UI and emails — keep in sync with Flutter copy.
 SESSION_PAYMENT_POLICY = (
-    "By booking, you agree to pay your membership session rate "
-    "(Inner Chamber: $50 off every session; Sovereign Circle: $50 off the "
-    "household's first session each month, then $85 off each additional). "
-    "After your coach accepts, your card on file will be charged in the "
-    "72-hour window before the session. Payment is due before the session. "
-    "Cancel at least 24 hours before the start time for a full refund. "
-    "Cancellations inside 24 hours are not refundable. "
-    "If your coach cancels, a paid session is refunded even inside 24 hours."
+    "By booking, you agree to pay your session rate with your assigned coach. "
+    "Inner Chamber: $50 off every session. Sovereign Circle: $50 off the "
+    "household's first session each month, then $85 off each additional. "
+    "Coach-only: the coach's listed session fee (no membership discount). "
+    "Your default card is charged automatically in the 72-hour window BEFORE "
+    "the session — not after. Open invoices live under Billing → Invoices; "
+    "pay them there or via the emailed Stripe link. Unpaid Stripe invoices "
+    "are emailed again every 7 days until paid. Payment is due before the "
+    "session. Cancel at least 24 hours before the start time for a full "
+    "refund. Cancellations inside 24 hours are not refundable. "
+    "If your coach cancels, a paid session is refunded even inside 24 hours. "
+    "A coach-assigned special rate replaces membership discounts for that client."
 )
 
 # Past scheduled rows: no_show only when there is nothing for SessionPaymentAgent
@@ -62,6 +66,95 @@ def booking_billing_enabled() -> bool:
         "true",
         "yes",
     )
+
+
+def effective_price_cents(price_cents: Any, session_data: Any = None) -> int:
+    """Column can be wiped to 0 while session_data still holds the quoted fee."""
+    col = 0
+    try:
+        col = int(price_cents or 0)
+    except (TypeError, ValueError):
+        col = 0
+    data = session_data or {}
+    if isinstance(data, str):
+        try:
+            import json
+
+            data = json.loads(data) if data else {}
+        except Exception:
+            data = {}
+    json_cents = 0
+    if isinstance(data, dict):
+        raw = data.get("price_cents")
+        try:
+            json_cents = int(raw or 0)
+        except (TypeError, ValueError):
+            json_cents = 0
+        # Coach-assigned special rate — do not GREATEST back up to a stale quote.
+        if data.get("custom_rate") and (json_cents > 0 or col > 0):
+            return json_cents if json_cents > 0 else col
+    return max(col, json_cents)
+
+
+# Pending unpaid live sessions follow the client's custom_session_rate_cents.
+APPLY_CUSTOM_SESSION_RATE_SQL = """
+UPDATE coaching_sessions cs
+   SET price_cents = (u.profile_data->>'custom_session_rate_cents')::int,
+       session_data = COALESCE(cs.session_data, '{}'::jsonb)
+         || jsonb_build_object(
+              'price_cents', (u.profile_data->>'custom_session_rate_cents')::int,
+              'custom_rate', true,
+              'coach_fee', round(
+                  (u.profile_data->>'custom_session_rate_cents')::numeric / 100.0, 2)
+            ),
+       updated_at = NOW()
+  FROM users u
+ WHERE cs.payment_status = 'pending'
+   AND COALESCE(cs.stripe_payment_intent_id, '') = ''
+   AND COALESCE(cs.session_data->>'stripe_invoice_id', '') = ''
+   AND UPPER(COALESCE(cs.status, '')) IN (
+         'SCHEDULED', 'CONFIRMED', 'ACTIVE', 'PENDING_APPROVAL')
+   AND (u.hardware_id = cs.client_id::text
+        OR u.username = cs.client_id::text
+        OR u.id::text = cs.client_id::text)
+   AND (u.profile_data->>'custom_session_rate_cents') ~ '^[1-9][0-9]*$'
+"""
+
+APPLY_CUSTOM_SESSION_RATE_FOR_CLIENT_SQL = """
+UPDATE coaching_sessions cs
+   SET price_cents = $2,
+       session_data = COALESCE(cs.session_data, '{}'::jsonb)
+         || jsonb_build_object(
+              'price_cents', $2::int,
+              'custom_rate', true,
+              'coach_fee', round(($2::numeric) / 100.0, 2)
+            ),
+       updated_at = NOW()
+ WHERE cs.payment_status = 'pending'
+   AND COALESCE(cs.stripe_payment_intent_id, '') = ''
+   AND COALESCE(cs.session_data->>'stripe_invoice_id', '') = ''
+   AND UPPER(COALESCE(cs.status, '')) IN (
+         'SCHEDULED', 'CONFIRMED', 'ACTIVE', 'PENDING_APPROVAL')
+   AND cs.client_id::text = ANY($1::text[])
+"""
+
+
+def resolve_session_price_cents(
+    *,
+    custom_cents: Optional[int],
+    plan: Optional[str],
+    coach_fee_dollars: Any,
+    prior_family_sessions: int = 0,
+) -> int:
+    """Special agreement wins; otherwise membership discount off listed fee."""
+    try:
+        custom = int(custom_cents) if custom_cents is not None else 0
+    except (TypeError, ValueError):
+        custom = 0
+    if custom > 0:
+        return custom
+    discount = session_discount_cents(plan, prior_family_sessions)
+    return billed_session_cents(coach_fee_dollars, discount)
 
 
 def fee_cents_from_coach_fee(coach_fee: Any) -> int:
@@ -170,14 +263,19 @@ async def quote_session_price_cents(
     scheduled_start: Any = None,
     client_plan: Optional[str] = None,
 ) -> int:
-    """Client charge in cents after membership discount (family-scoped for SC)."""
+    """Client charge in cents: coach-assigned custom rate, else membership discount."""
     plan = client_plan
+    custom_cents = None
     if db_pool and client_hardware_id:
         try:
             async with db_pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """
-                    SELECT COALESCE(profile_data->>'subscription_plan', tier) AS plan
+                    SELECT COALESCE(profile_data->>'subscription_plan', tier) AS plan,
+                           CASE WHEN (profile_data->>'custom_session_rate_cents')
+                                     ~ '^[1-9][0-9]*$'
+                                THEN (profile_data->>'custom_session_rate_cents')::int
+                                ELSE NULL END AS custom_cents
                     FROM users
                     WHERE hardware_id = $1 OR username = $1
                     LIMIT 1
@@ -186,8 +284,18 @@ async def quote_session_price_cents(
                 )
                 if row and row["plan"]:
                     plan = row["plan"]
+                if row and row["custom_cents"]:
+                    custom_cents = int(row["custom_cents"])
         except Exception as e:
             logger.warning("quote_session_price_cents plan lookup: %s", e)
+
+    if custom_cents and custom_cents > 0:
+        return resolve_session_price_cents(
+            custom_cents=custom_cents,
+            plan=plan,
+            coach_fee_dollars=coach_fee_dollars,
+            prior_family_sessions=0,
+        )
 
     when = datetime.now(timezone.utc)
     if scheduled_start:
@@ -204,8 +312,12 @@ async def quote_session_price_cents(
     prior = await _prior_family_sessions_this_month(
         db_pool, client_hardware_id, family_id, month_start, month_end
     )
-    discount = session_discount_cents(plan, prior)
-    return billed_session_cents(coach_fee_dollars, discount)
+    return resolve_session_price_cents(
+        custom_cents=None,
+        plan=plan,
+        coach_fee_dollars=coach_fee_dollars,
+        prior_family_sessions=prior,
+    )
 
 
 def apply_fee_to_session(session: Dict[str, Any], coach_fee_dollars: float, fee_info: Dict[str, Any]) -> None:

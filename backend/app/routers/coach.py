@@ -78,6 +78,17 @@ def load_json(filepath: Path, default=None):
     except: return default
 
 
+def _parse_custom_rate_cents(pd) -> Optional[int]:
+    if not isinstance(pd, dict):
+        return None
+    raw = pd.get("custom_session_rate_cents")
+    try:
+        cents = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return cents if cents > 0 else None
+
+
 async def _load_metrics_pg(hardware_id: str, db_pool) -> dict:
     """Load nevedal_state from PG client_metrics table. Returns None if unavailable."""
     if not db_pool:
@@ -184,6 +195,7 @@ async def get_assigned_clients(coach_id: str, request: Request, caller_hw_id: st
                         "mood_trend": ns.get("mood_trend", "stable"),
                     },
                     "next_session": upcoming[0] if upcoming else None,
+                    "custom_session_rate_cents": _parse_custom_rate_cents(pd),
                 })
 
             risk_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
@@ -226,6 +238,7 @@ async def get_assigned_clients(coach_id: str, request: Request, caller_hw_id: st
                     "mood_trend": ns.get("mood_trend", "stable"),
                 },
                 "next_session": upcoming[0] if upcoming else None,
+                "custom_session_rate_cents": _parse_custom_rate_cents(p),
             })
 
     risk_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
@@ -954,4 +967,167 @@ async def set_client_override_rest(
         "client_user_id": client_ref,
         "crystal_hash": crystal_hash,
         "reason": (body.override_reason or "")[:200],
+    }
+
+
+class SessionRateBody(BaseModel):
+    rate_dollars: Optional[float] = None
+    clear: bool = False
+
+
+async def _coach_identity_refs(conn, caller: str) -> set:
+    refs = {str(caller or "").strip()}
+    row = await conn.fetchrow(
+        """SELECT hardware_id, username FROM users
+           WHERE hardware_id = $1 OR username = $1 LIMIT 1""",
+        caller,
+    )
+    if row:
+        if row["hardware_id"]:
+            refs.add(row["hardware_id"])
+        if row["username"]:
+            refs.add(row["username"])
+    return {r for r in refs if r}
+
+
+async def _assert_coach_assigned_to_client(conn, caller: str, client_id: str, request: Request):
+    if getattr(request.state, "user_role", "") == "ADMIN":
+        row = await conn.fetchrow(
+            """SELECT hardware_id, username, profile_data
+               FROM users WHERE role = 'CLIENT'
+                 AND (hardware_id = $1 OR username = $1) LIMIT 1""",
+            client_id,
+        )
+        if not row:
+            raise HTTPException(404, "client not found")
+        return row
+    refs = await _coach_identity_refs(conn, caller)
+    row = await conn.fetchrow(
+        """SELECT hardware_id, username, profile_data
+           FROM users WHERE role = 'CLIENT'
+             AND (hardware_id = $1 OR username = $1) LIMIT 1""",
+        client_id,
+    )
+    if not row:
+        raise HTTPException(404, "client not found")
+    pd = row["profile_data"] or {}
+    if isinstance(pd, str):
+        try:
+            pd = json.loads(pd)
+        except Exception:
+            pd = {}
+    assigned = {
+        str(pd.get("coach_id") or "").strip(),
+        str(pd.get("assigned_coach_id") or "").strip(),
+        str(pd.get("assigned_coach") or "").strip(),
+    }
+    if not (refs & assigned):
+        raise HTTPException(403, "not assigned to this client")
+    return row
+
+
+@router.get("/clients/{client_id}/session-rate")
+async def get_client_session_rate(
+    client_id: str,
+    request: Request,
+    user=Depends(get_current_user_id),
+):
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "DATABASE_UNAVAILABLE")
+    caller = user if isinstance(user, str) else str(
+        (user or {}).get("hardware_id") or (user or {}).get("username") or ""
+    )
+    async with db_pool.acquire() as conn:
+        row = await _assert_coach_assigned_to_client(conn, caller, client_id, request)
+    pd = row["profile_data"] or {}
+    if isinstance(pd, str):
+        try:
+            pd = json.loads(pd)
+        except Exception:
+            pd = {}
+    cents = _parse_custom_rate_cents(pd)
+    return {
+        "client_id": row["hardware_id"] or client_id,
+        "custom_session_rate_cents": cents,
+        "custom_session_rate_dollars": round(cents / 100.0, 2) if cents else None,
+        "using_plan_default": cents is None,
+    }
+
+
+@router.put("/clients/{client_id}/session-rate")
+async def set_client_session_rate(
+    client_id: str,
+    body: SessionRateBody,
+    request: Request,
+    user=Depends(get_current_user_id),
+):
+    """Coach-assigned special session rate. Skips membership discounts. Pending unpaid live sessions only."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "DATABASE_UNAVAILABLE")
+    caller = user if isinstance(user, str) else str(
+        (user or {}).get("hardware_id") or (user or {}).get("username") or ""
+    )
+    clear = bool(body.clear) or (body.rate_dollars is not None and float(body.rate_dollars) <= 0)
+    cents = None
+    if not clear:
+        if body.rate_dollars is None:
+            raise HTTPException(400, "rate_dollars required")
+        cents = int(round(float(body.rate_dollars) * 100))
+        if cents < 100 or cents > 500000:
+            raise HTTPException(400, "rate must be between $1 and $5000")
+    from app.services.session_booking_billing import APPLY_CUSTOM_SESSION_RATE_FOR_CLIENT_SQL
+
+    async with db_pool.acquire() as conn:
+        row = await _assert_coach_assigned_to_client(conn, caller, client_id, request)
+        hw = row["hardware_id"] or client_id
+        uname = row["username"] or ""
+        ids = [x for x in {hw, uname, client_id} if x]
+        if clear:
+            await conn.execute(
+                """UPDATE users SET profile_data = (COALESCE(profile_data, '{}'::jsonb)
+                       - 'custom_session_rate_cents'
+                       - 'custom_session_rate_set_by'
+                       - 'custom_session_rate_set_at'
+                       - 'custom_session_rate_note')
+                   WHERE hardware_id = $1 OR username = $1""",
+                hw,
+            )
+            await conn.execute(
+                """UPDATE coaching_sessions
+                      SET session_data = COALESCE(session_data, '{}'::jsonb) - 'custom_rate',
+                          updated_at = NOW()
+                    WHERE payment_status = 'pending'
+                      AND COALESCE(stripe_payment_intent_id, '') = ''
+                      AND client_id::text = ANY($1::text[])""",
+                ids,
+            )
+        else:
+            await conn.execute(
+                """UPDATE users SET profile_data = jsonb_set(
+                       jsonb_set(
+                           jsonb_set(
+                               COALESCE(profile_data, '{}'::jsonb),
+                               '{custom_session_rate_cents}',
+                               to_jsonb($2::int)
+                           ),
+                           '{custom_session_rate_set_by}',
+                           to_jsonb($3::text)
+                       ),
+                       '{custom_session_rate_set_at}',
+                       to_jsonb(NOW()::text)
+                   )
+                   WHERE hardware_id = $1 OR username = $1""",
+                hw,
+                cents,
+                caller[:80],
+            )
+            await conn.execute(APPLY_CUSTOM_SESSION_RATE_FOR_CLIENT_SQL, ids, cents)
+    return {
+        "status": "ok",
+        "client_id": hw if not clear else client_id,
+        "custom_session_rate_cents": cents,
+        "using_plan_default": clear,
+        "updated_pending_live_sessions": True,
     }

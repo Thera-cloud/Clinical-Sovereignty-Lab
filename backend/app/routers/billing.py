@@ -733,9 +733,11 @@ async def downgrade_subscription(
 # =========================================================================
 
 @router.get("/invoices/{user_id}")
-async def get_invoices(user_id: str, request: Request, limit: int = 20):
-    """Return invoice list. Checks Stripe first, falls back to PG transactions, then JSON."""
+async def get_invoices(user_id: str, request: Request, limit: int = 40):
+    """Stripe invoices + session charges/pending so clients can pay and see history."""
     pool = getattr(request.app.state, "db_pool", None)
+    stripe_items = []
+    session_items = []
 
     # Try Stripe
     if STRIPE_AVAILABLE and stripe.api_key:
@@ -743,26 +745,41 @@ async def get_invoices(user_id: str, request: Request, limit: int = 20):
         if stripe_customer:
             try:
                 invoices = stripe.Invoice.list(customer=stripe_customer, limit=limit)
-                return {
-                    "source": "stripe",
-                    "invoices": [
-                        {
-                            "id": inv.id,
-                            "amount_due": inv.amount_due / 100,
-                            "amount_paid": inv.amount_paid / 100,
-                            "currency": inv.currency,
-                            "status": inv.status,
-                            "created": datetime.fromtimestamp(inv.created).isoformat(),
-                            "pdf_url": inv.invoice_pdf,
-                            "hosted_url": inv.hosted_invoice_url,
-                            "period_start": datetime.fromtimestamp(inv.period_start).isoformat() if inv.period_start else None,
-                            "period_end": datetime.fromtimestamp(inv.period_end).isoformat() if inv.period_end else None,
-                        }
-                        for inv in invoices.auto_paging_iter()
-                    ][:limit],
-                }
+                from app.services.session_invoice_ledger import _stripe_inv_dict
+
+                for inv in invoices.auto_paging_iter():
+                    stripe_items.append(_stripe_inv_dict(inv))
+                    if len(stripe_items) >= limit:
+                        break
             except Exception as e:
                 logger.warning("get_invoices: Stripe fetch failed for %s: %s", user_id, e)
+
+    if pool:
+        try:
+            from app.services.session_invoice_ledger import load_session_invoices
+
+            async with pool.acquire() as conn:
+                session_items = await load_session_invoices(conn, user_id, limit)
+        except Exception as e:
+            logger.warning("get_invoices: session list failed for %s: %s", user_id, e)
+
+    if stripe_items or session_items:
+        from app.services.session_invoice_ledger import merge_invoice_lists
+
+        merged = merge_invoice_lists(stripe_items, session_items, limit=limit)
+        pending = sum(
+            1 for i in merged
+            if str(i.get("status") or "").lower() in ("open", "unpaid", "draft")
+        )
+        return {
+            "source": "stripe+sessions" if stripe_items else "sessions",
+            "pending_count": pending,
+            "invoices": merged,
+            "autopay_note": (
+                "Your default card is charged automatically in the 72 hours "
+                "before each session with your assigned coach — not after the session."
+            ),
+        }
 
     # PG fallback: token_transactions
     if pool:
@@ -775,14 +792,49 @@ async def get_invoices(user_id: str, request: Request, limit: int = 20):
             if username_row:
                 txns = await get_transactions_pg(pool, username_row["username"], limit)
                 if txns:
-                    return {"source": "pg", "invoices": txns}
+                    return {"source": "pg", "invoices": txns, "pending_count": 0}
         except Exception as e:
             logger.warning("get_invoices: PG fallback failed for %s: %s", user_id, e)
 
     # JSON fallback
     billing = load_json(DATA_DIR / "billing.json")
     txns = [t for t in billing.get("transactions", []) if t.get("user_id") == user_id]
-    return {"source": "local", "invoices": txns[-limit:]}
+    return {"source": "local", "invoices": txns[-limit:], "pending_count": 0}
+
+
+class PayInvoiceRequest(BaseModel):
+    user_id: str
+    invoice_id: Optional[str] = None
+
+
+@router.post("/invoices/pay")
+async def pay_open_invoice(req: PayInvoiceRequest, request: Request):
+    """Charge the default card on an open Stripe invoice (no duplicate session PI)."""
+    if not STRIPE_AVAILABLE or not stripe.api_key:
+        raise HTTPException(503, "Stripe not available")
+    if not req.invoice_id or not str(req.invoice_id).startswith("in_"):
+        raise HTTPException(400, "invoice_id required")
+    pool = getattr(request.app.state, "db_pool", None)
+    try:
+        inv = stripe.Invoice.pay(req.invoice_id)
+        from app.services.session_invoice_ledger import mark_session_paid_from_invoice
+
+        if pool:
+            payload = inv.to_dict() if hasattr(inv, "to_dict") else {
+                "id": inv.id,
+                "amount_paid": getattr(inv, "amount_paid", 0),
+                "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+                "metadata": dict(getattr(inv, "metadata", None) or {}),
+            }
+            await mark_session_paid_from_invoice(pool, payload)
+        return {
+            "status": getattr(inv, "status", None),
+            "invoice_id": inv.id,
+            "hosted_url": getattr(inv, "hosted_invoice_url", None),
+            "paid": getattr(inv, "status", None) == "paid",
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, str(e))
 
 
 # =========================================================================
