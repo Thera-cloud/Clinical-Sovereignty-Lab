@@ -435,6 +435,33 @@ async def test_prepare_public_trial_start_creates_row_and_reports_state(monkeypa
     assert out["turns_used"] == 0
     assert out["turns_limit"] == ptg.TRIAL_TURN_LIMIT
     assert out["converted"] is False
+    assert out["history"] == []
+
+
+@pytest.mark.asyncio
+async def test_prepare_public_trial_start_returns_existing_history(monkeypatch):
+    pool = _FakeTrialPool()
+    duh = ptg.compute_device_uuid_hash("uuid-return")
+    pool.store[duh] = {
+        "turns_used": 3,
+        "trial_history": [
+            {"user": "hello", "assistant": "I'm here."},
+            {"user": "again", "assistant": "Welcome back."},
+        ],
+        "converted": False,
+        "gated_at": None,
+    }
+    monkeypatch.setattr(ptg, "_DB_POOL", pool)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_ENABLED", True)
+    monkeypatch.setattr(ptg, "PUBLIC_TRIAL_TURNSTILE_ENABLED", False)
+
+    out = await ptg.prepare_public_trial_start({"device_fingerprint": "uuid-return"}, "1.2.3.4", "ua")
+    assert out["type"] == "trial_state"
+    assert out["turns_used"] == 3
+    assert out["history"] == [
+        {"user": "hello", "assistant": "I'm here."},
+        {"user": "again", "assistant": "Welcome back."},
+    ]
 
 
 @pytest.mark.asyncio

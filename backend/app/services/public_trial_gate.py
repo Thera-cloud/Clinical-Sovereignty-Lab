@@ -960,6 +960,34 @@ def _sendgrid_trial_tracking_settings() -> Dict[str, Any]:
     }
 
 
+_MAX_CLIENT_HISTORY_PAIRS = 20
+_MAX_CLIENT_HISTORY_CHARS = 4000
+
+
+def _history_for_client(history: Any) -> list:
+    """Strip trial_history to {user, assistant} strings for try.html restore.
+
+    Returning visitors were seeing a blank chat after a real session because
+    trial_state omitted history even though db_start_trial already loaded it.
+    """
+    out: list = []
+    if not isinstance(history, list):
+        return out
+    for item in history[-_MAX_CLIENT_HISTORY_PAIRS:]:
+        if not isinstance(item, dict):
+            continue
+        pair: Dict[str, str] = {}
+        user = item.get("user")
+        assistant = item.get("assistant")
+        if isinstance(user, str) and user.strip():
+            pair["user"] = user.strip()[:_MAX_CLIENT_HISTORY_CHARS]
+        if isinstance(assistant, str) and assistant.strip():
+            pair["assistant"] = assistant.strip()[:_MAX_CLIENT_HISTORY_CHARS]
+        if pair:
+            out.append(pair)
+    return out
+
+
 async def prepare_public_trial_start(data: Dict[str, Any], ip: str, ua: str) -> Dict[str, Any]:
     """Handles `public_trial_start`. Returns the WS payload to send back
     (`trial_state`, `turnstile_required`, or a generic `error`).
@@ -991,6 +1019,7 @@ async def prepare_public_trial_start(data: Dict[str, Any], ip: str, ua: str) -> 
             "turns_used": state["turns_used"],
             "turns_limit": TRIAL_TURN_LIMIT,
             "converted": state["converted"],
+            "history": _history_for_client(state.get("trial_history")),
         }
     except Exception as e:
         logger.warning("public_trial_gate: public_trial_start failed: %s", e)

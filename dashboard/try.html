@@ -368,7 +368,7 @@ h1 {
   </div>
 
   <div class="input-row" id="inputRow">
-    <input type="text" id="chatInput" placeholder="Type your message..." disabled />
+    <input type="text" id="chatInput" placeholder="Check the box above to begin" disabled />
     <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
   </div>
 
@@ -435,6 +435,10 @@ if (startConsentEl) {
     if (startConsentEl.checked) {
       startConsentGiven = true;
       startConsentEl.disabled = true; // one-shot -- no un-checking mid-session
+      if (document.getElementById('chatWindow').children.length === 0) {
+        appendMessage('One moment — connecting to Little Nate...', 'system');
+      }
+      document.getElementById('chatInput').placeholder = 'Connecting…';
       if (!socket || socket.readyState === WebSocket.CLOSED) connectWS();
       if (typeof window.__tryInitTurnstile === 'function') window.__tryInitTurnstile();
       trySendStartAndPending();
@@ -653,6 +657,8 @@ function handleServerMessage(data) {
     case 'trial_state':
       turnstileRequiredNoticeShown = false;
       updateTurnsCounter(data.turns_used || 0, data.turns_limit);
+      restoreHistory(data.history);
+      document.getElementById('chatInput').placeholder = 'Type your message...';
       if ((data.turns_used || 0) >= (data.turns_limit || TURNS_LIMIT)) {
         dismissNudge();
         showGate();
@@ -732,6 +738,18 @@ function handleServerMessage(data) {
 }
 
 var lastSentText = '';
+var historyRestored = false;
+
+function restoreHistory(history) {
+  if (historyRestored || !Array.isArray(history) || !history.length) return;
+  historyRestored = true;
+  var win = document.getElementById('chatWindow');
+  win.querySelectorAll('.msg.system').forEach(function(el) { el.remove(); });
+  history.forEach(function(pair) {
+    if (pair && pair.user) appendMessage(pair.user, 'user');
+    if (pair && pair.assistant) appendMessage(pair.assistant, 'nate');
+  });
+}
 
 function sendTrialMessage(text, starterKey) {
   if (!text || gated) return true;
