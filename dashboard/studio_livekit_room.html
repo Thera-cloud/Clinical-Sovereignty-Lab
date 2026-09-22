@@ -93,7 +93,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="stage">
   <div id="hosts">
     <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
-    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260909b" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio></div></div>
+    <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260909b" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio><audio id="nateThinker" playsinline></audio></div></div>
     <div class="tile" id="shareTile"><h3>ON SCREEN <button type="button" id="btnShareClose">Close</button></h3><div id="shareTabs"><button type="button" id="tabShareScreen" data-share="screen">Screen</button><button type="button" id="tabShareImage" data-share="image">Image</button><button type="button" id="tabShareDoc" data-share="doc">Document</button><button type="button" id="tabShareVideo" data-share="video">Video</button><button type="button" id="tabShareLookup" data-share="lookup">Lookup</button></div><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or look it up</div></div></div>
   </div>
   <aside id="rail">
@@ -161,6 +161,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var LISTEN_SILENCE_MS = 1800;
   var LISTEN_HOLD_MS = 7000;
   var CAP_REC_TAIL_MS = 500;
+  var THINK_HOLD_MS = 12000;
+  var BARGE_MS = 5500;
+  var THINK_LINE = 'Let me take a moment to gather that — I will come right back.';
+  var thinkTimer = null, thinkBlob = null, thinkUrl = '';
   var listenOn = false, listenBuf = '', listenInterim = '', listenTimer = null;
   var capHold = {};
   var holdDraft = {id:0, text:'', event:'', reply:'', blob:null, abort:false, release:false, inflight:false, releaseText:'', releaseEvent:''};
@@ -194,6 +198,59 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     holdDraft.blob = null;
     holdDraft.text = '';
     holdDraft.id += 1;
+  }
+  function nateAudioPlaying(){
+    var a = speakerEl();
+    return !!(a && !a.paused && !a.ended && a.currentTime > 0);
+  }
+  function stopThinkClip(){
+    if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
+    var t = document.getElementById('nateThinker');
+    if (t){ try { t.pause(); t.removeAttribute('src'); t.load(); } catch (e) {} }
+  }
+  function armThinkHold(){
+    if (thinkTimer) clearTimeout(thinkTimer);
+    thinkTimer = setTimeout(function(){
+      thinkTimer = null;
+      if (lnPaused || nateAudioPlaying()) return;
+      playThinkClip();
+    }, THINK_HOLD_MS);
+  }
+  function warmThinkClip(){
+    if (guest || !cfg.session || !cfg.token || thinkBlob) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({text: THINK_LINE})
+    }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){
+      if (b && b.size >= 80) thinkBlob = b;
+    }).catch(function(){});
+  }
+  function playThinkClip(){
+    if (lnPaused || nateAudioPlaying()) return;
+    setStatus('Little Nate is gathering that…');
+    addLine('Nate', THINK_LINE);
+    sendData({op:'nate_line', text: THINK_LINE});
+    function playBlob(b){
+      var el = document.getElementById('nateThinker');
+      if (!el || !b) return;
+      if (thinkUrl) try { URL.revokeObjectURL(thinkUrl); } catch (e) {}
+      thinkUrl = URL.createObjectURL(b);
+      el.src = thinkUrl;
+      el.volume = 1;
+      el.play().catch(function(){});
+    }
+    if (thinkBlob) { playBlob(thinkBlob); return; }
+    if (!cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/speak', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.token},
+      body: JSON.stringify({text: THINK_LINE})
+    }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){
+      if (!b || b.size < 80 || nateAudioPlaying()) return;
+      thinkBlob = b;
+      playBlob(b);
+    }).catch(function(){});
   }
   function holdTurnBody(text, event){
     var ctx = roomCtx();
@@ -300,12 +357,14 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         setStatus('Click once so speakers can play Little Nate.');
         return;
       }
+      stopThinkClip();
       var gen = ++speakGen;
       nateSpeaking = true;
       lnAvatar('warm');
       playNateBlob(blob, gen);
       return;
     }
+    armThinkHold();
     speakNate(reply);
   }
   function deliverHold(text, event){
@@ -315,6 +374,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       holdDraft.releaseEvent = event || holdDraft.event || 'line';
       lnAvatar('thoughtful', 'listening');
       setStatus('Little Nate is already on this…');
+      armThinkHold();
       return;
     }
     if (holdDraft.reply && !holdDraft.abort && holdTextMatches(text)) {
@@ -612,6 +672,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     a.src = nateAudioUrl;
     a.onplaying = function(){
       if (gen !== speakGen) return;
+      stopThinkClip();
       lnAvatar('warm', 'speaking');
     };
     a.onended = function(){
@@ -830,6 +891,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     nateSpeaking = false;
     pendingNate = '';
     pendingNateBlob = null;
+    stopThinkClip();
     var a = speakerEl();
     if (a){ try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {} }
     if (window.speechSynthesis) speechSynthesis.cancel();
@@ -854,6 +916,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function runNateTurn(text, toss, event){
     turnBusy = true;
     nateTurnAt = Date.now();
+    armThinkHold();
     if (toss) { lnPaused = false; document.getElementById('btnPause').textContent = 'Pause LN'; document.getElementById('btnPause').classList.remove('on'); }
     var ctx = roomCtx();
     var kind = event || (toss ? 'toss' : 'line');
@@ -1526,10 +1589,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         else releaseCapSoon(id);
       });
     }
-    var remoteTalk = (speakers || []).some(function(p){
-      return p && p.identity && p.identity !== localId;
-    });
-    if (!nateSpeaking || !remoteTalk) {
+    var onAirTalk = !!(activeId && (speakers || []).some(function(p){
+      return p && p.identity && p.identity === activeId && p.identity !== localId;
+    }));
+    if (!nateSpeaking || !onAirTalk) {
       if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null; }
       return;
     }
@@ -1538,8 +1601,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       bargeTimer = null;
       if (!nateSpeaking) return;
       stopNateVoice();
-      setStatus('Little Nate yielded — host or caller has the floor.');
-    }, 2500);
+      setStatus('Little Nate yielded — the on-air caller has the floor.');
+    }, BARGE_MS);
   });
   room.on(LK.RoomEvent.DataReceived, function(payload, participant){
     try {
@@ -1609,6 +1672,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }
     setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — Bring on moves Caller ID 1 to air.');
     greeted = true;
+    if (!guest) warmThinkClip();
     if (!guest){
       loadBoothSounds();
       setTimeout(function(){

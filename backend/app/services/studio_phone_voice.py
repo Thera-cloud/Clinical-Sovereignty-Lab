@@ -122,9 +122,9 @@ async def synthesize_rex_wav(text: str) -> Optional[bytes]:
                 {"type": "response.create", "response": {"modalities": ["audio"]}}
             )
         )
-        deadline = asyncio.get_event_loop().time() + 28.0
+        deadline = asyncio.get_event_loop().time() + 45.0
         while asyncio.get_event_loop().time() < deadline:
-            raw = await asyncio.wait_for(ws.recv(), timeout=12.0)
+            raw = await asyncio.wait_for(ws.recv(), timeout=16.0)
             ev = json.loads(raw)
             et = ev.get("type") or ""
             if et == "error":
@@ -182,7 +182,7 @@ async def synthesize_onyx_wav(text: str) -> Optional[bytes]:
         ),
     }
     try:
-        async with httpx.AsyncClient(timeout=24.0) as client:
+        async with httpx.AsyncClient(timeout=36.0) as client:
             resp = await client.post(
                 url,
                 json=payload,

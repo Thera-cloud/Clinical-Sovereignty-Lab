@@ -57,6 +57,7 @@ async def transcribe(
     content_type: str = "audio/webm",
     prompt: Optional[str] = None,
     fail_fast: bool = False,
+    timeout_s: Optional[float] = None,
 ) -> Optional[str]:
     """
     Transcribe audio bytes to text via Azure Whisper.
@@ -105,6 +106,11 @@ async def transcribe(
         last_err = ""
         retries = 1 if fail_fast else _STT_MAX_RETRIES
         http_timeout = 8.0 if fail_fast else 120.0
+        if timeout_s is not None:
+            try:
+                http_timeout = max(8.0, float(timeout_s))
+            except (TypeError, ValueError):
+                pass
         for attempt in range(retries):
             try:
                 async with httpx.AsyncClient(timeout=http_timeout) as client:

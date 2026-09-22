@@ -82,10 +82,15 @@ def test_room_html_mirrors_hold():
     assert "var LISTEN_SILENCE_MS = 1800;" in html
     assert "var LISTEN_HOLD_MS = 7000;" in html
     assert "var CAP_REC_TAIL_MS = 500;" in html
+    assert "var THINK_HOLD_MS = 12000;" in html
+    assert "var BARGE_MS = 5500;" in html
     assert "function holdFloorMs" in html
     assert "function primeHold" in html
     assert "function deliverHold" in html
     assert "function playPrimedHold" in html
+    assert "function armThinkHold" in html
+    assert "nateThinker" in html
+    assert "identity === activeId" in html
     assert "holdTextMatches" in html
     assert "rec.continuous = true;" in html
     assert "function releaseCapSoon" in html

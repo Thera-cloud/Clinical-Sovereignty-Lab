@@ -532,7 +532,12 @@ async def ingest_live_caption(
     try:
         from app.services.whisper_stt import transcribe
 
-        text = (await transcribe(audio, content_type=ctype, fail_fast=True)) or ""
+        stt_timeout = min(32.0, max(8.0, len(audio) / 12000.0))
+        text = (
+            await transcribe(
+                audio, content_type=ctype, fail_fast=True, timeout_s=stt_timeout
+            )
+        ) or ""
     except Exception as exc:
         logger.warning("studio caption stt skipped: %s", exc)
     text = text.strip()

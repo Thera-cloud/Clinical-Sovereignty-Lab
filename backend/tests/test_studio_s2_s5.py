@@ -290,7 +290,11 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "AI CO-HOST" not in html
     assert "/avatar-modes/studio_portrait.html" in html
     assert "v=20260909b" in html
-    assert "}, 2500);" in html
+    assert "var BARGE_MS = 5500;" in html
+    assert "THINK_HOLD_MS" in html
+    assert "nateThinker" in html
+    assert "function armThinkHold" in html
+    assert "function playThinkClip" in html
     assert "}, 450);" not in html
     assert "function waitLabel" in html
     assert "n > 10 ? '10+'" in html
@@ -304,8 +308,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "max_tokens=260 if howto else 160" in sess_src
     assert "max_tokens=160 if howto else 120" not in sess_src
     voice_src = (ROOT / "backend/app/services/studio_phone_voice.py").read_text()
-    assert "time() + 28.0" in voice_src
-    assert "time() + 10.0" not in voice_src
+    assert "time() + 45.0" in voice_src
+    assert "time() + 28.0" not in voice_src
     assert "expression_viewer.html" not in html
     assert "speakGen" in html
     assert "pendingCaps.slice(-24)" not in html
@@ -366,7 +370,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260921c" in url
+    assert "v=20260922a" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -401,7 +405,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "asks_app_howto(thread_text" not in src_sess
     assert "remember_line" in src_sess
     assert "THIS_SHOW" in src_sess
-    assert "synthesize_studio_voice" in src_sess
+    assert "timeout_s=stt_timeout" in src_sess
     assert 'tts_provider="azure_premium"' in src_sess
     assert 'voice="onyx"' in src_sess
     assert 'tts_provider="edge_tts"' not in src_sess
