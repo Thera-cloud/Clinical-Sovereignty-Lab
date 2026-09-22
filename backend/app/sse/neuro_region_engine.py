@@ -27,6 +27,7 @@ from app.sse.neuro_scoring import (
     pair_champion,
     resolve_panel_region,
     roll_coliseum_floor,
+    AGE_GATE_EXCLUDE,
     scores_from_theme_counts,
     select_neuro_biome,
     visiting_figures,
@@ -108,6 +109,25 @@ async def _last_panel_region(user_id: str, db_pool) -> str:
         return REGION_ORIGIN
 
 
+async def _recent_neuro_biomes(user_id: str, db_pool, n: int = 3) -> List[str]:
+    """Recent Neuro places, so the next panel walks a different doorway."""
+    try:
+        from app.sse.thera_world_regions import NEURO_BIOMES
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT biome FROM sse_panel_log WHERE user_id = $1 AND biome = ANY($2::text[]) "
+                "ORDER BY generated_at DESC LIMIT $3",
+                user_id, list(NEURO_BIOMES), n)
+        seen: List[str] = []
+        for r in rows:
+            b = r["biome"]
+            if b and b not in seen:
+                seen.append(b)
+        return seen
+    except Exception:
+        return []
+
+
 async def _recent_neuro_champions(user_id: str, db_pool, n: int = 3) -> List[str]:
     try:
         async with db_pool.acquire() as conn:
@@ -128,9 +148,45 @@ def _champion_to_npc(c: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+async def _stamped_theme_counts(user_id: str, db_pool) -> Dict[str, int]:
+    """Read neuro_stems already stamped on crystals. Older than the live 150-text window still counts."""
+    uid = await _resolve_uid(user_id, db_pool)
+    if not uid:
+        return {}
+    counts: Dict[str, int] = {}
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT metadata FROM nate_intelligence_crystals "
+                "WHERE user_id = $1 AND superseded_by IS NULL AND metadata ? 'neuro_stems' "
+                "ORDER BY created_at DESC LIMIT 200", uid)
+        for r in rows:
+            meta = _loads(r["metadata"]) or {}
+            if not isinstance(meta, dict):
+                continue
+            for stem in meta.get("neuro_stems") or []:
+                key = str(stem)
+                counts[key] = counts.get(key, 0) + 1
+    except Exception as e:
+        logger.warning("stamped neuro stem read failed for %s: %s", user_id, e)
+    return counts
+
+
 async def compute_neuro_scores(user_id: str, profile: Dict[str, Any], journey: Dict[str, Any], db_pool) -> Dict[str, float]:
-    """Rolling 12-vector from the same mined theme_counts Origin already uses."""
-    fresh = scores_from_theme_counts(profile.get("theme_counts") or {})
+    """Rolling 12-vector. Live theme_counts and stamped crystal metadata share one vector.
+
+    Per stem, the stronger count wins so the same crystal is not double-counted.
+    """
+    merged: Dict[str, int] = {}
+    for src in (await _stamped_theme_counts(user_id, db_pool), profile.get("theme_counts") or {}):
+        for k, v in (src or {}).items():
+            try:
+                n = int(v or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n > merged.get(str(k), 0):
+                merged[str(k)] = n
+    fresh = scores_from_theme_counts(merged)
     prev = _loads(journey.get("neuro_scores")) or None
     if not isinstance(prev, dict) or not prev:
         prev = None
@@ -167,26 +223,31 @@ async def resolve_neuro_panel_context(
 
     # Persist the score even on Origin days — this is the unlock row and the coach signal.
     try:
-        await _persist_scores(user_id, scores, None, None, None, db_pool)
+        # Journey row only. The score-log row is written once, with the panel id, on outcome.
+        await _persist_scores(user_id, scores, None, None, None, db_pool, write_log=False)
     except Exception as e:
         logger.warning("neuro score persist failed for %s: %s", user_id, e)
 
     if region != REGION_NEURO:
         return None
 
-    biome_id = select_neuro_biome(scores)
+    recent_places = await _recent_neuro_biomes(user_id, db_pool, n=3)
+    biome_id = select_neuro_biome(scores, avoid=recent_places)
     spec = neuro_biome_spec(biome_id)
     if not spec:
         return None
+    exclude = AGE_GATE_EXCLUDE if age_gated else ()
     skip = await _recent_neuro_champions(user_id, db_pool, n=2)
-    champion = pair_champion(scores, biome_id, skip_names=skip)
+    champion = pair_champion(scores, biome_id, skip_names=skip, exclude_names=exclude)
     if not champion:
         return None
-    visitors = visiting_figures(scores, biome_id, k=2)
+    visitors = visiting_figures(scores, biome_id, k=2, exclude_names=exclude)
 
     desc = spec.get("bright_description") if age_gated else spec.get("description")
     desc = desc or spec.get("description") or spec.get("display_name", biome_id)
     healing = spec.get("healing_visual") or ""
+    if healing and healing not in desc:
+        desc = f"{desc}. {healing}"
     floor_id = None
     if biome_id == "coliseum_of_ascendance":
         floor_id = roll_coliseum_floor(seed=f"{user_id}:{datetime.now(timezone.utc).date()}")
@@ -219,6 +280,8 @@ async def _persist_scores(
     champion: Optional[str],
     panel_id: Optional[str],
     db_pool,
+    *,
+    write_log: bool = True,
 ) -> None:
     hd = all_domain_health(scores)
     h = neuro_health(scores)
@@ -226,11 +289,13 @@ async def _persist_scores(
         await conn.execute(
             "UPDATE sse_user_journeys SET neuro_scores = $1::jsonb, neuro_last_scored_at = NOW() "
             "WHERE user_id = $2", json.dumps(scores), user_id)
+        if not write_log:
+            return
         await conn.execute(
-            "INSERT INTO sse_neuro_score_log (user_id, scores, h_d, h, selected_biome, champion, panel_id) "
-            "VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7::uuid)",
+            "INSERT INTO sse_neuro_score_log (user_id, scores, h_d, h, selected_biome, champion, panel_id, source) "
+            "VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7::uuid, $8)",
             user_id, json.dumps(scores), json.dumps(hd), round(h, 4),
-            biome_id or select_neuro_biome(scores), champion, panel_id)
+            biome_id or select_neuro_biome(scores), champion, panel_id, "theme_counts")
 
 
 async def record_neuro_panel_outcome(

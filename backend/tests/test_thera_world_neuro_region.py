@@ -185,7 +185,7 @@ def test_coliseum_floor_allowlist_and_seed():
 
 
 # ---------------------------------------------------------------------------
-# Routing — Origin frozen unless unlocked + strained
+# Routing — whole-world journey. Healthy vectors enter Neuro too.
 # ---------------------------------------------------------------------------
 
 def test_region_routing(monkeypatch):
@@ -193,18 +193,55 @@ def test_region_routing(monkeypatch):
     strained = {"authority_deficit": 0.8}
     # locked journey → Origin even when strained
     assert ns.resolve_panel_region({"current_biome": "mirror_lake"}, strained) == REGION_ORIGIN
-    # unlocked via open_sky → Neuro when a structure is strained
+    # unlocked via open_sky → Neuro, including a healthy vector (growth is not a deficit gate)
     j = {"current_biome": "open_sky"}
     assert ns.resolve_panel_region(j, strained) == REGION_NEURO
-    # healthy vector → Origin
-    assert ns.resolve_panel_region(j, {"authority_mature": 0.9}) == REGION_ORIGIN
-    # alternate: yesterday Neuro + only mild strain → Origin today
+    assert ns.resolve_panel_region(j, {"authority_mature": 0.9}) == REGION_NEURO
+    assert ns.resolve_panel_region(j, {}) == REGION_NEURO
+    # alternate: yesterday Neuro and not deeply strained → Origin today (both regions are walked)
     assert ns.resolve_panel_region(j, {"authority_deficit": 0.3}, last_region=REGION_NEURO) == REGION_ORIGIN
+    assert ns.resolve_panel_region(j, {"authority_mature": 0.9}, last_region=REGION_NEURO) == REGION_ORIGIN
     # deep strain → back-to-back allowed
     assert ns.resolve_panel_region(j, {"authority_deficit": 0.9}, last_region=REGION_NEURO) == REGION_NEURO
     # unlocked via prior score row
     assert ns.resolve_panel_region({"neuro_last_scored_at": "2026-09-01"}, strained) == REGION_NEURO
     assert ns.resolve_panel_region({"neuro_scores": json.dumps({"authority_deficit": -0.2})}, strained) == REGION_NEURO
+
+
+def test_biome_rotation_skips_recent_places():
+    v = {"separation_deficit": 0.9}
+    home = ns.select_neuro_biome(v)
+    assert home == STRUCTURE_TO_BIOME["separation"]
+    nxt = ns.select_neuro_biome(v, avoid=[home])
+    assert nxt != home
+    assert nxt in STRUCTURE_TO_BIOME.values()
+
+
+def test_boundaries_and_previously_unmapped_themes_move_poles():
+    b = ns.scores_from_theme_counts({"boundaries": 6})
+    assert b["separation_mature"] > 0
+    assert b["separation_deficit"] == 0
+    anxiety = ns.scores_from_theme_counts({"anxiety": 4, "grief": 4, "spiritual": 4})
+    assert anxiety["authority_deficit"] < 0
+    assert anxiety["attachment_deficit"] < 0
+    assert anxiety["authority_mature"] > 0  # spiritual is a growth stem
+
+
+def test_age_gate_drops_literal_force_figures():
+    champ = ns.pair_champion(
+        {"authority_hyper": 1.0}, "coliseum_of_ascendance", exclude_names=ns.AGE_GATE_EXCLUDE)
+    assert champ is not None
+    assert champ["name"] not in ns.AGE_GATE_EXCLUDE
+
+
+def test_scrub_rewrites_engine_labels():
+    out = ns.scrub_client_copy("Your attachment is -0.40 and Authority is 30%.")
+    assert "attachment" not in out.lower()
+    assert "authority" not in out.lower()
+    assert "-0.40" not in out
+    assert "%" not in out
+    assert "hearth" in out.lower()
+    assert "voice" in out.lower()
 
 
 def test_kill_switch_forces_origin(monkeypatch):

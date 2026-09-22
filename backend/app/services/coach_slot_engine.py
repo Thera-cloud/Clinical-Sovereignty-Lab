@@ -225,3 +225,72 @@ async def compute_available_slots(
         result["booked_slots"] = booked_slots
 
     return result
+
+
+def _as_aware(raw: str) -> Optional[_dt.datetime]:
+    s = (raw or "").strip().replace("Z", "+00:00")
+    if not s:
+        return None
+    try:
+        dt = _dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        from zoneinfo import ZoneInfo
+        dt = dt.replace(tzinfo=ZoneInfo(DEFAULT_TZ))
+    return dt
+
+
+async def appointment_blocked_by_google(
+    db_pool: Any, coach_hw_id: str, start_iso: str, end_iso: str,
+) -> Optional[str]:
+    """Block a booking that overlaps Google busy. Out of office is a hard override.
+
+    Returns an error code, or None when the window is clear. Flag
+    COACH_GOOGLE_OOO_BLOCKS_BOOKING=false turns the gate off.
+    """
+    import os
+    if os.getenv("COACH_GOOGLE_OOO_BLOCKS_BOOKING", "true").lower() in ("0", "false", "no", "off"):
+        return None
+    if not db_pool or not (coach_hw_id or "").strip():
+        return None
+    start = _as_aware(start_iso)
+    end = _as_aware(end_iso)
+    if not start or not end:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            username = await conn.fetchval(
+                "SELECT username FROM users WHERE hardware_id = $1 LIMIT 1",
+                coach_hw_id,
+            )
+            if not username:
+                return None
+            try:
+                rows = await conn.fetch(
+                    "SELECT event_type, summary FROM google_external_busy "
+                    "WHERE user_id = $1 AND start_at < $3 AND end_at > $2",
+                    username, start, end,
+                )
+            except Exception:
+                rows = await conn.fetch(
+                    "SELECT summary FROM google_external_busy "
+                    "WHERE user_id = $1 AND start_at < $3 AND end_at > $2",
+                    username, start, end,
+                )
+    except Exception:
+        return None
+    if not rows:
+        return None
+    for r in rows:
+        try:
+            et = r["event_type"] or ""
+        except Exception:
+            et = ""
+        try:
+            summary = (r["summary"] or "").lower()
+        except Exception:
+            summary = ""
+        if et == "outOfOffice" or "out of office" in summary:
+            return "COACH_OUT_OF_OFFICE"
+    return "Time slot conflict"

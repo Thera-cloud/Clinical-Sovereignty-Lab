@@ -15288,6 +15288,23 @@ async def handle_client(websocket, path=None):
                                     save_json_file(SESSIONS_FILE, sessions)
                             except Exception as _sync_e:
                                 print(f">>> [BOOKING] PG sync skipped: {_sync_e}")
+                            # QUANTUM-CRYSTAL-ARCH: Google out-of-office overrides the published schedule
+                            try:
+                                from app.services.coach_slot_engine import appointment_blocked_by_google
+                                _ooo_msg = await appointment_blocked_by_google(
+                                    db_pool, coach_id, scheduled_start, scheduled_end,
+                                )
+                                if _ooo_msg:
+                                    await websocket.send(json.dumps({
+                                        "type": "error",
+                                        "message": _ooo_msg,
+                                        "detail": "This coach is out of office for that time."
+                                        if _ooo_msg == "COACH_OUT_OF_OFFICE"
+                                        else "That time is already taken.",
+                                    }))
+                                    continue
+                            except Exception as _ooo_e:
+                                print(f">>> [BOOKING] google ooo check skipped: {_ooo_e}")
                             # Conflict check — QUANTUM-CRYSTAL-ARCH: pending_approval also blocks the slot
                             conflict = False
                             for s in sessions:

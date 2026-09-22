@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from app.services.skyeye_platform_base import TokenCipher
@@ -54,6 +54,47 @@ GOOGLE_WS_CLIENT_SECRET = os.getenv("GOOGLE_WS_CLIENT_SECRET", "")
 
 def _is_clone_node() -> bool:
     return os.getenv("IS_CLONE", "").lower() in ("true", "1", "yes")
+
+
+def all_day_bounds(start_date: str, end_date: str, tz_name: str = "America/New_York") -> Tuple[str, str]:
+    """Google all-day end.date is exclusive. Bounds are midnight in the coach TZ."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(tz_name)
+    start = datetime.fromisoformat(start_date).replace(tzinfo=tz)
+    end = datetime.fromisoformat(end_date).replace(tzinfo=tz)
+    return start.isoformat(), end.isoformat()
+
+
+def external_busy_row(ev: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Busy window for availability. Official out-of-office always blocks, including all-day."""
+    if (ev.get("status") or "") == "cancelled":
+        return None
+    priv = ((ev.get("extendedProperties") or {}).get("private") or {})
+    if priv.get("sanctuary_session_id"):
+        return None
+    event_type = ev.get("eventType") or "default"
+    if ev.get("transparency") == "transparent" and event_type != "outOfOffice":
+        return None
+    start_obj = ev.get("start") or {}
+    end_obj = ev.get("end") or {}
+    if event_type == "outOfOffice" and start_obj.get("date") and end_obj.get("date"):
+        start, end = all_day_bounds(start_obj["date"], end_obj["date"])
+    else:
+        start = start_obj.get("dateTime")
+        end = end_obj.get("dateTime")
+        if not start or not end:
+            return None
+    gid = ev.get("id")
+    if not gid:
+        return None
+    summary = ev.get("summary") or ("Out of office" if event_type == "outOfOffice" else "")
+    return {
+        "google_event_id": str(gid),
+        "start": str(start),
+        "end": str(end),
+        "summary": str(summary),
+        "event_type": str(event_type),
+    }
 
 
 def parse_gcal_datetime(value: Any) -> Optional[datetime]:
@@ -327,27 +368,31 @@ class GoogleCalendarSyncAgent:
         applied = 0
         external_busy: List[Dict[str, str]] = []
         external_rows: List[Dict[str, Any]] = []
+        cancelled_ids: List[str] = []
         for ev in events:
             if await self._apply_event(user_id, ev, calendar_id):
                 applied += 1
-            # Track busy windows (skip cancelled and all-day)
             if ev.get("status") == "cancelled":
+                if ev.get("id"):
+                    cancelled_ids.append(str(ev["id"]))
                 continue
-            start = (ev.get("start") or {}).get("dateTime")
-            end = (ev.get("end") or {}).get("dateTime")
-            if start and end and not self._is_sanctuary_event(ev):
-                external_busy.append({"start": start, "end": end})
-                external_rows.append({
-                    "event_id": ev.get("id") or "",
-                    "summary": ev.get("summary") or "",
-                    "start": start,
-                    "end": end,
-                })
+            row = external_busy_row(ev)
+            if not row:
+                continue
+            external_busy.append({"start": row["start"], "end": row["end"]})
+            external_rows.append(row)
 
         # Update in-process busy cache (only useful within the backend process)
         self.coach_busy_cache[user_id] = external_busy
-        # Persist to PG so the bridge (separate container) can also subtract these.
-        await self._persist_external_busy(user_id, calendar_id, external_rows)
+        # Persist so REST, chat, and the bridge subtract the same windows.
+        # A first pull (no sync token) replaces future rows. Later pulls only
+        # upsert changes and drop cancelled ids — a lone OOO delta must not
+        # wipe the rest of the coach's busy cache.
+        await self._persist_external_busy(
+            user_id, calendar_id, external_rows,
+            full_replace=not sync_token,
+            cancelled_ids=cancelled_ids,
+        )
 
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -411,49 +456,78 @@ class GoogleCalendarSyncAgent:
             logger.warning("apply_event failed for session %s: %s", session_id, e)
             return False
 
-    async def _persist_external_busy(self, user_id: str, calendar_id: str,
-                                       rows: List[Dict[str, Any]]):
-        """Replace this user's external busy windows in PG.
-
-        Strategy: delete this user's existing rows, insert the fresh set. The
-        cache is small per user (only forward-looking events), so a full
-        replace is simpler than diffing. If a sync_token-based incremental
-        pull returned no events, we still call this with an empty list — that
-        means no changes since last token, NOT 'no events at all'. Skip the
-        delete in that case to avoid wiping known-good state.
+    async def _persist_external_busy(
+        self, user_id: str, calendar_id: str, rows: List[Dict[str, Any]],
+        *, full_replace: bool = False, cancelled_ids: Optional[List[str]] = None,
+    ):
+        """Upsert busy windows. Full sync replaces future rows; incremental
+        only deletes ids Google marked cancelled.
         """
-        if not rows:
+        cancelled_ids = [c for c in (cancelled_ids or []) if c]
+        if not rows and not cancelled_ids and not full_replace:
             return
         try:
             async with self._pool.acquire() as conn:
+                has_type = await conn.fetchval(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'google_external_busy' AND column_name = 'event_type'"
+                )
                 async with conn.transaction():
+                    event_ids: List[str] = []
                     for r in rows:
-                        try:
-                            start_dt = parse_gcal_datetime(r["start"])
-                            end_dt = parse_gcal_datetime(r["end"])
-                            if not start_dt or not end_dt:
-                                continue
-                        except Exception:
+                        gid = r.get("google_event_id") or r.get("event_id") or ""
+                        if not gid:
                             continue
-                        await conn.execute(
-                            "INSERT INTO google_external_busy "
-                            "(user_id, google_event_id, calendar_id, summary, start_at, end_at, updated_at) "
-                            "VALUES ($1, $2, $3, $4, $5, $6, NOW()) "
-                            "ON CONFLICT (user_id, google_event_id) DO UPDATE SET "
-                            "calendar_id = EXCLUDED.calendar_id, summary = EXCLUDED.summary, "
-                            "start_at = EXCLUDED.start_at, end_at = EXCLUDED.end_at, "
-                            "updated_at = NOW()",
-                            user_id, r["event_id"], calendar_id, r["summary"][:200],
-                            start_dt, end_dt,
-                        )
-                    # Drop stale rows (not in the current pull AND in the past or far-future window)
-                    event_ids = [r["event_id"] for r in rows if r.get("event_id")]
-                    if event_ids:
+                        start_dt = parse_gcal_datetime(r.get("start"))
+                        end_dt = parse_gcal_datetime(r.get("end"))
+                        if not start_dt or not end_dt:
+                            continue
+                        event_ids.append(str(gid))
+                        summary = (r.get("summary") or "")[:200]
+                        if has_type:
+                            await conn.execute(
+                                "INSERT INTO google_external_busy "
+                                "(user_id, google_event_id, calendar_id, summary, "
+                                "start_at, end_at, event_type, updated_at) "
+                                "VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) "
+                                "ON CONFLICT (user_id, google_event_id) DO UPDATE SET "
+                                "calendar_id = EXCLUDED.calendar_id, summary = EXCLUDED.summary, "
+                                "start_at = EXCLUDED.start_at, end_at = EXCLUDED.end_at, "
+                                "event_type = EXCLUDED.event_type, updated_at = NOW()",
+                                user_id, gid, calendar_id, summary,
+                                start_dt, end_dt, r.get("event_type") or "default",
+                            )
+                        else:
+                            await conn.execute(
+                                "INSERT INTO google_external_busy "
+                                "(user_id, google_event_id, calendar_id, summary, start_at, end_at, updated_at) "
+                                "VALUES ($1, $2, $3, $4, $5, $6, NOW()) "
+                                "ON CONFLICT (user_id, google_event_id) DO UPDATE SET "
+                                "calendar_id = EXCLUDED.calendar_id, summary = EXCLUDED.summary, "
+                                "start_at = EXCLUDED.start_at, end_at = EXCLUDED.end_at, "
+                                "updated_at = NOW()",
+                                user_id, gid, calendar_id, summary, start_dt, end_dt,
+                            )
+                    if cancelled_ids:
                         await conn.execute(
                             "DELETE FROM google_external_busy "
-                            "WHERE user_id = $1 AND end_at >= NOW() AND google_event_id != ALL($2::text[])",
-                            user_id, event_ids,
+                            "WHERE user_id = $1 AND google_event_id = ANY($2::text[])",
+                            user_id, cancelled_ids,
                         )
+                    if full_replace:
+                        if event_ids:
+                            await conn.execute(
+                                "DELETE FROM google_external_busy "
+                                "WHERE user_id = $1 AND end_at >= NOW() "
+                                "AND google_event_id != ALL($2::text[])",
+                                user_id, event_ids,
+                            )
+                        else:
+                            await conn.execute(
+                                "DELETE FROM google_external_busy "
+                                "WHERE user_id = $1 AND end_at >= NOW()",
+                                user_id,
+                            )
         except Exception as e:
             logger.warning("persist_external_busy failed for %s: %s", user_id, e)
 

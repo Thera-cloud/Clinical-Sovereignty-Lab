@@ -6,6 +6,7 @@ import pytest
 
 from app.services.google_calendar_sync_agent import (
     GoogleCalendarSyncAgent,
+    external_busy_row,
     parse_gcal_datetime,
 )
 
@@ -86,6 +87,44 @@ async def test_apply_event_binds_datetime_not_str():
     assert isinstance(end_dt, datetime) and not isinstance(end_dt, str)
     assert start_dt.utcoffset() == timedelta(hours=-4)
     assert etag == "new" and session_id == "SES_S1"
+
+
+def test_all_day_out_of_office_covers_a_published_hour():
+    from zoneinfo import ZoneInfo
+    row = external_busy_row({
+        "id": "ooo1",
+        "eventType": "outOfOffice",
+        "status": "confirmed",
+        "summary": "Out of office",
+        "start": {"date": "2026-09-22"},
+        "end": {"date": "2026-09-23"},
+    })
+    assert row is not None
+    assert row["event_type"] == "outOfOffice"
+    start = datetime.fromisoformat(row["start"])
+    end = datetime.fromisoformat(row["end"])
+    slot_start = datetime(2026, 9, 22, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    slot_end = slot_start + timedelta(hours=1)
+    assert slot_start < end and slot_end > start
+
+
+def test_transparent_default_event_does_not_block():
+    assert external_busy_row({
+        "id": "m1",
+        "transparency": "transparent",
+        "start": {"dateTime": "2026-09-22T10:00:00-04:00"},
+        "end": {"dateTime": "2026-09-22T11:00:00-04:00"},
+    }) is None
+
+
+def test_cancelled_out_of_office_is_not_a_window():
+    assert external_busy_row({
+        "id": "ooo1",
+        "status": "cancelled",
+        "eventType": "outOfOffice",
+        "start": {"date": "2026-09-22"},
+        "end": {"date": "2026-09-23"},
+    }) is None
 
 
 @pytest.mark.asyncio

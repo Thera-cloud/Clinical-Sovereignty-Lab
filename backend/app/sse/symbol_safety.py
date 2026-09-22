@@ -41,6 +41,8 @@ _MEDIUM_RISK_TIERS = {"medium_risk"}
 # Pride/Shame) carry no registry symbol and are always safe.
 CHARACTER_TO_SYMBOL: Dict[str, str] = {
     "Serpent": "serpent",
+    "Dragon Sovereign": "dragon",
+    "Death Knight": "skull_bones",
 }
 
 # Labeling-only overrides (not exclusions) — swap display language based on

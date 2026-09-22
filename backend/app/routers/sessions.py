@@ -816,7 +816,14 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
                 continue
             if (new_start < existing_end and new_end > existing_start):
                 raise HTTPException(409, "Time slot conflict with existing session")
-    
+
+    from app.services.coach_slot_engine import appointment_blocked_by_google
+    _ooo_msg = await appointment_blocked_by_google(
+        _get_db(request), req.coach_id, req.scheduled_start, req.scheduled_end,
+    )
+    if _ooo_msg:
+        raise HTTPException(409, _ooo_msg)
+
     session_id = generate_session_id()
 
     _is_consultation = req.session_type == "MASTER_CONSULTATION"
@@ -1020,6 +1027,16 @@ async def reschedule_session(
             continue
         if new_start < existing_end and new_end > existing_start:
             raise HTTPException(409, "Time slot conflict with existing session")
+
+    from app.services.coach_slot_engine import appointment_blocked_by_google
+    _ooo_msg = await appointment_blocked_by_google(
+        _get_db(request),
+        old.get("coach_id") or "",
+        new_start.isoformat(),
+        new_end.isoformat(),
+    )
+    if _ooo_msg:
+        raise HTTPException(409, _ooo_msg)
 
     meeting_id = (old.get("zoom_meeting_id") or "").strip()
     if meeting_id and settings.ENABLE_ZOOM:

@@ -57,9 +57,18 @@ STEM_TO_POLE: Dict[str, Tuple[str, str]] = {
     "perfectionism": ("integration", "hyper"),
     "forgiveness": ("integration", "mature"),
     # separation — own name
-    "boundaries": ("separation", "deficit"),
+    # "boundaries" is the corrective move (a limit, an own name), not a deficit.
+    # Enmeshment stays on codependency.
+    "boundaries": ("separation", "mature"),
     "codependency": ("separation", "deficit"),
     "rejection": ("separation", "hyper"),
+    # themes the miner already counts that previously moved no pole
+    "anxiety": ("authority", "deficit"),
+    "resentment": ("authority", "hyper"),
+    "deception": ("integration", "hyper"),
+    "grief": ("attachment", "deficit"),
+    "loss": ("attachment", "deficit"),
+    "depression": ("attachment", "deficit"),
     # attachment — hearth
     "attachment": ("attachment", "hyper"),
     "love": ("attachment", "mature"),
@@ -70,7 +79,7 @@ STEM_TO_POLE: Dict[str, Tuple[str, str]] = {
 }
 
 # Stems that signal growth across all four structures (light mature lift).
-GROWTH_STEMS: Tuple[str, ...] = ("growth", "hope", "discovery", "wonder", "faith")
+GROWTH_STEMS: Tuple[str, ...] = ("growth", "hope", "discovery", "wonder", "faith", "spiritual")
 GROWTH_WEIGHT = 0.5
 
 STEM_TO_STRUCTURE: Dict[str, str] = {k: v[0] for k, v in STEM_TO_POLE.items()}
@@ -85,9 +94,11 @@ ROLLING_ALPHA = 0.35
 # Minimum stem hits before a pole registers at full intensity.
 _INTENSITY_FLOOR = 4.0
 
-# Region routing thresholds (engine-only)
-NEURO_FOCUS_HD = 0.0        # a structure with H_d below this can pull the setting to Neuro
-NEURO_DEEP_HD = -0.5        # allow back-to-back Neuro panels below this
+# Region routing (engine-only).
+# The journey walks Origin and Neuro. A healthy or quiet vector still enters
+# Neuro — growth is not gated on a deficit. Back-to-back Neuro days are reserved
+# for a deeply strained structure (corrective intensity).
+NEURO_DEEP_HD = -0.5
 NEURO_ENV_FLAG = "SSE_NEURO_REGION_ENABLED"
 
 _FORBIDDEN_LABELS = re.compile(
@@ -219,11 +230,20 @@ def neuro_metadata_for_stems(stems: Iterable[str]) -> Dict[str, Any]:
 # Place + champion selection
 # ---------------------------------------------------------------------------
 
-def select_neuro_biome(scores: Dict[str, Any]) -> str:
-    """Setting doorway = weakest H_d. Tie order is the fixed structure order."""
+def select_neuro_biome(scores: Dict[str, Any], *, avoid: Optional[Iterable[str]] = None) -> str:
+    """Setting doorway = weakest H_d, skipping places already walked recently.
+
+    Tie order is the fixed structure order. `avoid` is how the journey visits
+    all four Neuro places instead of camping on one strained doorway.
+    """
     hd = all_domain_health(scores)
-    weakest = min(NEURO_STRUCTURES, key=lambda d: (hd[d], NEURO_STRUCTURES.index(d)))
-    return STRUCTURE_TO_BIOME[weakest]
+    ranked = sorted(NEURO_STRUCTURES, key=lambda d: (hd[d], NEURO_STRUCTURES.index(d)))
+    skipped = {a for a in (avoid or []) if a}
+    for d in ranked:
+        bid = STRUCTURE_TO_BIOME[d]
+        if bid not in skipped:
+            return bid
+    return STRUCTURE_TO_BIOME[ranked[0]]
 
 
 _DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "neuro_champions.json")
@@ -266,21 +286,30 @@ def _l2(a: Dict[str, float], b: Dict[str, float]) -> float:
     return math.sqrt(sum((a[k] - b[k]) ** 2 for k in POLE_KEYS))
 
 
+# Literal-force / death figures. Age-gated panels must not pair these.
+AGE_GATE_EXCLUDE: Tuple[str, ...] = (
+    "Warlord", "Dragon Sovereign", "Beast Queen", "Death Knight", "Leviathan",
+)
+
+
 def pair_champion(
     scores: Dict[str, Any],
     biome_id: str,
     roster: Optional[Sequence[Dict[str, Any]]] = None,
     *,
     skip_names: Iterable[str] = (),
+    exclude_names: Iterable[str] = (),
     epsilon: float = 1e-6,
 ) -> Optional[Dict[str, Any]]:
     """Nearest champion (L2 on the 12-vector) within the selected place only.
 
     `skip_names` lets the caller avoid repeating yesterday's mirror; if every
-    candidate is skipped the nearest overall is returned.
+    candidate is skipped the nearest overall is returned. `exclude_names` is
+    a hard drop (age-gate) — those figures are never returned.
     """
     user = normalize_poles(scores)
-    cands = champions_for_biome(biome_id, roster)
+    banned = {s.lower() for s in exclude_names if s}
+    cands = [c for c in champions_for_biome(biome_id, roster) if (c.get("name") or "").lower() not in banned]
     if not cands:
         return None
     skip = {s.lower() for s in skip_names if s}
@@ -300,6 +329,8 @@ def visiting_figures(
     biome_id: str,
     k: int = 2,
     roster: Optional[Sequence[Dict[str, Any]]] = None,
+    *,
+    exclude_names: Iterable[str] = (),
 ) -> List[Dict[str, Any]]:
     """1–2 champions from OTHER Neuro places at middle distance, so the panel is
     not a single-structure classroom. One per other place, weakest H_d first."""
@@ -311,7 +342,7 @@ def visiting_figures(
     others = [d for d in sorted(NEURO_STRUCTURES, key=lambda d: (hd[d], NEURO_STRUCTURES.index(d))) if d != home]
     out: List[Dict[str, Any]] = []
     for d in others[:k]:
-        c = pair_champion(scores, STRUCTURE_TO_BIOME[d], roster)
+        c = pair_champion(scores, STRUCTURE_TO_BIOME[d], roster, exclude_names=exclude_names)
         if c:
             out.append(c)
     return out
@@ -355,20 +386,62 @@ def resolve_panel_region(
     *,
     last_region: str = REGION_ORIGIN,
 ) -> str:
-    """Which stream fills today's single image slot. Origin path is untouched
-    when this returns REGION_ORIGIN."""
+    """Which stream fills today's single image slot.
+
+    Once Neuro is unlocked, Origin and Neuro alternate so the client walks the
+    whole Thera-world. A deeply strained structure may stay in Neuro a second
+    day. Healthy, quiet, and zero vectors are not locked out.
+    """
     if not neuro_enabled():
         return REGION_ORIGIN
     if not neuro_unlocked(journey, scores):
         return REGION_ORIGIN
     hd = all_domain_health(scores)
     weakest = min(hd.values()) if hd else 0.0
-    if weakest >= NEURO_FOCUS_HD:
-        return REGION_ORIGIN
-    # Don't starve the Origin story: alternate unless a structure is deeply strained.
     if last_region == REGION_NEURO and weakest > NEURO_DEEP_HD:
         return REGION_ORIGIN
     return REGION_NEURO
+
+
+def scrub_client_copy(text: str) -> str:
+    """Rewrite leaked engine labels in client-facing scene text. Never blank the scene."""
+    out = text or ""
+    out = re.sub(r"\bauthority\b", "voice", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bintegration\b", "holding both", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bseparation\b", "an own name", out, flags=re.IGNORECASE)
+    out = re.sub(r"\battachment\b", "the hearth", out, flags=re.IGNORECASE)
+    out = re.sub(r"-?\d+\.\d+", "", out)
+    out = re.sub(r"\d+\s?%", "", out)
+    out = re.sub(r"\byour deficit\b", "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bhyper-?regulated\b", "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bmature adult level\b", "", out, flags=re.IGNORECASE)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
+def compose_neuro_bible(ctx: Dict[str, Any]) -> str:
+    """LLM-only block. Place, figure, corrective meeting. No scores."""
+    meta = ctx.get("metadata") or {}
+    champ = ctx.get("champion") or {}
+    biome = ctx.get("biome") or {}
+    place = meta.get("place_label") or biome.get("biome") or ""
+    name = champ.get("name") or ""
+    purpose = champ.get("purpose") or ""
+    healing = biome.get("healing_visual") or meta.get("healing_visual") or ""
+    floor_id = ctx.get("floor_id") or meta.get("floor_id")
+    visitors = ", ".join(meta.get("visitors") or []) or "none"
+    lines = [
+        f"NEURO REGION — same Thera-world as the Path of Five, not a second world. Today's place: {place}.",
+        f"This panel is a corrective relational meeting between the protagonist and {name}.",
+        f"Why {name} is here: {purpose}",
+        f"Other figures at middle distance (keep them in frame): {visitors}.",
+        "The meeting practices four lived moves together in this one scene: a voice that neither shrinks nor crushes, holding two true things at once, an own name that is not exile, and warmth that still leaves room. Do not sequence them as lessons. Do not grade them.",
+        "Never write the words authority, integration, separation, or attachment. Never write a score, a percent, a level, or a grade.",
+    ]
+    if healing:
+        lines.append(f"Include this healing image in the scene and the image prompt: {healing}")
+    if floor_id:
+        lines.append(f"Coliseum floor for this still: {floor_id}.")
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------

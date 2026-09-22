@@ -5818,16 +5818,16 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                           '\u{1F5FA} Journey: ${(_recapData!["journey"]["biome"] ?? "unknown").toString().replaceAll("_", " ")} — Panel ${_recapData!["journey"]["panel_count"] ?? 0}',
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 12)),
-                    if (_recapData!["journey"] == null &&
-                        _recapData!["last_panel_biome"] != null)
+                    if (_recapData!["last_panel_biome"] != null)
                       Text(
-                          '\u{1F30D} Thera-World: latest panel — ${(_recapData!["last_panel_biome_label"] ?? _recapData!["last_panel_biome"]).toString().replaceAll("_", " ")}',
+                          '\u{1F30D} Thera-World: ${(_recapData!["last_panel_biome_label"] ?? _recapData!["last_panel_biome"]).toString().replaceAll("_", " ")}'
+                          '${_recapData!["last_panel_region"] == "neuro" && (_recapData!["last_panel_character"] ?? "").toString().isNotEmpty ? " — with ${_recapData!["last_panel_character"]}" : ""}',
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 12)),
                     if (_recapData!["last_panel_region"] == 'neuro')
                       const Padding(
                         padding: EdgeInsets.only(top: 2),
-                        child: Text('\u{2727} A new region of your world has opened.',
+                        child: Text('\u{2727} Same journey. This place is a meeting, not a grade.',
                             style: TextStyle(
                                 color: Color(0xFF4ECDC4), fontSize: 11)),
                       ),

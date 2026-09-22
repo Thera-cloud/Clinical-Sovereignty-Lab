@@ -286,23 +286,30 @@ async def list_events_incremental(access_token: str, calendar_id: str,
     next_sync_token: Optional[str] = None
     page_token: Optional[str] = None
 
-    base_params: Dict[str, str] = {"singleEvents": "true", "maxResults": "250"}
+    # Repeated eventTypes: default list omits outOfOffice (Google, 2023+).
+    # Changing this set invalidates an old syncToken (410 → full resync).
+    base_params: List[Tuple[str, str]] = [
+        ("singleEvents", "true"),
+        ("maxResults", "250"),
+        ("eventTypes", "default"),
+        ("eventTypes", "outOfOffice"),
+    ]
     if sync_token:
-        base_params["syncToken"] = sync_token
+        base_params.append(("syncToken", sync_token))
     else:
         # Full sync — bound to a sane window unless caller provided one
-        base_params["timeMin"] = time_min or (
+        base_params.append(("timeMin", time_min or (
             datetime.now(timezone.utc) - timedelta(days=7)
-        ).isoformat().replace("+00:00", "Z")
+        ).isoformat().replace("+00:00", "Z")))
         if time_max:
-            base_params["timeMax"] = time_max
-        base_params["showDeleted"] = "true"
+            base_params.append(("timeMax", time_max))
+        base_params.append(("showDeleted", "true"))
 
     async with aiohttp.ClientSession() as session:
         while True:
-            params = dict(base_params)
+            params = list(base_params)
             if page_token:
-                params["pageToken"] = page_token
+                params.append(("pageToken", page_token))
             async with session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 410:
                     # Sync token expired — caller must retry full sync

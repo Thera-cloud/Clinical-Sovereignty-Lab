@@ -751,6 +751,7 @@ async def compose_journey_narrative(
     archetype_hint: str = "", character_visual: str = "",
     deep_crystal_context: str = "", chapter_summary: str = "",
     todays_npcs: Optional[List[dict]] = None,
+    neuro_bible: str = "",
 ) -> dict:
     """Use LLM to compose a scene narrative. Falls back to template on failure."""
     import httpx
@@ -1004,6 +1005,7 @@ async def compose_journey_narrative(
         "Generate a short scene description (2-4 sentences) and a Grok Imagine image prompt "
         "for this user's journey panel. Stay inside Thera-world concepts.\n\n"
         f"{palette_block}\n\n"
+        f"{neuro_bible}"
         f"{age_gate_block}"
         f"{protagonist_block}"
         f"User's current biome: {biome_name} — {biome_desc}\n"
@@ -1315,13 +1317,27 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         crystal_npcs = list(neuro_ctx["npcs"])  # visiting champions replace Origin NPC cast today
 
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
+    neuro_bible = ""
+    if neuro_ctx:
+        try:
+            from app.sse.neuro_scoring import compose_neuro_bible
+            neuro_bible = compose_neuro_bible(neuro_ctx)
+        except Exception as _bible_err:
+            logger.warning("Neuro bible skipped for %s: %s", user_id, _bible_err)
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
         panel_sequence=panel_seq, user_id=user_id, recent_narratives=recent_nar,
         archetype_hint=arch_hint, character_visual=arch_ident.get("character_visual", ""),
         deep_crystal_context=deep_ctx, chapter_summary=chapter,
-        todays_npcs=crystal_npcs)
+        todays_npcs=crystal_npcs, neuro_bible=neuro_bible)
+    if neuro_ctx:
+        try:
+            from app.sse.neuro_scoring import scrub_client_copy
+            narrative["narrative_text"] = scrub_client_copy(narrative.get("narrative_text") or "")
+            narrative["image_prompt"] = scrub_client_copy(narrative.get("image_prompt") or "")
+        except Exception as _scrub_err:
+            logger.warning("Neuro client scrub skipped for %s: %s", user_id, _scrub_err)
 
     image_prompt = narrative.get("image_prompt", "")
     if not image_prompt:
@@ -1334,23 +1350,25 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     if arch_hint:
         image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
 
-    # Blend recurring crystal NPCs (FIX #6) + active quest/mission NPCs into image
+    # Blend recurring crystal NPCs (FIX #6) + active quest/mission NPCs into image.
+    # Neuro days keep the champion cast only — Origin quest figures stay on Origin days.
     current_npcs: list = list(crystal_npcs)
-    try:
-        for q in profile.get("active_quests", []):
-            pn = q.get("progress_notes", [])
-            if isinstance(pn, str):
-                pn = json.loads(pn)
-            if pn and pn[0].get("npcs"):
-                current_npcs.extend(pn[0]["npcs"][:2])
-        for m in profile.get("active_missions", []):
-            pn = m.get("progress_notes", [])
-            if isinstance(pn, str):
-                pn = json.loads(pn)
-            if pn and pn[0].get("npcs"):
-                current_npcs.extend(pn[0]["npcs"][:1])
-    except Exception as _npc_err:
-        logger.warning("NPC enrichment failed: %s", _npc_err)
+    if not neuro_ctx:
+        try:
+            for q in profile.get("active_quests", []):
+                pn = q.get("progress_notes", [])
+                if isinstance(pn, str):
+                    pn = json.loads(pn)
+                if pn and pn[0].get("npcs"):
+                    current_npcs.extend(pn[0]["npcs"][:2])
+            for m in profile.get("active_missions", []):
+                pn = m.get("progress_notes", [])
+                if isinstance(pn, str):
+                    pn = json.loads(pn)
+                if pn and pn[0].get("npcs"):
+                    current_npcs.extend(pn[0]["npcs"][:1])
+        except Exception as _npc_err:
+            logger.warning("NPC enrichment failed: %s", _npc_err)
     for npc in current_npcs[:3]:
         frag = npc.get("visual_prompt_fragment", "")
         if frag and frag.lower() not in image_prompt.lower():
