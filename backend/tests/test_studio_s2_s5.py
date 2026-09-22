@@ -370,7 +370,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260922a" in url
+    assert "v=20260922b" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -616,6 +616,9 @@ def test_studio_realm_rotation():
         assert "flex:0 0 auto;margin-top:auto" in room, rel
         assert "line-height:1.3;color:#C9A962" in room, rel
         assert 'id="shareTile"' in room, rel
+        assert "function grabHostJpeg" in room, rel
+        assert "function armHostSpace" in room, rel
+        assert "/cohost/host-frame" in room, rel
         assert "#hosts.sharing" in room, rel
         assert 'id="btnShare"' in room, rel
         assert "getDisplayMedia" in room, rel
@@ -682,10 +685,27 @@ def test_studio_share_host_only():
 
     empty = asyncio.run(share.describe_share_frame(b""))
     assert empty["ok"] is False
+    empty_host = asyncio.run(share.describe_host_space(b""))
+    assert empty_host["ok"] is False
+    look = share._parse_host_look(
+        '{"seen":true,"emotion":"amused","energy":"warm","gaze":"camera",'
+        '"notable":true,"line":"Big Nate is smiling at camera."}'
+    )
+    assert look["emotion"] == "amused" and look["notable"] is True
+    share.remember_host_space("sess-host", look["line"], "jpg", look)
+    host = share.host_space_seen("sess-host")
+    block = share.host_space_block(host)
+    assert "HOST CAMERA" in block and "smiling" in block
+    assert share.want_host_jpeg("line", "look at me", False, "") is True
+    assert share.want_host_jpeg("line", "hello", False, "sharejpg") is False
+    assert share.want_host_jpeg("toss", "hello", False, "") is True
+    share.forget_host_space("sess-host")
+    assert share.host_space_seen("sess-host") == {}
 
     api_src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
     assert '/sessions/{session_id}/cohost/share' in api_src
     assert '/sessions/{session_id}/cohost/share-frame' in api_src
+    assert '/sessions/{session_id}/cohost/host-frame' in api_src
     assert '/sessions/{session_id}/cohost/share-asset' in api_src
     assert '/sessions/{session_id}/share-asset' in api_src
     assert '/sessions/{session_id}/cohost/sound' in api_src
@@ -695,6 +715,9 @@ def test_studio_share_host_only():
 
     sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
     assert "ON SCREEN" in sess_src
+    assert "host_space_block" in sess_src
+    share_src = (ROOT / "backend/app/services/studio_cohost_share.py").read_text()
+    assert "HOST CAMERA" in share_src
     assert "share_kind" in sess_src
     assert "never when a caller asks" in sess_src
     assert "cannot see the page yet" in sess_src

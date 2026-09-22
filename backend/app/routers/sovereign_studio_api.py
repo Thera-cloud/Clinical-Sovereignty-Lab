@@ -1107,6 +1107,35 @@ async def cohost_share_frame_public(
     return {"ok": True, "seen": bool(out.get("seen")), "note": out.get("note") or ""}
 
 
+@public_router.post("/sessions/{session_id}/cohost/host-frame")
+async def cohost_host_frame_public(
+    session_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Host-camera still so Nate can read Big Nate's face and energy. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    _require_host_jwt(request, session_id)
+    raw = await file.read()
+    from app.services.studio_cohost_share import describe_host_space, remember_host_space
+
+    out = await describe_host_space(raw)
+    if not out.get("ok"):
+        return _raise(out)
+    remember_host_space(
+        str(session_id),
+        out.get("note") or "",
+        out.get("jpeg") or "",
+        out.get("look") or {},
+    )
+    return {
+        "ok": True,
+        "seen": bool(out.get("seen")),
+        "note": out.get("note") or "",
+        "notable": bool(out.get("notable")),
+    }
+
+
 @public_router.post("/sessions/{session_id}/cohost/share-asset")
 async def cohost_share_asset_public(
     session_id: UUID,

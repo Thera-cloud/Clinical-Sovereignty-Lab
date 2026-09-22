@@ -276,9 +276,12 @@ async def cohost_turn(
         kind = "toss"
     from app.services.studio_listen_hold import prime_clear, prime_store, prime_take
     from app.services.studio_cohost_share import (
+        host_space_block,
+        host_space_seen,
         merge_share_note,
         note_has_seen_content,
         share_seen,
+        want_host_jpeg,
     )
 
     sid = str(session_id)
@@ -297,6 +300,9 @@ async def cohost_turn(
         "pdf",
     }
     can_see = note_has_seen_content(share_n) or bool(jpeg)
+    host = host_space_seen(sid)
+    if want_host_jpeg(kind, blob, bool(host.get("notable")), jpeg):
+        jpeg = jpeg or (host.get("jpeg") or "")
     if kind in ("toss", "open", "caller_join"):
         prime_clear(sid)
     # Screen shares change every second. A primed line without the still is fiction.
@@ -357,6 +363,11 @@ async def cohost_turn(
         )
         if (realm_blurb or "").strip():
             system += f" Mood of the space: {realm_blurb.strip()[:240]}."
+    host_block = host_space_block(host)
+    if host_block:
+        system += host_block
+        if jpeg and not (seen.get("jpeg") or ""):
+            system += " A still of Big Nate on the host camera is attached."
     room = f"Room: {live} live caller(s), {hold} waiting."
     if realm_name and realm_shift:
         room += " The realm just shifted in behind you this second."

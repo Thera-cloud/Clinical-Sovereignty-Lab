@@ -291,6 +291,43 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       return new Blob([u8], {type:'image/jpeg'});
     } catch (e) { return null; }
   }
+  function grabHostJpeg(){
+    try {
+      var v = document.getElementById('hostVid');
+      if (!v || !v.videoWidth) return null;
+      var w = v.videoWidth, h = v.videoHeight;
+      var scale = Math.min(1, 640 / Math.max(w, h));
+      var c = document.createElement('canvas');
+      c.width = Math.max(2, Math.round(w * scale));
+      c.height = Math.max(2, Math.round(h * scale));
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      var data = c.toDataURL('image/jpeg', 0.68);
+      var raw = atob((data.split(',')[1] || ''));
+      var u8 = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+      if (u8.length < 80 || u8.length > 220000) return null;
+      return new Blob([u8], {type:'image/jpeg'});
+    } catch (e) { return null; }
+  }
+  function pushHostSpace(){
+    if (guest || !cfg.session || !cfg.token) return Promise.resolve();
+    var blob = grabHostJpeg();
+    if (!blob) return Promise.resolve();
+    var fd = new FormData();
+    fd.append('file', blob, 'host.jpg');
+    return fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/host-frame', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      body: fd
+    }).then(function(r){ return r.json(); }).catch(function(){});
+  }
+  var hostSpaceTimer = 0;
+  function armHostSpace(){
+    if (guest) return;
+    if (hostSpaceTimer) clearInterval(hostSpaceTimer);
+    pushHostSpace();
+    hostSpaceTimer = setInterval(function(){ pushHostSpace(); }, 20000);
+  }
   function pushShareFrame(){
     if (guest || !shareState.on || shareState.kind === 'search' || !cfg.session || !cfg.token) return Promise.resolve();
     var blob = grabShareJpeg();
@@ -1673,6 +1710,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — Bring on moves Caller ID 1 to air.');
     greeted = true;
     if (!guest) warmThinkClip();
+    if (!guest) armHostSpace();
     if (!guest){
       loadBoothSounds();
       setTimeout(function(){

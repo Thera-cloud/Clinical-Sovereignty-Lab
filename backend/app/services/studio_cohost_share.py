@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import re
 import time
@@ -64,6 +65,159 @@ def forget_share_frame(session_id: str) -> None:
     sid = (session_id or "").strip()
     if sid:
         _SEEN.pop(sid, None)
+
+
+_HOST: Dict[str, Dict[str, Any]] = {}
+_HOST_TTL = 45.0
+_LOOK_ME = re.compile(
+    r"\b(look at me|see me|my face|how do i look|what do you see|on (?:the )?camera|in my space)\b",
+    re.I,
+)
+
+
+def remember_host_space(
+    session_id: str,
+    note: str,
+    jpeg_b64: str = "",
+    look: Optional[Dict[str, Any]] = None,
+) -> None:
+    sid = (session_id or "").strip()
+    if not sid:
+        return
+    row: Dict[str, Any] = {
+        "note": (note or "")[:800],
+        "jpeg": (jpeg_b64 or "")[:900_000],
+        "at": time.time(),
+        "look": look or {},
+    }
+    _HOST[sid] = row
+
+
+def forget_host_space(session_id: str) -> None:
+    sid = (session_id or "").strip()
+    if sid:
+        _HOST.pop(sid, None)
+
+
+def host_space_seen(session_id: str) -> Dict[str, Any]:
+    sid = (session_id or "").strip()
+    row = _HOST.get(sid) or {}
+    if not row:
+        return {}
+    if time.time() - float(row.get("at") or 0) > _HOST_TTL:
+        _HOST.pop(sid, None)
+        return {}
+    look = row.get("look") if isinstance(row.get("look"), dict) else {}
+    return {
+        "note": str(row.get("note") or ""),
+        "jpeg": str(row.get("jpeg") or ""),
+        "look": look,
+        "notable": bool(look.get("notable")),
+    }
+
+
+def host_space_block(seen: Optional[Dict[str, Any]]) -> str:
+    row = seen or {}
+    note = (row.get("note") or "").strip()
+    look = row.get("look") if isinstance(row.get("look"), dict) else {}
+    if not note and not look:
+        return ""
+    emotion = str(look.get("emotion") or "").strip()[:40]
+    energy = str(look.get("energy") or "").strip()[:40]
+    gaze = str(look.get("gaze") or "").strip()[:40]
+    bits = [p for p in (energy, emotion, gaze) if p]
+    head = ", ".join(bits) if bits else "live"
+    extra = " This look is worth a beat if it fits." if look.get("notable") else ""
+    return (
+        "\n\nHOST CAMERA (Big Nate): "
+        f"{head}. Last look: {note or 'in frame'}."
+        " Mention face, energy, or space only when it serves the bit — a laugh, "
+        "a tightness, a lean. Never read vitals. Never diagnose. Never say "
+        "biometric or valence. You are sitting across from him."
+        + extra
+    )
+
+
+def want_host_jpeg(kind: str, blob: str, notable: bool, share_jpeg: str) -> bool:
+    if (share_jpeg or "").strip():
+        return False
+    if notable:
+        return True
+    if (kind or "").strip().lower() in {"toss", "open"}:
+        return True
+    return bool(_LOOK_ME.search(blob or ""))
+
+
+def _parse_host_look(text: str) -> Dict[str, Any]:
+    raw = (text or "").strip()
+    if not raw:
+        return {}
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        line = raw[:240]
+        if line.lower() in {"unread", "unable to process images"}:
+            return {}
+        return {"line": line, "notable": False}
+    try:
+        data = json.loads(raw[start : end + 1])
+    except Exception:
+        return {"line": raw[:240], "notable": False}
+    if not isinstance(data, dict):
+        return {}
+    line = str(data.get("line") or data.get("note") or "").strip()[:240]
+    if not data.get("seen", True) and not line:
+        return {}
+    if line.lower() in {"unread", "unable to process images"}:
+        return {}
+    return {
+        "emotion": str(data.get("emotion") or "").strip()[:40],
+        "energy": str(data.get("energy") or "").strip()[:40],
+        "gaze": str(data.get("gaze") or "").strip()[:40],
+        "posture": str(data.get("posture") or "").strip()[:40],
+        "notable": bool(data.get("notable")),
+        "line": line,
+    }
+
+
+async def describe_host_space(image_bytes: bytes) -> Dict[str, Any]:
+    raw = image_bytes or b""
+    if len(raw) < 80:
+        return {"ok": False, "reason": "empty_frame", "code": 422}
+    if len(raw) > 1_500_000:
+        return {"ok": False, "reason": "frame_too_large", "code": 413}
+    jpeg = base64.b64encode(raw).decode("ascii")
+    look: Dict[str, Any] = {}
+    try:
+        from app.services.nate_inference_router import NateInferenceRouter
+
+        out = await NateInferenceRouter().generate(
+            prompt=(
+                "Look at Big Nate, the live radio host, in this camera still. "
+                "JSON only: {\"seen\":true,\"emotion\":\"amused|warm|tight|tired|"
+                "fired|neutral\",\"energy\":\"calm|warm|fired|tired|tense|playful\","
+                "\"gaze\":\"camera|away|down\",\"posture\":\"short\",\"notable\":false,"
+                "\"line\":\"one short visible observation\"}. "
+                "No diagnosis. If empty or dark, {\"seen\":false,\"line\":\"unread\"}."
+            ),
+            system="Host-camera look only. Visible facts. JSON only.",
+            domain="culture",
+            max_tokens=120,
+            images=[jpeg],
+        )
+        look = _parse_host_look((out.get("text") or "").strip())
+    except Exception as exc:
+        logger.warning("studio host-space describe skipped: %s", exc)
+        look = {}
+    note = str(look.get("line") or "").strip()
+    return {
+        "ok": True,
+        "note": note[:800],
+        "seen": bool(note),
+        "jpeg": jpeg,
+        "look": look,
+        "notable": bool(look.get("notable")),
+    }
 
 
 def share_seen(session_id: str) -> Dict[str, str]:
