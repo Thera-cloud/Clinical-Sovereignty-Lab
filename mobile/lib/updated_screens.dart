@@ -60,6 +60,7 @@ import 'services/tombstone_sync.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/thera_panel_image.dart';
+import 'widgets/thera_go_deeper_ask.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/coach_integrations_hub.dart';
 
@@ -1604,6 +1605,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   int? _selectionStart;
   int? _selectionEnd;
   bool _isTextSelected = false;
+  int _chatSelectionEpoch = 0;
+  /// Ignore SelectionArea re-locking after Thera-World zoom (zoom used to
+  /// freeze physics at mid-reply, e.g. "emergence into").
+  int _chatSelectionIgnoreUntilMs = 0;
   final List<_VocabEntry> _customVocab = [];
   final FlutterTts _tts = FlutterTts();
   bool _isSpeaking = false;
@@ -3033,12 +3038,20 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   /// Message used by the Thera-World hot button — identical to the Sovereign
   /// Vault "Go deeper with Nate" flow so the bridge resolves the panel via
   /// `sse_panel_chat_context` ([SSE Panel:<uuid>]).
-  String _theraWorldAskMessage(String panelId, {String? imageUrl}) {
-    final imgTag =
-        (imageUrl != null && imageUrl.isNotEmpty) ? '[SSE Image:$imageUrl]' : '';
-    return "$imgTag[SSE Panel:$panelId] I want to go deeper with you on this panel. "
-        "Sit with the figures with me — what your inner world is showing, "
-        "how this scene continues from what came before, and what you're beginning to understand.";
+  String _theraWorldAskMessage(
+    String panelId, {
+    String? imageUrl,
+    String? biome,
+    String? narrative,
+    String? character,
+  }) {
+    return theraGoDeeperAsk(
+      panelId: panelId,
+      imageUrl: imageUrl ?? '',
+      biome: biome ?? '',
+      narrative: narrative ?? '',
+      character: character ?? '',
+    );
   }
 
   String _stripSseImageTag(String text) =>
@@ -3101,6 +3114,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           _recapData!['last_panel_biome'] ??= panel['biome'];
           _recapData!['last_panel_url'] ??=
               panel['image_url'] ?? panel['r2_url'];
+          _recapData!['last_panel_narrative'] ??=
+              panel['narrative_text'] ?? panel['narrative'];
+          _recapData!['last_panel_character'] ??=
+              panel['character_manifest'] ?? panel['character'];
         }
         final due = data['due_practices'];
         if (due is List && due.isNotEmpty) {
@@ -3199,8 +3216,20 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _sendMessage();
   }
 
-  void _sendTheraWorldAsk(String panelId, {String? imageUrl}) {
-    _sendPresetMessage(_theraWorldAskMessage(panelId, imageUrl: imageUrl));
+  void _sendTheraWorldAsk(
+    String panelId, {
+    String? imageUrl,
+    String? biome,
+    String? narrative,
+    String? character,
+  }) {
+    _sendPresetMessage(_theraWorldAskMessage(
+      panelId,
+      imageUrl: imageUrl,
+      biome: biome,
+      narrative: narrative,
+      character: character,
+    ));
   }
 
   void _showNewQuestDialog() {
@@ -4666,13 +4695,47 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     }
   }
 
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      });
+  void _scrollToBottom({bool instant = false}) {
+    if (!_scrollController.hasClients) return;
+    Future.delayed(Duration(milliseconds: instant ? 0 : 100), () {
+      if (!mounted || !_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      if (!pos.hasContentDimensions) return;
+      final target = pos.maxScrollExtent;
+      if (instant) {
+        _scrollController.jumpTo(target);
+        return;
+      }
+      _scrollController.animateTo(target,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    });
+  }
+
+  /// Zoom overlay pauses tickers on this route (TickerMode) so animateTo
+  /// cannot follow LN's stream. Returning with SelectionArea still "selected"
+  /// also left NeverScrollable physics on — chat stuck mid-phrase.
+  void _restoreChatScrollAfterOverlay() {
+    if (!mounted) return;
+    setState(() {
+      _isTextSelected = false;
+      _chatSelectionEpoch++;
+      _chatSelectionIgnoreUntilMs =
+          DateTime.now().millisecondsSinceEpoch + 1500;
+    });
+    void jumpTail() {
+      if (!mounted || !_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      if (!pos.hasContentDimensions) return;
+      _scrollController.jumpTo(pos.maxScrollExtent);
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      jumpTail();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        jumpTail();
+        if (mounted) _scrollToBottom(instant: true);
+      });
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -5772,6 +5835,14 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                             _recapData!["last_panel_id"].toString(),
                             imageUrl:
                                 (_recapData!["last_panel_url"] ?? '').toString(),
+                            biome: (_recapData!["last_panel_biome"] ?? '')
+                                .toString(),
+                            narrative:
+                                (_recapData!["last_panel_narrative"] ?? '')
+                                    .toString(),
+                            character:
+                                (_recapData!["last_panel_character"] ?? '')
+                                    .toString(),
                           );
                         }),
                       ..._duePracticeRecapButtons(),
@@ -6107,7 +6178,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
             if (planBanner != null) planBanner,
             Expanded(
               child: SelectionArea(
+          key: ValueKey('chat-select-$_chatSelectionEpoch'),
           onSelectionChanged: (value) {
+            if (DateTime.now().millisecondsSinceEpoch <
+                _chatSelectionIgnoreUntilMs) {
+              return;
+            }
             final selecting = value != null && value.plainText.isNotEmpty;
             if (selecting != _isTextSelected) {
               setState(() => _isTextSelected = selecting);
@@ -6115,7 +6191,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
           },
           child: ListView.builder(
             controller: _scrollController,
-            physics: _isTextSelected
+            physics: (_isTextSelected &&
+                    DateTime.now().millisecondsSinceEpoch >=
+                        _chatSelectionIgnoreUntilMs)
                 ? const NeverScrollableScrollPhysics()
                 : const ClampingScrollPhysics(),
             itemCount: _chatHistory.length,
@@ -6129,7 +6207,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                 return Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Column(
+                  child: SelectionContainer.disabled(
+                    child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
@@ -6141,8 +6220,22 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                         ),
                       ),
                       const SizedBox(height: 6),
-                      TheraPanelImage(url: url, height: 220),
+                      TheraPanelImage(
+                        url: url,
+                        height: 220,
+                        onZoomOpened: () {
+                          if (!mounted) return;
+                          setState(() {
+                            _isTextSelected = false;
+                            _chatSelectionEpoch++;
+                            _chatSelectionIgnoreUntilMs =
+                                DateTime.now().millisecondsSinceEpoch + 1500;
+                          });
+                        },
+                        onZoomClosed: _restoreChatScrollAfterOverlay,
+                      ),
                     ],
+                    ),
                   ),
                 );
               }
@@ -18007,6 +18100,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 apiBase: _apiBaseUrl,
                 headers: _restHeaders(json: false),
                 compact: true,
+                collapsible: true,
               ),
             ),
             const Divider(color: Colors.white10, height: 1),
@@ -18025,6 +18119,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           child: CoachPracticeSnapshotCard(
             apiBase: _apiBaseUrl,
             headers: _restHeaders(json: false),
+            compact: true,
+            collapsible: true,
           ),
         ),
         Expanded(child: _buildBriefingsFolderList(folders, compact: false)),
@@ -18043,6 +18139,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           child: CoachPracticeSnapshotCard(
             apiBase: _apiBaseUrl,
             headers: _restHeaders(json: false),
+            compact: true,
+            collapsible: true,
           ),
         ),
         const Divider(color: Colors.white10, height: 1),

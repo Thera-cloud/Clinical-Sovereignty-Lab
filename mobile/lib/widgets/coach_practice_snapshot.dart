@@ -2,18 +2,21 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'print_html_stub.dart' if (dart.library.html) 'print_html_web.dart';
 
 /// Roster mean (gold line) + client scatter. Hover names UI-only. Print nameless.
+///
+/// [collapsible] starts as a sparkline ribbon so Briefings can scroll folders
+/// instead of a full-viewport graph. Date slider pans; wheel never zooms.
 class CoachPracticeSnapshotCard extends StatefulWidget {
   final String apiBase;
   final Map<String, String> headers;
   final String? targetCoachUsername;
   final bool compact;
+  final bool collapsible;
   final String? headlineHint;
 
   const CoachPracticeSnapshotCard({
@@ -22,6 +25,7 @@ class CoachPracticeSnapshotCard extends StatefulWidget {
     required this.headers,
     this.targetCoachUsername,
     this.compact = false,
+    this.collapsible = false,
     this.headlineHint,
   });
 
@@ -46,10 +50,12 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   double _x1 = 1;
   double _y0 = 0;
   double _y1 = 1;
+  late bool _chartOpen;
 
   @override
   void initState() {
     super.initState();
+    _chartOpen = !widget.collapsible;
     _load();
   }
 
@@ -297,44 +303,6 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
   double _minSpanX(int seriesLen) =>
       math.max(7.0 / math.max(seriesLen, 7), 0.06);
 
-  void _onWheel(PointerScrollEvent e, Size size, int seriesLen) {
-    GestureBinding.instance.pointerSignalResolver.register(e, (event) {
-      final ev = event as PointerScrollEvent;
-      if (ev.scrollDelta.dy == 0) return;
-      final geom = _ChartGeom(
-        size,
-        math.max(seriesLen, 1),
-        x0: _x0,
-        x1: _x1,
-        y0: _y0,
-        y1: _y1,
-      );
-      if (!geom.plot.contains(ev.localPosition)) return;
-      final fx = ((ev.localPosition.dx - geom.plot.left) / geom.plot.width)
-          .clamp(0.0, 1.0);
-      final fy = ((ev.localPosition.dy - geom.plot.top) / geom.plot.height)
-          .clamp(0.0, 1.0);
-      final anchorX = _x0 + fx * (_x1 - _x0);
-      final anchorY = _y0 + (1 - fy) * (_y1 - _y0);
-      final factor = ev.scrollDelta.dy > 0 ? 1.12 : 0.88;
-      final spanX =
-          ((_x1 - _x0) * factor).clamp(_minSpanX(seriesLen), 1.0);
-      final spanY = ((_y1 - _y0) * factor).clamp(0.08, 1.0);
-      var x0 = anchorX - fx * spanX;
-      var y0 = anchorY - (1 - fy) * spanY;
-      if (x0 < 0) x0 = 0;
-      if (x0 + spanX > 1) x0 = 1 - spanX;
-      if (y0 < 0) y0 = 0;
-      if (y0 + spanY > 1) y0 = 1 - spanY;
-      setState(() {
-        _x0 = x0;
-        _x1 = x0 + spanX;
-        _y0 = y0;
-        _y1 = y0 + spanY;
-      });
-    });
-  }
-
   void _onDateWindow(RangeValues v, int seriesLen) {
     final minSpan = _minSpanX(seriesLen);
     var a = v.start.clamp(0.0, 1.0);
@@ -368,7 +336,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
     final coach = (_snap?['coach'] as Map?) ?? {};
     final master = _snap?['master'] as Map?;
     final totals = (_snap?['totals'] as Map?) ?? {};
-    final height = widget.compact ? 236.0 : 320.0;
+    final height = widget.compact ? 168.0 : 200.0;
     final title = widget.headlineHint ??
         '${coach['display_name'] ?? 'Practice'} · ${_days}d snapshot';
     final series = List<Map<String, dynamic>>.from(_snap?['series'] ?? []);
@@ -434,11 +402,26 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 );
               }),
               const SizedBox(width: 8),
-              TextButton(
-                onPressed: _resetView,
-                child: const Text('Reset',
-                    style: TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
-              ),
+              if (_chartOpen)
+                TextButton(
+                  onPressed: _resetView,
+                  child: const Text('Reset',
+                      style: TextStyle(color: Color(0xFF8B7355), fontSize: 11)),
+                ),
+              if (widget.collapsible)
+                TextButton.icon(
+                  onPressed: () => setState(() => _chartOpen = !_chartOpen),
+                  icon: Icon(
+                    _chartOpen ? Icons.expand_less : Icons.expand_more,
+                    color: const Color(0xFFC9A962),
+                    size: 18,
+                  ),
+                  label: Text(
+                    _chartOpen ? 'Collapse' : 'Expand graph',
+                    style: const TextStyle(
+                        color: Color(0xFFC9A962), fontSize: 11),
+                  ),
+                ),
               if (_printing)
                 const SizedBox(
                     width: 16,
@@ -462,36 +445,49 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
               ),
             ),
-          _sampleBar(),
-          const Padding(
-            padding: EdgeInsets.only(bottom: 6),
-            child: Text(
-              'Wheel zooms at cursor (X+Y). Slider searches dates. Gold = roster mean   ● client   ◯ live   ● dip',
-              style: TextStyle(color: Color(0xFF8B7355), fontSize: 10),
+          if (_chartOpen) _sampleBar(),
+          if (_chartOpen)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 6),
+              child: Text(
+                'Slider searches dates. Double-tap graph to reset. Gold = roster mean   ● client   ◯ live   ● dip',
+                style: TextStyle(color: Color(0xFF8B7355), fontSize: 10),
+              ),
             ),
-          ),
           if (_loading && _snap == null)
             const SizedBox(
-              height: 80,
+              height: 56,
               child: Center(
                 child: CircularProgressIndicator(
                     strokeWidth: 1.5, color: Color(0xFFC9A962)),
               ),
             )
           else
-            SizedBox(
-              height: height,
-              child: LayoutBuilder(
-                builder: (context, box) {
-                  final size = Size(box.maxWidth, height);
-                  return Listener(
-                    behavior: HitTestBehavior.opaque,
-                    onPointerSignal: (sig) {
-                      if (sig is PointerScrollEvent) {
-                        _onWheel(sig, size, series.length);
-                      }
-                    },
-                    child: GestureDetector(
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: SizedBox(
+                height: _chartOpen ? height : 64,
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final plotH = _chartOpen ? height : 64.0;
+                    final size = Size(box.maxWidth, plotH);
+                    final paint = CustomPaint(
+                      size: size,
+                      painter: _PracticePainter(
+                        series: series,
+                        scatter: scatter,
+                        x0: _x0,
+                        x1: _x1,
+                        y0: _y0,
+                        y1: _y1,
+                        windowDays: _days,
+                        spark: !_chartOpen,
+                      ),
+                    );
+                    if (!_chartOpen) return paint;
+                    return GestureDetector(
                       onDoubleTap: () => _resetView(),
                       child: MouseRegion(
                         onHover: (e) {
@@ -511,18 +507,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                         child: Stack(
                           clipBehavior: Clip.hardEdge,
                           children: [
-                            CustomPaint(
-                              size: size,
-                              painter: _PracticePainter(
-                                series: series,
-                                scatter: scatter,
-                                x0: _x0,
-                                x1: _x1,
-                                y0: _y0,
-                                y1: _y1,
-                                windowDays: _days,
-                              ),
-                            ),
+                            paint,
                             if (_hover != null && _hoverPos != null)
                               Positioned(
                                 left: (_hoverPos!.dx + 12)
@@ -556,12 +541,13 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                           ],
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
-          if (_sampleMode == 'pick' &&
+          if (_chartOpen &&
+              _sampleMode == 'pick' &&
               _sampleSize != null &&
               _picked.isEmpty)
             const Padding(
@@ -571,7 +557,7 @@ class _CoachPracticeSnapshotCardState extends State<CoachPracticeSnapshotCard> {
                 style: TextStyle(color: Color(0xFFC9A962), fontSize: 11),
               ),
             ),
-          if (series.isNotEmpty) _dateSlider(series),
+          if (_chartOpen && series.isNotEmpty) _dateSlider(series),
           const SizedBox(height: 8),
           Wrap(
             spacing: 10,
@@ -899,10 +885,7 @@ class _ChartGeom {
   final double x1;
   final double y0;
   final double y1;
-  static const padL = 56.0;
-  static const padR = 16.0;
-  static const padT = 14.0;
-  static const padB = 48.0;
+  final bool spark;
 
   _ChartGeom(
     this.size,
@@ -911,7 +894,13 @@ class _ChartGeom {
     required this.x1,
     required this.y0,
     required this.y1,
+    this.spark = false,
   });
+
+  double get padL => spark ? 8 : 56;
+  double get padR => spark ? 8 : 16;
+  double get padT => spark ? 6 : 14;
+  double get padB => spark ? 8 : 48;
 
   Rect get plot => Rect.fromLTWH(
         padL,
@@ -958,6 +947,7 @@ class _PracticePainter extends CustomPainter {
   final double y0;
   final double y1;
   final int windowDays;
+  final bool spark;
 
   _PracticePainter({
     required this.series,
@@ -967,6 +957,7 @@ class _PracticePainter extends CustomPainter {
     required this.y0,
     required this.y1,
     required this.windowDays,
+    this.spark = false,
   });
 
   @override
@@ -979,6 +970,7 @@ class _PracticePainter extends CustomPainter {
       x1: x1,
       y0: y0,
       y1: y1,
+      spark: spark,
     );
     final plot = geom.plot;
     final nDays = math.max(series.isEmpty ? windowDays : series.length, 1);
@@ -1027,26 +1019,28 @@ class _PracticePainter extends CustomPainter {
       tp.paint(canvas, at);
     }
 
-    canvas.save();
-    canvas.translate(11, plot.center.dy);
-    canvas.rotate(-math.pi / 2);
-    final yTitle = TextPainter(
-      text: const TextSpan(
-        text: 'Healing 0–1',
-        style: TextStyle(
-          color: Color(0xFFE8D5A3),
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
+    if (!spark) {
+      canvas.save();
+      canvas.translate(11, plot.center.dy);
+      canvas.rotate(-math.pi / 2);
+      final yTitle = TextPainter(
+        text: const TextSpan(
+          text: 'Healing 0–1',
+          style: TextStyle(
+            color: Color(0xFFE8D5A3),
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    yTitle.paint(canvas, Offset(-yTitle.width / 2, -8));
-    canvas.restore();
+        textDirection: TextDirection.ltr,
+      )..layout();
+      yTitle.paint(canvas, Offset(-yTitle.width / 2, -8));
+      canvas.restore();
 
-    for (final t in yTicks) {
-      final y = plot.top + plot.height * (1 - ((t - y0) / geom.spanY));
-      drawLabel(t.toStringAsFixed(2), Offset(14, y - 7));
+      for (final t in yTicks) {
+        final y = plot.top + plot.height * (1 - ((t - y0) / geom.spanY));
+        drawLabel(t.toStringAsFixed(2), Offset(14, y - 7));
+      }
     }
 
     const xCount = 6;
@@ -1055,6 +1049,7 @@ class _PracticePainter extends CustomPainter {
       final wx = x0 + t * (x1 - x0);
       final x = plot.left + plot.width * t;
       canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), grid);
+      if (spark) continue;
       canvas.drawLine(Offset(x, plot.bottom), Offset(x, plot.bottom + 5), axis);
       final day = (wx * (nDays - 1)).round();
       final date = series.isEmpty
@@ -1073,15 +1068,17 @@ class _PracticePainter extends CustomPainter {
       if (k == xCount - 1) dx = x - tp.width;
       tp.paint(canvas, Offset(dx, plot.bottom + 6));
     }
-    drawLabel(
-      'Days $dayLo–$dayHi',
-      Offset(plot.center.dx - 32, size.height - 13),
-      const TextStyle(
-        color: Color(0xFFE8D5A3),
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-      ),
-    );
+    if (!spark) {
+      drawLabel(
+        'Days $dayLo–$dayHi',
+        Offset(plot.center.dx - 32, size.height - 13),
+        const TextStyle(
+          color: Color(0xFFE8D5A3),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      );
+    }
 
     if (series.isEmpty) return;
 
@@ -1166,5 +1163,6 @@ class _PracticePainter extends CustomPainter {
       old.x1 != x1 ||
       old.y0 != y0 ||
       old.y1 != y1 ||
-      old.windowDays != windowDays;
+      old.windowDays != windowDays ||
+      old.spark != spark;
 }

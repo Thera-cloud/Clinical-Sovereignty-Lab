@@ -95,7 +95,9 @@ async def test_sse_panel_ref_injects_character_map_and_themes():
     assert "THERA-WORLD" in ctx
     assert "Little Nate" in ctx
     assert "SIFT" in ctx
-    assert "Three focus topics for today" in ctx
+    assert "unique sitting" in ctx
+    assert "without needing to fix it" in ctx
+    assert "Three focus topics for today" not in ctx
     assert "RECENT CHAT" in ctx
     assert "alone even when people" in ctx
     assert "CRYSTAL HISTORY" in ctx
@@ -192,7 +194,8 @@ async def test_daily_panel_infers_serpent_from_narrative():
     assert "Cartographer" in ctx
     assert "Never claim a figure is absent" in ctx
     assert "SSE PANEL CONTRACT" in ctx
-    assert "WRITE THIS BEFORE SIFT" in ctx
+    assert "unique sitting" in ctx
+    assert "WRITE THIS BEFORE SIFT" not in ctx
 
 
 def test_http_get_bytes_is_sync_not_coroutine():
@@ -204,7 +207,10 @@ def test_ensure_three_focus_topics_completes_cutoff():
     ctx = (
         "Core character manifested: Curiosity\n"
         "Crystal themes that drove this panel: loneliness, growth\n"
-        "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]\n"
+        "Biome: open_sky | Tone: meditative\n"
+        "Scene narrative: Curiosity waits by an open door at dusk.\n"
+        "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — unique sitting, not a template]\n"
+        "- [Jun 24] Client: I feel alone even when people are around.\n"
     )
     cut = (
         "SIFT is a doorway.\n"
@@ -215,6 +221,9 @@ def test_ensure_three_focus_topics_completes_cutoff():
     assert _sse.focus_topics_complete(out)
     assert "1." in out and "2." in out and "3." in out
     assert out.count("1.") >= 1
+    assert "without needing to fix it" not in out
+    assert "Curiosity waits by an open door" in out
+    assert "alone even when people" in out
 
 
 def test_ensure_three_focus_topics_leaves_complete_alone():
@@ -224,8 +233,8 @@ def test_ensure_three_focus_topics_leaves_complete_alone():
 
 
 def test_sse_should_complete_on_panel_rewrite_and_cut_followup():
-    ctx = "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]"
-    assert _sse.sse_should_complete_focus_topics(
+    ctx = "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — unique sitting, not a template]"
+    assert not _sse.sse_should_complete_focus_topics(
         "I am curious.(asking about my Sovereign Journey story panel image)", ctx
     )
     assert _sse.sse_should_complete_focus_topics(
@@ -293,3 +302,52 @@ async def test_plain_hi_does_not_reinject_panel():
     assert new_text == "hi"
     assert ctx == ""
     assert img is None
+
+
+@pytest.mark.asyncio
+async def test_prior_stock_closer_flags_anti_repeat():
+    row = {
+        "panel_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "panel_type": "journey",
+        "r2_url": None,
+        "narrative_text": "Derry shadows pool around the Mirror.",
+        "biome": "mist_town",
+        "character_manifest": "Mirror",
+        "panel_tone": "dusk",
+        "crystal_domains_used": {"themes": ["trust"], "domains": ["clinical"]},
+        "generated_at": datetime(2026, 9, 21, tzinfo=timezone.utc),
+    }
+    chat_rows = [
+        {
+            "user_text": "I want to go deeper with you on this panel.",
+            "ai_text": (
+                "For today, here are three focus topics for reflection or journaling:\n"
+                "1. What Mirror is reflecting in trust — without needing to fix it."
+            ),
+            "created_at": datetime(2026, 9, 21, tzinfo=timezone.utc),
+        },
+    ]
+    db = _FakeDB(row=row, chat_rows=chat_rows)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    text = "[SSE Panel:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee] I want to go deeper with you on this panel."
+    _new, ctx, _img = await build_sse_panel_chat_context(db, profile, text)
+    assert "[ANTI-REPEAT]" in ctx
+    assert "LN last said (do not copy" in ctx
+    assert _sse.sse_should_complete_focus_topics(text, ctx) is False
+
+
+def test_topics_from_ctx_are_scene_specific():
+    ctx = (
+        "Core character manifested: Serpent\n"
+        "Crystal themes that drove this panel: shame, control\n"
+        "Biome: river_bend | Tone: tense\n"
+        "Scene narrative: The Serpent rises from the crystal waters beside the Cartographer.\n"
+        "- [Sep 21] Client: She is using my trauma against me.\n"
+    )
+    topics = _sse._topics_from_ctx(ctx)
+    assert len(topics) == 3
+    blob = " ".join(topics)
+    assert "without needing to fix it" not in blob
+    assert "body-sense or image in the scene" not in blob
+    assert "Serpent" in blob
+    assert "using my trauma" in blob

@@ -6136,7 +6136,8 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
             if crystal:
                 result["crystal_insight"] = crystal[:200]
             lp_row = await conn.fetchrow(
-                "SELECT panel_id::text AS panel_id, r2_url, biome, generated_at FROM sse_panel_log "
+                "SELECT panel_id::text AS panel_id, r2_url, biome, generated_at, "
+                "narrative_text, character_manifest FROM sse_panel_log "
                 "WHERE user_id = ANY($1) AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1",
                 ids,
             )
@@ -6146,6 +6147,8 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
                 result["last_panel_id"] = lp_row["panel_id"]
                 result["last_panel_biome"] = lp_row["biome"]
                 result["last_panel_generated_at"] = lp_row["generated_at"].isoformat() if lp_row["generated_at"] else None
+                result["last_panel_narrative"] = (lp_row["narrative_text"] or "")[:240]
+                result["last_panel_character"] = lp_row["character_manifest"] or ""
     except Exception as e:
         logger.warning("sse_client_recap: %s", e)
     cached = _widget_cache.get(uid)

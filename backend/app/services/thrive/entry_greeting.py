@@ -396,7 +396,8 @@ async def gather_signals(db_pool: Any, user_id: str) -> EntrySignals:
         try:
             p = await conn.fetchrow(
                 """
-                SELECT panel_id::text AS panel_id, panel_type, biome, narrative_text, r2_url, generated_at
+                SELECT panel_id::text AS panel_id, panel_type, biome, narrative_text,
+                       character_manifest, r2_url, generated_at
                 FROM sse_panel_log WHERE user_id = ANY($1::text[]) ORDER BY generated_at DESC LIMIT 1
                 """,
                 ids,
@@ -407,6 +408,8 @@ async def gather_signals(db_pool: Any, user_id: str) -> EntrySignals:
                     "panel_type": p["panel_type"],
                     "biome": (p["biome"] or "").replace("_", " "),
                     "narrative": (p["narrative_text"] or "")[:400],
+                    "narrative_text": (p["narrative_text"] or "")[:400],
+                    "character_manifest": p["character_manifest"] or "",
                     "image_url": p["r2_url"],
                     "generated_at": p["generated_at"].isoformat() if p["generated_at"] else None,
                     "age_days": round((now - p["generated_at"]).total_seconds() / 86400, 1) if p["generated_at"] else None,

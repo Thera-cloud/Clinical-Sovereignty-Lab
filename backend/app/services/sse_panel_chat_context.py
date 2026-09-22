@@ -32,6 +32,20 @@ _FOCUS_HEADING_RE = re.compile(
     r"(?:For today,\s*)?(?:here are )?(?:the )?three focus topics\b",
     re.I,
 )
+_STOCK_PANEL_CLOSER_RE = re.compile(
+    r"without needing to fix it|"
+    r"body-sense or image in the scene that wants a name|"
+    r"one thread from recent conversation this image is holding|"
+    r"i(?:['’]m| am) right here with you|"
+    r"let(?:['’]s| us) talk about these figures together|"
+    r"three focus topics for reflection or journaling",
+    re.I,
+)
+_CUTOFF_ASK_RE = re.compile(
+    r"(?:focus topics?|three topics|3 topics|got cut off|cut off|"
+    r"post them again|list (?:them|those|the topics))",
+    re.I,
+)
 
 # Client-facing memory → character map (grouped themes per manifestation).
 CHARACTER_THEME_GUIDE: dict[str, dict[str, Any]] = {
@@ -216,12 +230,23 @@ def _format_chat_threads(rows: list[Any]) -> str:
     if not rows:
         return "[RECENT CHAT — near experience] No recent chat threads in database for this client."
     lines = ["[RECENT CHAT — near experience threads LN should cite in reasoning]"]
+    stock_hit = False
     for r in reversed(rows):
         ts = r.get("created_at")
         ts_str = ts.strftime("%b %d") if ts and hasattr(ts, "strftime") else ""
         u = (r.get("user_text") or "").strip()[:220]
+        a = (r.get("ai_text") or "").strip()[:180]
         if u:
             lines.append(f"- [{ts_str}] Client: {u}")
+        if a:
+            lines.append(f"  LN last said (do not copy structure or closer): {a}")
+            if _STOCK_PANEL_CLOSER_RE.search(a):
+                stock_hit = True
+    if stock_hit:
+        lines.append(
+            "[ANTI-REPEAT] A prior LN panel reply used the stock three-topic closer. "
+            "This turn: no numbered journaling list, no 'without needing to fix it'."
+        )
     return "\n".join(lines)
 
 
@@ -256,12 +281,16 @@ def _format_cycle_signals(rows: list[Any]) -> str:
 
 def _sse_panel_contract() -> str:
     return (
-        "[SSE PANEL CONTRACT] You must include section E: exactly 3 numbered focus "
-        "topics, each a complete sentence. Write E immediately after C — before SIFT. "
-        "Never stop after a bare '1.' Never say you already listed the topics unless "
-        "RECENT CHAT shows three complete numbered items. If the client says the topics "
-        "were cut off, list all three now. If space is short, shorten A–C and SIFT; "
-        "never omit E."
+        "[SSE PANEL CONTRACT] Sit with THIS image as a new visit. "
+        "Name at least two concrete figures, landmarks, or objects from Scene narrative. "
+        "Quote a few words from RECENT CHAT and join them to something visible now. "
+        "Forbidden stock: 'without needing to fix it'; 'a body-sense or image in the scene "
+        "that wants a name'; 'one thread from recent conversation this image is holding'; "
+        "'I'm right here with you'; 'Let's talk about these figures together'; "
+        "'For today, here are three focus topics for reflection or journaling'. "
+        "Do not use A/B/C/E/D section headers or a worksheet outline. "
+        "Numbered 1/2/3 journaling prompts only if the client asked for topics or said "
+        "they were cut off — and then each line must use nouns from THIS scene."
     )
 
 
@@ -270,36 +299,66 @@ def focus_topics_complete(text: str) -> bool:
 
 
 def sse_should_complete_focus_topics(user_text: str, ctx: str) -> bool:
+    """Only backfill topics when the client asked — never on first Go Deeper."""
     if not ctx or "DEEP REFLECTION PROTOCOL" not in ctx:
         return False
     blob = user_text or ""
-    if _SSE_PANEL_REF_RE.search(blob) or _STORY_PANEL_LEGACY_RE.search(blob):
-        return True
-    if "asking about my Sovereign Journey" in blob:
-        return True
-    return bool(_PANEL_FOLLOWUP_RE.search(blob))
+    return bool(_CUTOFF_ASK_RE.search(blob))
+
+
+def _ctx_field(ctx: str, label: str) -> str:
+    m = re.search(rf"{re.escape(label)}:\s*(.+)", ctx or "")
+    if not m:
+        return ""
+    val = m.group(1).strip()
+    if not val or val.lower() in ("n/a", "unknown"):
+        return ""
+    if "not stored" in val.lower():
+        return ""
+    return val.split("|")[0].strip()
+
+
+def _first_clause(text: str, max_len: int = 120) -> str:
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if not text:
+        return ""
+    part = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    return part[:max_len].rstrip(" ,;:")
+
+
+def _last_client_excerpt(ctx: str) -> str:
+    hits = re.findall(r"\] Client: (.+)", ctx or "")
+    if not hits:
+        return ""
+    return re.sub(r"\s+", " ", hits[-1].strip())[:90].rstrip(" .")
 
 
 def _topics_from_ctx(ctx: str) -> list[str]:
-    char = "this panel's core character"
-    m = re.search(r"Core character manifested:\s*(.+)", ctx or "")
-    if m:
-        char = m.group(1).strip() or char
+    char = _ctx_field(ctx, "Core character manifested") or "the figure in this panel"
+    biome = _ctx_field(ctx, "Biome") or "this landscape"
+    narrative = _ctx_field(ctx, "Scene narrative")
+    scene = _first_clause(narrative) or f"{char} in {biome}"
     themes: list[str] = []
-    tm = re.search(r"Crystal themes that drove this panel:\s*(.+)", ctx or "")
-    if tm:
+    raw_themes = _ctx_field(ctx, "Crystal themes that drove this panel")
+    if raw_themes:
         themes = [
             t.strip()
-            for t in tm.group(1).split(",")
+            for t in raw_themes.split(",")
             if t.strip() and "not stored" not in t.lower() and t.strip() != "n/a"
         ]
-    theme = themes[0] if themes else "what you brought into the space today"
-    theme2 = themes[1] if len(themes) > 1 else "a feeling the scene is holding"
-    return [
-        f"What {char} is reflecting in {theme} — without needing to fix it.",
-        f"A body-sense or image in the scene that wants a name around {theme2}.",
-        "One thread from recent conversation this image is holding for you today.",
-    ]
+    client_line = _last_client_excerpt(ctx)
+    theme = themes[0] if themes else "what is stirring"
+    t1 = f"Stay with {scene} — what is {char} doing that you have not said out loud?"
+    t2 = (
+        f"One detail in {biome} that matches {theme} in your body right now."
+    )
+    if client_line:
+        t3 = f'You said "{client_line}" — where does that land in this picture?'
+    elif len(themes) > 1:
+        t3 = f"How is {themes[1]} different in this scene than the last panel?"
+    else:
+        t3 = f"What would change if you took one step closer to {char} here?"
+    return [t1, t2, t3]
 
 
 def ensure_three_focus_topics(ai_text: str, ctx: str) -> str:
@@ -324,54 +383,29 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
     return "\n".join([
         _sse_panel_contract(),
         "",
-        "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — follow this structure in your reply]",
+        "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — unique sitting, not a template]",
         "",
-        "PURPOSE: The journey image is a memory-evocation tool. It brings FAR crystal memory "
-        "into contact with NEAR chat experience so you can walk memory reconsolidation modalities "
-        "(linking old themes to what is alive today). The core character manifests because of "
-        "what the client is bringing into the space — explain that reasoning explicitly.",
+        "PURPOSE: This image is a memory-evocation tool. Join FAR crystal memory to "
+        "NEAR chat using what is actually painted in THIS panel — not a generic essay.",
         "",
-        "RESPONSE STRUCTURE (warm mythic voice; no internal pipeline names):",
-        "",
-        "A. What I am noticing (structured reasoning)",
-        "   - Cite 2–4 themes from RECENT CHAT with approximate timing.",
-        "   - Cite 2–3 excerpts from CRYSTAL HISTORY as far-memory strands.",
-        "   - If CYCLE SIGNALS exist, name one repeating pattern and how it touches today's scene.",
-        "   - Name what the client is bringing into the space (their words/themes).",
-        "",
-        "B. Why this core character appeared",
-        f"   - Give the one-line memory→character map for {char_name}.",
-        f"   - Link explicitly: crystal themes + recent chat → why {char_name} stepped forward.",
-        "",
-        "C. What is shaping my reasoning",
-        "   - Name 2–3 specific evidence pieces from the sections above (quote short snippets).",
-        "   - If REPLY THERAPY 3+3+3 data is present, mention corrective emotional experience "
-        "progress only in human terms (mismatch → reconsolidation → evocative recall), not counts.",
-        "",
-        "E. Three focus topics for today (WRITE THIS BEFORE SIFT — required, never omit)",
-        "   Exactly 3 numbered topics (1. 2. 3.) drawn from crystal themes, chat history, "
-        "cycle patterns, and this panel's character. Each topic is one complete sentence "
-        "for reflection or journaling today — not tasks or homework. Do not stop after '1.'",
-        "",
-        "D. SIFT exploration (Sense → Image → Feel → Think)",
-        "   Offer SIFT as a gentle doorway into the imagery:",
-        "   - Sense: what the body notices in the scene (grounding, breath, tension).",
-        "   - Image: which symbol or figure calls to them.",
-        "   - Feel: emotion beneath the image.",
-        "   - Think: meaning they are making — without fixing or diagnosing.",
-        "",
-        "F. Optional deeper dive",
-        "   Close by offering: if they wish to go further with the imagery, you can walk "
-        "a fuller SIFT pass and also expand the scene using more Thera-world concepts "
-        "(companions, landmarks, quest objects) that already belong to this world — "
-        "not a new setting.",
+        "THIS VISIT (warm mythic voice; no pipeline names; no section letters):",
+        f"- Open on a concrete detail from Scene narrative or the image, then why {char_name} "
+        "is in that spot today (one or two sentences, not a preamble).",
+        "- Use one fresh doorway only: either a single SIFT question, or one figure, or "
+        "one landmark, or one quoted client line. Do not stack all four.",
+        "- If RECENT CHAT already contains a numbered 1/2/3 closer from you, do not use "
+        "numbered prompts this turn — ask one new question instead.",
+        "- If the client asked for focus topics or said they were cut off, give three "
+        f"complete sentences that name {char_name} plus nouns from Scene narrative "
+        "and a RECENT CHAT quote. Never the stock journaling trio.",
         "",
         "RULES: Do not invent chat or crystal quotes not in the evidence blocks. "
         "Do not mention panel_sequence, FFT, ODPE, or algorithms. "
-        "Stay in Thera-world. You may name additional companions or landmarks from the "
-        "Thera-world concept palette when deepening the scene. Do not invent a city, "
+        "Stay in Thera-world. You may name companions or landmarks from the "
+        "Thera-world concept palette when they belong to this scene. Do not invent a city, "
         "office, or second mythology. "
-        "Never claim a figure is absent if the scene narrative names it.",
+        "Never claim a figure is absent if the scene narrative names it. "
+        "Never copy LN last said.",
     ])
 
 
@@ -737,9 +771,9 @@ async def build_sse_panel_chat_context(
         ])
         if followup:
             ctx += (
-                "\n\n[SSE PANEL FOLLOW-UP] The client is continuing the journey-panel turn. "
-                "If RECENT CHAT shows an incomplete '1.' or they asked to repost, list all "
-                "three complete focus topics now. Do not claim you already posted them."
+                "\n\n[SSE PANEL FOLLOW-UP] Continue THIS scene. "
+                "If they asked to repost topics, give three new sentences using nouns from "
+                "Scene narrative and a RECENT CHAT quote — never the stock journaling trio."
             )
         return user_text, ctx, None
 
@@ -751,8 +785,8 @@ async def build_sse_panel_chat_context(
         ctx += "\n\n[SSE PANEL IMAGE] The journey panel image is attached as a vision block."
     if followup:
         ctx += (
-            "\n\n[SSE PANEL FOLLOW-UP] The client is continuing the journey-panel turn. "
-            "If RECENT CHAT shows an incomplete '1.' or they asked to repost, list all "
-            "three complete focus topics now. Do not claim you already posted them."
+            "\n\n[SSE PANEL FOLLOW-UP] Continue THIS scene. "
+            "If they asked to repost topics, give three new sentences using nouns from "
+            "Scene narrative and a RECENT CHAT quote — never the stock journaling trio."
         )
     return user_text, ctx, image_data_url

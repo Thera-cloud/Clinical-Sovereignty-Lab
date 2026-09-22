@@ -184,19 +184,19 @@ def test_flutter_wires_practice_card():
     assert "ASSISTANT MASTER FOLDERS" in src
     widget = (REPO / "mobile/lib/widgets/coach_practice_snapshot.dart").read_text()
     assert "Print review (no client names)" in widget
-    assert "PointerScrollEvent" in widget
     assert "Gold = roster mean" in widget
-    assert "Wheel zooms at cursor" in widget
+    assert "Expand graph" in widget
+    assert "collapsible" in widget
     assert "RangeSlider" in widget
-    assert "anchorX" in widget
-    assert "anchorY" in widget
+    assert "_chartOpen" in widget
     assert "_ChartGeom" in widget
-    assert "pointerSignalResolver" in widget
-    assert "HitTestBehavior.opaque" in widget
     assert "Healing 0–1" in widget
     assert "Days $dayLo" in widget
     assert "Day $day" in widget
     assert "_x0 = 0" in widget
+    assert "Slider searches dates" in widget
+    assert "Wheel zooms at cursor" not in widget
+    assert "pointerSignalResolver" not in widget
     assert "Sample" in widget
     assert "Random grab" in widget
     assert "Pick each" in widget

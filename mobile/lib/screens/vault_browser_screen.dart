@@ -13,6 +13,7 @@ import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
 import '../config/app_config.dart';
 import '../widgets/vault_preview_window.dart';
 import '../widgets/thera_panel_image.dart';
+import '../widgets/thera_go_deeper_ask.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/web_download.dart';
 import 'nate_organizer_screen.dart';
@@ -248,18 +249,13 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     final imgUrl = sse['r2_url']?.toString() ??
         item['thumbnail_url']?.toString() ??
         '';
-    final imgTag = imgUrl.isNotEmpty ? '[SSE Image:$imgUrl]' : '';
-    final panelId = item['id']?.toString() ?? '';
-    if (panelId.isNotEmpty && panelId != 'archetype') {
-      return "$imgTag[SSE Panel:$panelId] I want to go deeper with you on this panel. "
-          "Sit with the figures with me — what your inner world is showing, "
-          "how this scene continues from what came before, and what you're beginning to understand.";
-    }
-    final pType = sse['panel_type']?.toString() ?? 'journey';
-    final biome = sse['biome']?.toString() ?? '';
-    final fmtBiome = biome.replaceAll('_', ' ');
-    return "$imgTag[Story Panel: $pType] Biome: $fmtBiome. "
-        "I want to go deeper with you on this image.";
+    return theraGoDeeperAsk(
+      panelId: item['id']?.toString() ?? '',
+      imageUrl: imgUrl,
+      narrative: sse['narrative_text']?.toString() ?? '',
+      character: sse['character_manifest']?.toString() ?? '',
+      biome: sse['biome']?.toString() ?? '',
+    );
   }
 
   Future<void> _searchItems() async {
