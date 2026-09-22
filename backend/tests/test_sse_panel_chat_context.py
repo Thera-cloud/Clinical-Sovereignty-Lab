@@ -96,6 +96,9 @@ async def test_sse_panel_ref_injects_character_map_and_themes():
     assert "Little Nate" in ctx
     assert "SIFT" in ctx
     assert "unique sitting" in ctx
+    assert "walk SIFT" in ctx
+    assert "Sense:" in ctx
+    assert "one fresh doorway only" not in ctx
     assert "without needing to fix it" in ctx
     assert "Three focus topics for today" not in ctx
     assert "RECENT CHAT" in ctx

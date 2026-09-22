@@ -61,6 +61,7 @@ import 'services/vault_entitlement.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/thera_panel_image.dart';
 import 'widgets/thera_go_deeper_ask.dart';
+import 'widgets/thera_panel_legend.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/coach_integrations_hub.dart';
 
@@ -3232,6 +3233,30 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     ));
   }
 
+  Map<String, String> _sseAuthHeaders() {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    final uid = (widget.currentUserProfile?['hardware_id'] ??
+            widget.currentUserProfile?['user_id'] ??
+            widget.username ??
+            '')
+        .toString();
+    return {
+      'Content-Type': 'application/json',
+      if (uid.isNotEmpty) 'X-User-Id': uid,
+      if (tok.isNotEmpty) 'Authorization': 'Bearer $tok',
+    };
+  }
+
+  void _showTheraWorldLegend(String panelId, {VoidCallback? onGoDeeper}) {
+    showTheraPanelLegend(
+      context: context,
+      apiBase: defaultApiBaseUrl,
+      panelId: panelId,
+      authHeaders: _sseAuthHeaders(),
+      onGoDeeper: onGoDeeper,
+    );
+  }
+
   void _showNewQuestDialog() {
     final ctrl = TextEditingController();
     showDialog(
@@ -5796,9 +5821,16 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                     if (_recapData!["journey"] == null &&
                         _recapData!["last_panel_biome"] != null)
                       Text(
-                          '\u{1F30D} Thera-World: latest panel — ${_recapData!["last_panel_biome"].toString().replaceAll("_", " ")}',
+                          '\u{1F30D} Thera-World: latest panel — ${(_recapData!["last_panel_biome_label"] ?? _recapData!["last_panel_biome"]).toString().replaceAll("_", " ")}',
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 12)),
+                    if (_recapData!["last_panel_region"] == 'neuro')
+                      const Padding(
+                        padding: EdgeInsets.only(top: 2),
+                        child: Text('\u{2727} A new region of your world has opened.',
+                            style: TextStyle(
+                                color: Color(0xFF4ECDC4), fontSize: 11)),
+                      ),
                     if ((_recapData!["active_quests"] as List?)?.isNotEmpty ==
                         true)
                       Text(
@@ -5843,6 +5875,28 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                             character:
                                 (_recapData!["last_panel_character"] ?? '')
                                     .toString(),
+                          );
+                        }),
+                      if (_recapData!["last_panel_id"] != null)
+                        _recapBtn('Legend', () {
+                          _showTheraWorldLegend(
+                            _recapData!["last_panel_id"].toString(),
+                            onGoDeeper: () {
+                              _dismissRecap();
+                              _sendTheraWorldAsk(
+                                _recapData!["last_panel_id"].toString(),
+                                imageUrl: (_recapData!["last_panel_url"] ?? '')
+                                    .toString(),
+                                biome: (_recapData!["last_panel_biome"] ?? '')
+                                    .toString(),
+                                narrative:
+                                    (_recapData!["last_panel_narrative"] ?? '')
+                                        .toString(),
+                                character:
+                                    (_recapData!["last_panel_character"] ?? '')
+                                        .toString(),
+                              );
+                            },
                           );
                         }),
                       ..._duePracticeRecapButtons(),
@@ -6203,6 +6257,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               if (msg.startsWith('[THERA_PANEL_IMG]|')) {
                 final parts = msg.split('|');
                 final url = parts.length > 1 ? parts[1] : '';
+                final pid = parts.length > 2 ? parts[2] : '';
                 if (url.isEmpty) return const SizedBox.shrink();
                 return Padding(
                   padding:
@@ -6234,6 +6289,29 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                         },
                         onZoomClosed: _restoreChatScrollAfterOverlay,
                       ),
+                      if (pid.isNotEmpty)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => _showTheraWorldLegend(
+                              pid,
+                              onGoDeeper: () => _sendTheraWorldAsk(
+                                pid,
+                                imageUrl: url,
+                              ),
+                            ),
+                            icon: const Icon(Icons.menu_book_outlined,
+                                size: 16, color: Color(0xFF9D4EDD)),
+                            label: const Text(
+                              'Legend',
+                              style: TextStyle(
+                                color: Color(0xFF9D4EDD),
+                                fontFamily: 'Courier',
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                     ),
                   ),

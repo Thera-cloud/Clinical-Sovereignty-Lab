@@ -245,7 +245,8 @@ def _format_chat_threads(rows: list[Any]) -> str:
     if stock_hit:
         lines.append(
             "[ANTI-REPEAT] A prior LN panel reply used the stock three-topic closer. "
-            "This turn: no numbered journaling list, no 'without needing to fix it'."
+            "This turn: walk SIFT unique to this scene; no numbered journaling list, "
+            "no 'without needing to fix it'."
         )
     return "\n".join(lines)
 
@@ -288,6 +289,7 @@ def _sse_panel_contract() -> str:
         "that wants a name'; 'one thread from recent conversation this image is holding'; "
         "'I'm right here with you'; 'Let's talk about these figures together'; "
         "'For today, here are three focus topics for reflection or journaling'. "
+        "Walk Sense, Image, Feel, Think on THIS scene (all four). "
         "Do not use A/B/C/E/D section headers or a worksheet outline. "
         "Numbered 1/2/3 journaling prompts only if the client asked for topics or said "
         "they were cut off — and then each line must use nouns from THIS scene."
@@ -368,7 +370,7 @@ def ensure_three_focus_topics(ai_text: str, ctx: str) -> str:
         return text
     topics = _topics_from_ctx(ctx)
     block = (
-        "\n\nFor today, here are three focus topics for reflection or journaling:\n"
+        "\n\nThree threads from this scene:\n"
         f"1. {topics[0]}\n"
         f"2. {topics[1]}\n"
         f"3. {topics[2]}\n"
@@ -391,11 +393,18 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
         "THIS VISIT (warm mythic voice; no pipeline names; no section letters):",
         f"- Open on a concrete detail from Scene narrative or the image, then why {char_name} "
         "is in that spot today (one or two sentences, not a preamble).",
-        "- Use one fresh doorway only: either a single SIFT question, or one figure, or "
-        "one landmark, or one quoted client line. Do not stack all four.",
+        "- Then walk SIFT as a doorway into THIS scene. All four — unique to what is painted:",
+        "  Sense: one body or place detail (ground, breath, texture) tied to a landmark "
+        "or object in Scene narrative.",
+        f"  Image: which figure or symbol is calling — name {char_name} or another figure "
+        "actually in the scene.",
+        "  Feel: the emotion under that image, joined to a few quoted words from RECENT CHAT.",
+        "  Think: the meaning they are making — no diagnosis, no fixing.",
+        "- Close with one invitation to stay with that figure or feeling. "
+        "Do not add a numbered 1/2/3 journaling list unless they asked for topics or said they were cut off.",
         "- If RECENT CHAT already contains a numbered 1/2/3 closer from you, do not use "
-        "numbered prompts this turn — ask one new question instead.",
-        "- If the client asked for focus topics or said they were cut off, give three "
+        "numbered prompts this turn — still walk SIFT, then one new question.",
+        "- If the client asked for focus topics or said they were cut off, after SIFT give three "
         f"complete sentences that name {char_name} plus nouns from Scene narrative "
         "and a RECENT CHAT quote. Never the stock journaling trio.",
         "",
@@ -409,6 +418,35 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
     ])
 
 
+def _neuro_panel_context(row: Any, char_name: str) -> dict[str, Any] | None:
+    """QUANTUM-CRYSTAL-ARCH — Neuro region detection without new SELECT columns.
+
+    A panel is Neuro when its biome is a Neuro place AND its core figure is a
+    Neuro champion. Returns {place_label, purpose, braid} or None (Origin)."""
+    try:
+        from app.sse.neuro_scoring import champion_by_name, four_move_braid_block
+        from app.sse.thera_world_regions import NEURO_BIOMES, biome_display_name
+    except Exception:
+        return None
+    biome_id = (row.get("biome") or "").strip()
+    if biome_id not in NEURO_BIOMES:
+        return None
+    champ = champion_by_name(char_name)
+    if not champ:
+        return None
+    place = biome_display_name(biome_id)
+    try:
+        braid = four_move_braid_block(place, champ.get("name") or char_name)
+    except Exception:
+        braid = ""
+    return {
+        "place_label": place,
+        "purpose": champ.get("purpose") or "",
+        "role": champ.get("role") or "",
+        "braid": braid,
+    }
+
+
 def _build_panel_block(
     row: Any,
     themes: list[str],
@@ -416,11 +454,17 @@ def _build_panel_block(
     evidence: dict[str, str],
 ) -> str:
     char_name = (row.get("character_manifest") or "Mirror").strip()
-    guide = CHARACTER_THEME_GUIDE.get(char_name, CHARACTER_THEME_GUIDE["Mirror"])
+    neuro = _neuro_panel_context(row, char_name)
+    if neuro:
+        guide = {"mythic": neuro["purpose"] or f"{char_name} — {neuro['role']}."}
+    else:
+        guide = CHARACTER_THEME_GUIDE.get(char_name, CHARACTER_THEME_GUIDE["Mirror"])
     theme_line = ", ".join(themes[:6]) if themes else "(theme snapshot not stored for this panel)"
     domain_line = ", ".join(domains[:4]) if domains else "n/a"
     narrative = (row.get("narrative_text") or "").strip()
     biome = (row.get("biome") or "").replace("_", " ")
+    if neuro:
+        biome = neuro["place_label"]
     tone = row.get("panel_tone") or ""
     generated = row.get("generated_at")
     gen_str = generated.isoformat() if generated and hasattr(generated, "isoformat") else str(generated or "")
@@ -463,6 +507,9 @@ def _build_panel_block(
         "",
         _build_deep_reflection_protocol(char_name),
     ]
+    if neuro and neuro.get("braid"):
+        # Neuro visit: all four lived moves braided in-scene, on top of SIFT.
+        parts += ["", neuro["braid"]]
     return "\n".join(parts)
 
 

@@ -451,8 +451,30 @@ def _codex_entry_for_symbol(symbol_id: str, state: str) -> Dict[str, Any]:
     }
 
 
+def _neuro_champion(name: str) -> Optional[Dict[str, Any]]:
+    """QUANTUM-CRYSTAL-ARCH — Neuro region figure lookup (lazy import; None = not Neuro)."""
+    try:
+        from app.sse.neuro_scoring import champion_by_name
+        return champion_by_name(name)
+    except Exception:
+        return None
+
+
 def _codex_entry_for_character(character_name: str, posture: Dict[str, str]) -> Dict[str, Any]:
     symbol_id = CHARACTER_TO_SYMBOL.get(character_name)
+    champ = _neuro_champion(character_name) if not symbol_id else None
+    if champ:
+        # Neuro champions are mirrors with a stated purpose — no registry symbol governs them.
+        return {
+            "symbol_id": None,
+            "display_name": champ.get("name") or character_name,
+            "tier": "low_risk",
+            "state": "allowed",
+            "meaning": champ.get("purpose") or (
+                f"{character_name} stands in this panel as a mirror for what is emerging in you."
+            ),
+            "region": "neuro",
+        }
     if not symbol_id:
         # No registry symbol governs this character (Mirror, Reflection, Guide,
         # Curiosity, Pride/Shame, Holy Spirit) — always safe, describe generically.
@@ -521,19 +543,92 @@ def npc_role_for_name(name: str) -> str:
     for spec in _npc_catalog():
         if (spec.get("name") or "") == name:
             return (spec.get("role") or "").strip()
+    champ = _neuro_champion(name)
+    if champ:
+        return (champ.get("role") or "").strip()
     return ""
 
 
-def figures_named_in_narrative(narrative: str) -> List[str]:
-    text = (narrative or "").lower()
-    if not text:
+def _neuro_roster_names() -> List[str]:
+    try:
+        from app.sse.neuro_scoring import load_champions
+        return [c.get("name") or "" for c in load_champions()]
+    except Exception:
+        return []
+
+
+_THE_PREFIX = re.compile(r"^the\s+", re.I)
+_CORE_FIGURES = (
+    "Holy Spirit",
+    "Pride/Shame",
+    "Serpent",
+    "Reflection",
+    "Curiosity",
+    "Mirror",
+    "Little Nate",
+)
+
+
+def _name_keys(name: str) -> List[str]:
+    n = (name or "").strip()
+    if not n:
+        return []
+    keys = [n.lower()]
+    bare = _THE_PREFIX.sub("", n).strip().lower()
+    if bare and bare not in keys:
+        keys.append(bare)
+    if "/" in bare:
+        for part in bare.split("/"):
+            p = part.strip()
+            if len(p) >= 4 and p not in keys:
+                keys.append(p)
+    return [k for k in keys if len(k) >= 4]
+
+
+def name_mentioned(name: str, text: str) -> bool:
+    """True when a catalog/core name (or its bare form) appears in text."""
+    blob = (text or "").lower()
+    if not blob or not name:
+        return False
+    for key in _name_keys(name):
+        if re.search(rf"\b{re.escape(key)}\b", blob):
+            return True
+    return False
+
+
+def figures_named_in_narrative(narrative: str, biome: str = "") -> List[str]:
+    if not (narrative or "").strip():
         return []
     found: List[str] = []
     for spec in _npc_catalog():
         n = (spec.get("name") or "").strip()
-        if n and n.lower() in text and n not in found:
+        if n and name_mentioned(n, narrative) and n not in found:
             found.append(n)
+    for core in _CORE_FIGURES:
+        if name_mentioned(core, narrative) and core not in found:
+            found.append(core)
+    # Neuro roster only scanned for Neuro panels — bare forms like "sovereign",
+    # "wonder", "lover" are ordinary words inside Origin narratives.
+    if _is_neuro_biome(biome):
+        for champ in _neuro_roster_names():
+            if champ and champ not in found and _full_name_mentioned(champ, narrative):
+                found.append(champ)
     return found
+
+
+def _full_name_mentioned(name: str, narrative: str) -> bool:
+    """Whole-name match only (no bare form): 'The Wonder' must not fire on 'a sense of wonder'."""
+    if not name or not narrative:
+        return False
+    return re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", narrative, re.IGNORECASE) is not None
+
+
+def _is_neuro_biome(biome: str) -> bool:
+    try:
+        from app.sse.thera_world_regions import NEURO_BIOMES
+        return (biome or "") in NEURO_BIOMES
+    except Exception:
+        return False
 
 
 def _excerpt(text: str, limit: int = 160) -> str:
@@ -590,12 +685,11 @@ def compose_prior_note(name: str, prior_panels: Optional[List[Dict[str, Any]]]) 
     if not name:
         return ""
     hits: List[str] = []
-    needle = name.lower()
     for p in prior_panels or []:
         blob = " ".join(
             filter(None, [p.get("character_manifest") or "", p.get("narrative_text") or ""])
-        ).lower()
-        if needle not in blob:
+        )
+        if not name_mentioned(name, blob):
             continue
         biome = (p.get("biome") or "").replace("_", " ").strip()
         hits.append(biome or "an earlier scene")
@@ -655,11 +749,23 @@ def enrich_panel_legend(
     prior_panels: Optional[List[Dict[str, Any]]] = None,
     panel_sequence: int = 0,
     last_panel_summary: str = "",
+    archetype_hint: str = "",
 ) -> Dict[str, Any]:
     """C3 payload: figure-level descriptives + journey continuity.
 
     Pure (no DB). `legend` is the consent-posture list from build_panel_codex.
+    Neuro figures additionally carry `purpose` (why this figure stands in the
+    panel) and `archetype_mirror` (how they meet the client's archetype). Both
+    pass the client language wall — never structure names, never scores.
     """
+    neuro_panel = _is_neuro_biome(biome)
+    biome_label = biome
+    if neuro_panel:
+        try:
+            from app.sse.thera_world_regions import biome_display_name
+            biome_label = biome_display_name(biome)
+        except Exception:
+            pass
     role_by_name: Dict[str, str] = {}
     for spec in npc_details or []:
         n = (spec.get("name") or "").strip()
@@ -694,14 +800,19 @@ def enrich_panel_legend(
             role=role,
             narrative=narrative_text,
             is_core=is_core,
-            biome=biome,
+            biome=biome_label,
         )
+        champ = _neuro_champion(name) if name else None
+        if champ:
+            row["region"] = "neuro"
+            row["purpose"] = _client_safe(champ.get("purpose") or "")
+            row["archetype_mirror"] = _client_safe(_archetype_mirror(champ, archetype_hint))
         enriched.append(row)
     return {
         "legend": enriched,
         "journey_thread": compose_journey_thread(
             panel_sequence=panel_sequence,
-            biome=biome,
+            biome=biome_label,
             narrative=narrative_text,
             character_name=core,
             prior_panels=prior_panels,
@@ -709,5 +820,24 @@ def enrich_panel_legend(
         ),
         "panel_sequence": panel_sequence or (len(prior_panels or []) + 1),
         "biome": biome,
+        "biome_label": biome_label,
+        "region": "neuro" if neuro_panel else "origin",
         "character": core,
     }
+
+
+def _archetype_mirror(champ: Dict[str, Any], archetype_hint: str) -> str:
+    try:
+        from app.sse.neuro_scoring import compose_archetype_mirror
+        return compose_archetype_mirror(champ, archetype_hint or "")
+    except Exception:
+        return ""
+
+
+def _client_safe(text: str) -> str:
+    """Language wall: strip a Neuro legend line rather than leak engine vocabulary."""
+    try:
+        from app.sse.neuro_scoring import client_safe_violations
+        return "" if client_safe_violations(text) else text
+    except Exception:
+        return text

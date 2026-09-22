@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "origin",
+      "display_name": "The Path of Five",
+      "unlock": "always",
+      "biomes": [
+        {"biome_id": "dark_forest", "display_name": "Dark Forest"},
+        {"biome_id": "fortress_plains", "display_name": "Fortress Plains"},
+        {"biome_id": "river_valley", "display_name": "River Valley"},
+        {"biome_id": "crystal_mountains", "display_name": "Crystal Mountains"},
+        {"biome_id": "open_sky", "display_name": "Open Sky"}
+      ]
+    },
+    {
+      "region_id": "neuro",
+      "display_name": "Neuro",
+      "unlock": "neuro_scores_or_open_sky",
+      "biomes": [
+        {
+          "biome_id": "coliseum_of_ascendance",
+          "display_name": "Coliseum of Ascendance",
+          "structure": "authority",
+          "description": "a vast arena of black basalt and star-veined marble, broken statues of former champions ringing the tiers, the Crown of Verdict suspended above the floor in still light",
+          "bright_description": "a sunlit arena of pale stone and star-veined marble, banners drifting, a gentle crown of light held above a wide open floor",
+          "healing_visual": "a figure standing on the floor without shrinking and without crushing anyone, the Crown of Verdict lowering by a hand's width"
+        },
+        {
+          "biome_id": "confluence_of_tides",
+          "display_name": "The Confluence of Tides",
+          "structure": "integration",
+          "description": "a floating city of lashed vessels riding the meeting of three currents — one clear and fast, one dark and cold, one silver-bright — a central platform laid with a mosaic of waves that only reads whole from every side",
+          "bright_description": "a friendly floating town of colorful boats tied together where three sparkling streams meet, a round deck at the center paved with a wave mosaic",
+          "healing_visual": "someone standing at the platform's center seeing the whole mosaic, all three currents feeding the same harbor"
+        },
+        {
+          "biome_id": "aerolith_cloud_city",
+          "display_name": "Aerolith the Cloud City",
+          "structure": "separation",
+          "description": "islands of cloudstone bound by lightning tethers, spires that cast one shared shadow, bridges of light between them, the distinct lands of the world visible far below",
+          "bright_description": "soft cloud islands with airy towers and rainbow bridges, kites and gliders, the patchwork lands of the world visible below",
+          "healing_visual": "the towers each casting their own shadow, bridges remaining but no longer chains, one figure flying under their own name"
+        },
+        {
+          "biome_id": "hearthworld_of_returning",
+          "display_name": "Hearthworld of Returning",
+          "structure": "attachment",
+          "description": "twelve warm islands joined by living root-bridges that pulse with light, the First Hearth burning steady at the center, lanterns on every shore",
+          "bright_description": "twelve cozy islands with glowing root-bridges and a great warm hearth at the center, lanterns and blankets on every shore",
+          "healing_visual": "a root-bridge stretching to make room without snapping, glowing brighter on an honest request, mending where it was torn"
+        }
+      ]
+    }
+  ]
+}

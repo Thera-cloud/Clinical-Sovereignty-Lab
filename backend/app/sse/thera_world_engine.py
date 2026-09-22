@@ -1292,11 +1292,27 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         except Exception as _evo_err:
             logger.warning("Archetype evolution failed for %s: %s", user_id, _evo_err)
 
+    # QUANTUM-CRYSTAL-ARCH — Neuro region (additive). None → Origin path unchanged.
+    neuro_ctx = None
+    try:
+        from app.sse.neuro_region_engine import resolve_neuro_panel_context
+        neuro_ctx = await resolve_neuro_panel_context(
+            user_id, profile, journey, db_pool,
+            age_gated=bool((profile.get("_family_context") or {}).get("age_gated")))
+    except Exception as _neuro_err:
+        logger.warning("Neuro region resolve failed for %s (Origin fallback): %s", user_id, _neuro_err)
+    if neuro_ctx:
+        biome = neuro_ctx["biome"]
+        current_biome_name = biome["biome"]
+        character = neuro_ctx["character"]
+
     # FIX #4: deep crystal recall + rolling chapter summary (long-arc memory)
     deep_ctx = await _fetch_deep_crystal_context(user_id, profile, db_pool)
     chapter = await _get_chapter_summary(user_id, journey, profile, db_pool)
     # FIX #6: recurring NPCs forged from crystal domain clusters
     crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
+    if neuro_ctx:
+        crystal_npcs = list(neuro_ctx["npcs"])  # visiting champions replace Origin NPC cast today
 
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
@@ -1475,6 +1491,17 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     except Exception as e:
         logger.warning("generate_journey_panel DB write failed for %s: %s", user_id, e)
 
+    # QUANTUM-CRYSTAL-ARCH — tag the saved row/journey with region (additive columns, mig 441)
+    if _panel_saved:
+        try:
+            from app.sse.neuro_region_engine import record_neuro_panel_outcome, record_origin_panel_outcome
+            if neuro_ctx:
+                await record_neuro_panel_outcome(user_id, panel_id, neuro_ctx, db_pool)
+            else:
+                await record_origin_panel_outcome(user_id, db_pool)
+        except Exception as _neuro_log_err:
+            logger.warning("Neuro region outcome record failed for %s: %s", user_id, _neuro_log_err)
+
     if _panel_saved and db_pool:
         try:
             _qctx = ""
@@ -1502,7 +1529,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
 
     return {"panel_id": panel_id, "r2_url": r2_url, "biome": current_biome_name,
             "character": character[0], "narrative": nar_text,
-            "panel_tone": narrative.get("panel_tone", "meditative"), "transitioned": transitioned}
+            "panel_tone": narrative.get("panel_tone", "meditative"), "transitioned": transitioned,
+            "region": "neuro" if neuro_ctx else "origin"}
 
 
 async def get_user_sse_status(user_id: str, db_pool) -> dict:

@@ -24,7 +24,13 @@ def test_chat_restores_scroll_after_panel_zoom():
     assert "go deeper with you on this panel" in src
     ask = (REPO / "mobile/lib/widgets/thera_go_deeper_ask.dart").read_text()
     assert "theraGoDeeperAsk" in ask
-    assert "Skip the usual three journaling prompts" in ask
+    assert "Skip the usual three journaling prompts" not in ask
+    assert "Walk Sense, Image, Feel, Think" in ask
+    src = (REPO / "mobile/lib/updated_screens.dart").read_text()
+    assert "showTheraPanelLegend" in src
+    assert "_recapBtn('Legend'" in src
+    legend = (REPO / "mobile/lib/widgets/thera_panel_legend.dart").read_text()
+    assert "codex/panel/" in legend
     assert "Sit with the figures with me" not in ask
     vault = (REPO / "mobile/lib/screens/vault_browser_screen.dart").read_text()
     assert "theraGoDeeperAsk(" in vault

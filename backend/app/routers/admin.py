@@ -5753,7 +5753,8 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
             raise HTTPException(404, "panel not found")
         owner = row["user_id"]
         idrow = await conn.fetchrow(
-            "SELECT cultural_context, spiritual_framework FROM sse_identity_forge WHERE user_id = $1", owner)
+            "SELECT cultural_context, spiritual_framework, archetype_hint "
+            "FROM sse_identity_forge WHERE user_id = $1", owner)
         jrow = await conn.fetchrow(
             "SELECT last_panel_npcs, last_panel_summary, panel_sequence, current_biome "
             "FROM sse_user_journeys WHERE user_id = $1", owner)
@@ -5776,12 +5777,22 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
     is_latest = bool(this_at and latest_at and this_at >= latest_at)
     from app.sse.symbol_safety import (
         build_panel_codex, enrich_panel_legend, figures_named_in_narrative,
+        name_mentioned,
     )
     narrative = row["narrative_text"] or ""
-    npc_names = [n["name"] for n in npc_details] if is_latest else []
-    for extra in figures_named_in_narrative(narrative):
+    panel_biome = row["biome"] or ((jrow["current_biome"] if jrow else "") or "")
+    npc_names = []
+    for extra in figures_named_in_narrative(narrative, biome=panel_biome):
         if extra not in npc_names:
             npc_names.append(extra)
+    # last_panel_npcs is journey-latest only — merge onto this panel when
+    # it is the current panel, or when the name also appears in THIS narrative.
+    for n in npc_details:
+        name = (n.get("name") or "").strip()
+        if not name or name in npc_names:
+            continue
+        if is_latest or name_mentioned(name, narrative):
+            npc_names.append(name)
     legend = await build_panel_codex(
         row["character_manifest"] or "", npc_names, owner, pool,
         cultural_context=(idrow["cultural_context"] if idrow else "") or "",
@@ -5801,11 +5812,12 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
         legend,
         character_name=row["character_manifest"] or "",
         narrative_text=narrative,
-        biome=row["biome"] or ((jrow["current_biome"] if jrow else "") or ""),
+        biome=panel_biome,
         npc_details=npc_details,
         prior_panels=prior_panels,
         panel_sequence=int(jrow["panel_sequence"] or 0) if jrow and is_latest else (len(prior_panels) + 1),
         last_panel_summary=(jrow["last_panel_summary"] if jrow else "") or "",
+        archetype_hint=(idrow["archetype_hint"] if idrow else "") or "",
     )
     return {
         "panel_id": panel_id,
@@ -5813,6 +5825,8 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
         "journey_thread": bundle["journey_thread"],
         "panel_sequence": bundle["panel_sequence"],
         "biome": bundle["biome"],
+        "biome_label": bundle.get("biome_label") or bundle["biome"],
+        "region": bundle.get("region") or "origin",
         "character": bundle["character"],
         "prior_panels": [
             {"biome": p["biome"], "character": p["character_manifest"], "generated_at": p["generated_at"]}
@@ -6146,6 +6160,14 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
                 # Thera-World hot button → "[SSE Panel:<id>]" ask-Nate flow (growth-phase v1)
                 result["last_panel_id"] = lp_row["panel_id"]
                 result["last_panel_biome"] = lp_row["biome"]
+                # QUANTUM-CRYSTAL-ARCH — region label derived from biome id (no schema dependency)
+                try:
+                    from app.sse.thera_world_regions import NEURO_BIOMES, biome_display_name
+                    _is_neuro = (lp_row["biome"] or "") in NEURO_BIOMES
+                    result["last_panel_region"] = "neuro" if _is_neuro else "origin"
+                    result["last_panel_biome_label"] = biome_display_name(lp_row["biome"] or "")
+                except Exception:
+                    result["last_panel_region"] = "origin"
                 result["last_panel_generated_at"] = lp_row["generated_at"].isoformat() if lp_row["generated_at"] else None
                 result["last_panel_narrative"] = (lp_row["narrative_text"] or "")[:240]
                 result["last_panel_character"] = lp_row["character_manifest"] or ""

@@ -14,6 +14,7 @@ import '../config/app_config.dart';
 import '../widgets/vault_preview_window.dart';
 import '../widgets/thera_panel_image.dart';
 import '../widgets/thera_go_deeper_ask.dart';
+import '../widgets/thera_panel_legend.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/web_download.dart';
 import 'nate_organizer_screen.dart';
@@ -966,128 +967,20 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
   }
 
   // Thera-World Global Symbol Safety System — Layer C3 (Codex/Legend).
-  // Tap-to-reveal legend: every character/symbol in this panel, named and
-  // explained in the user's own consented posture. No unexplained figures.
-  Future<Map<String, dynamic>?> _fetchCodex(String panelId) async {
-    try {
-      final resp = await http.get(
-        Uri.parse('$_baseUrl/api/sse-client/codex/panel/$panelId'),
-        headers: _authHeaders,
-      ).timeout(const Duration(seconds: 8));
-      if (resp.statusCode >= 200 && resp.statusCode < 300) {
-        return jsonDecode(resp.body) as Map<String, dynamic>;
-      }
-    } catch (_) {}
-    return null;
-  }
-
   void _showCodexLegend(String panelId, {Map<String, dynamic>? item}) {
-    showModalBottomSheet(
+    showTheraPanelLegend(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: _VaultDesign.bgChamber,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => FutureBuilder<Map<String, dynamic>?>(
-        future: _fetchCodex(panelId),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const SizedBox(
-              height: 160,
-              child: Center(child: CircularProgressIndicator(color: _VaultDesign.purple)),
-            );
-          }
-          final data = snapshot.data;
-          final legend = (data?['legend'] as List?) ?? [];
-          final thread = (data?['journey_thread'] ?? '').toString();
-          final seq = data?['panel_sequence'];
-          return DraggableScrollableSheet(
-            initialChildSize: 0.62, minChildSize: 0.35, maxChildSize: 0.95, expand: false,
-            builder: (_, scrollCtrl) => ListView(controller: scrollCtrl, padding: const EdgeInsets.all(20), children: [
-              Text(
-                seq != null ? 'Legend — panel $seq' : 'Legend',
-                style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'How to read the figures in this panel, and how this scene continues Little Nate\'s understanding of you over time.',
-                style: TextStyle(color: _VaultDesign.textSecondary, fontSize: 13, height: 1.4),
-              ),
-              if (thread.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF9D4EDD).withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.25)),
-                  ),
-                  child: Text(thread,
-                      style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13, height: 1.45)),
-                ),
-              ],
-              const SizedBox(height: 16),
-              if (legend.isEmpty)
-                const Text(
-                  'The landscape itself is the figure here. Go deeper with Nate to sit with the scene.',
-                  style: TextStyle(color: _VaultDesign.textSecondary),
-                ),
-              ...legend.map((e) {
-                final name = e['display_name']?.toString() ?? '';
-                final inPanel = e['figure_in_panel']?.toString() ?? '';
-                final role = e['role']?.toString() ?? '';
-                final prior = e['prior_note']?.toString() ?? '';
-                final meaning = e['meaning']?.toString() ?? '';
-                final isCore = e['is_core'] == true;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 18),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Expanded(
-                        child: Text(name,
-                            style: const TextStyle(color: _VaultDesign.purple, fontWeight: FontWeight.bold, fontSize: 15)),
-                      ),
-                      if (isCore)
-                        const Text('core',
-                            style: TextStyle(color: Color(0xFFC9A962), fontSize: 11, fontWeight: FontWeight.w600)),
-                    ]),
-                    if (role.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(role, style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 12, fontStyle: FontStyle.italic)),
-                    ],
-                    if (inPanel.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(inPanel, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45)),
-                    ],
-                    if (prior.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(prior, style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12, height: 1.4)),
-                    ],
-                    if (meaning.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(meaning, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4)),
-                    ],
-                  ]),
-                );
-              }),
-              if (item != null) ...[
-                const SizedBox(height: 8),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.forum_outlined, size: 18),
-                  label: const Text('Go deeper with Nate'),
-                  style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
-                  onPressed: () {
-                    final msg = _sseAskNateMessage(item);
-                    final nav = Navigator.of(this.context);
-                    Navigator.pop(ctx);
-                    nav.pop();
-                    nav.pop(msg);
-                  },
-                ),
-              ],
-            ]),
-          );
-        },
-      ),
+      apiBase: _baseUrl,
+      panelId: panelId,
+      authHeaders: _authHeaders,
+      onGoDeeper: item == null
+          ? null
+          : () {
+              final msg = _sseAskNateMessage(item);
+              final nav = Navigator.of(this.context);
+              nav.pop();
+              nav.pop(msg);
+            },
     );
   }
 

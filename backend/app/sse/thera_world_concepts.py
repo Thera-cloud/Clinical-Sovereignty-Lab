@@ -39,6 +39,31 @@ BIOME_LANDMARKS: dict[str, tuple[str, ...]] = {
         "horizon light widening without hurry",
         "a cloak set down, no longer needed",
     ),
+    # --- Neuro region (additive; Origin tuples above are byte-identical) ---
+    "coliseum_of_ascendance": (
+        "the Crown of Verdict hanging in still light above the floor",
+        "a ring of broken champion statues on the tiers",
+        "an empty stone seat at the arena's edge",
+        "a gate left open onto the floor",
+    ),
+    "confluence_of_tides": (
+        "three currents meeting — clear-fast, dark-cold, silver-bright",
+        "a central platform mosaic of waves that only reads whole from every side",
+        "lashed hulls creaking softly against each other",
+        "a mooring rope with room to give",
+    ),
+    "aerolith_cloud_city": (
+        "cloudstone islands bound by lightning tethers",
+        "a spire beginning to cast its own shadow",
+        "a bridge of light that remains but is no longer a chain",
+        "the distinct lands of the world visible far below",
+    ),
+    "hearthworld_of_returning": (
+        "the First Hearth burning steady at the center",
+        "a root-bridge pulsing with soft light",
+        "a second seat pulled near the fire",
+        "a bridge mended where it was torn, glowing brighter there",
+    ),
 }
 
 STORY_BEATS: tuple[str, ...] = (

@@ -28,8 +28,8 @@ String theraGoDeeperSceneHook({
   final who = character.trim();
   final land = biome.replaceAll('_', ' ').trim();
   final skip =
-      'Stay with what is actually in this scene — one figure, one feeling. '
-      'Skip the usual three journaling prompts.';
+      'Walk Sense, Image, Feel, Think with me on what is actually in this scene. '
+      'Do not use the stock three journaling prompts.';
   if (scene.isNotEmpty) {
     final prefix = who.isNotEmpty ? '$who. ' : '';
     return '${prefix}Scene: $scene $skip';

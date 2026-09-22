@@ -4,6 +4,8 @@ from app.sse.symbol_safety import (
     compose_journey_thread,
     compose_prior_note,
     enrich_panel_legend,
+    figures_named_in_narrative,
+    name_mentioned,
 )
 
 
@@ -79,3 +81,25 @@ def test_enrich_adds_descriptives_and_empty_scene_fallback():
     assert empty["legend"]
     assert empty["legend"][0]["display_name"] == "The scene"
     assert "biome" in empty["legend"][0]["meaning"].lower()
+
+
+def test_name_mentioned_matches_bare_catalog_form():
+    assert name_mentioned("The Weaver", "the weaver waits at the loom")
+    assert name_mentioned("The Cartographer", "Cartographer refining his map")
+    assert name_mentioned("Serpent", "the serpent rises from the water")
+    assert not name_mentioned("The Weaver", "a bird weaves through the trees")
+
+
+def test_figures_named_in_narrative_finds_catalog_and_core():
+    names = figures_named_in_narrative(
+        "You stand with the Cartographer when the Serpent rises from the waters."
+    )
+    assert "The Cartographer" in names
+    assert "Serpent" in names
+
+
+def test_prior_note_matches_bare_name_in_older_panel():
+    note = compose_prior_note("The Weaver", [
+        {"character_manifest": "Mirror", "narrative_text": "A weaver mends the torn thread.", "biome": "woven_grove"},
+    ])
+    assert "woven grove" in note.lower()
