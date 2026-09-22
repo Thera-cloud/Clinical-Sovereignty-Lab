@@ -234,6 +234,36 @@ def test_age_gate_drops_literal_force_figures():
     assert champ["name"] not in ns.AGE_GATE_EXCLUDE
 
 
+def test_center_is_not_the_defensive_upper_band():
+    assert ns.active_band({"authority_mature": 0.9, "authority_hyper": 0.1}, "authority") == ns.BAND_CENTER
+    assert ns.active_band({"authority_mature": 0.8, "authority_hyper": 0.8}, "authority") == ns.BAND_UPPER
+    assert ns.active_band({"authority_deficit": -0.8}, "authority") == ns.BAND_LOWER
+    assert ns.active_band({"attachment_deficit": -0.6, "attachment_hyper": 0.7}, "attachment") == ns.BAND_BOTH
+
+
+def test_codependency_is_attachment_enmeshment():
+    v = ns.scores_from_theme_counts({"codependency": 6})
+    assert v["attachment_hyper"] > 0
+    assert v["separation_deficit"] == 0
+
+
+def test_image_line_is_client_safe_and_chat_map_stays_internal():
+    scores = {"separation_hyper": 0.9, "integration_deficit": -0.7}
+    line = ns.image_change_line(scores, "separation")
+    ns.assert_client_safe(line)
+    assert "wall" in line.lower()
+    chat = ns.compose_growth_navigation(scores)
+    assert "internal only" in chat.lower()
+    assert "authority" in chat.lower()
+    bible = ns.compose_neuro_bible({
+        "scores": scores,
+        "biome": {"biome": "aerolith_cloud_city"},
+        "champion": {"name": "Bridge Warden", "purpose": "keeps a span", "structure": "separation"},
+        "metadata": {"place_label": "Aerolith"},
+    })
+    assert "wall" in bible.lower() or "gate" in bible.lower()
+
+
 def test_scrub_rewrites_engine_labels():
     out = ns.scrub_client_copy("Your attachment is -0.40 and Authority is 30%.")
     assert "attachment" not in out.lower()
@@ -293,6 +323,12 @@ def test_four_move_braid_block():
     for move in ns.FOUR_MOVES:
         assert move["move"] in block, move["key"]
     assert "Work them together" in block
+    aimed = ns.four_move_braid_block(
+        "Aerolith", "Bridge Warden",
+        change_line=ns.image_change_line({"separation_hyper": 0.9}, "separation"),
+    )
+    assert "wall" in aimed.lower()
+    assert not ns.client_safe_violations(aimed)
     # engine vocabulary never reaches the client block (the instruction lines name
     # "category/score/level" only as prohibitions — those are allowed)
     assert not re.search(r"\b(domain|structure|pole|deficit|hyper)\b", block, re.IGNORECASE)

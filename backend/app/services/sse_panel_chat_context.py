@@ -435,8 +435,20 @@ def _neuro_panel_context(row: Any, char_name: str) -> dict[str, Any] | None:
     if not champ:
         return None
     place = biome_display_name(biome_id)
+    change_line = ""
+    meta = row.get("panel_metadata") if hasattr(row, "get") else None
+    if isinstance(meta, str):
+        try:
+            import json as _json
+            meta = _json.loads(meta)
+        except Exception:
+            meta = {}
+    if isinstance(meta, dict):
+        change_line = meta.get("change_line") or ""
     try:
-        braid = four_move_braid_block(place, champ.get("name") or char_name)
+        braid = four_move_braid_block(
+            place, champ.get("name") or char_name, change_line=change_line,
+        )
     except Exception:
         braid = ""
     return {
@@ -698,7 +710,8 @@ async def _latest_journey_panel_row(db_pool, ids: list[str]):
         return await db_pool.fetchrow(
             """
             SELECT panel_id, panel_type, r2_url, narrative_text, biome,
-                   character_manifest, panel_tone, crystal_domains_used, generated_at
+                   character_manifest, panel_tone, crystal_domains_used, generated_at,
+                   panel_metadata
             FROM sse_panel_log
             WHERE user_id = ANY($1::text[])
             ORDER BY generated_at DESC NULLS LAST
@@ -739,7 +752,8 @@ async def build_sse_panel_chat_context(
             row = await db_pool.fetchrow(
                 """
                 SELECT panel_id, panel_type, r2_url, narrative_text, biome,
-                       character_manifest, panel_tone, crystal_domains_used, generated_at
+                       character_manifest, panel_tone, crystal_domains_used, generated_at,
+                       panel_metadata
                 FROM sse_panel_log
                 WHERE panel_id = $1::uuid AND user_id = ANY($2::text[])
                 """,

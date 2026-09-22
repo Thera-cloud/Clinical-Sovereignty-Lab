@@ -10529,6 +10529,16 @@ class AzureCortex:
         except Exception as _gp_err:
             print(f">>> [GROWTH PHASE] non-fatal: {type(_gp_err).__name__}: {_gp_err}")
 
+        # QUANTUM-CRYSTAL-ARCH — Neuro three-band map for main chat (SSE_NEURO_REGION_ENABLED).
+        try:
+            if _role == "CLIENT" and not dojo_type:
+                from app.sse.neuro_region_engine import neuro_chat_addendum as _neuro_nav
+                _neuro_map = await _neuro_nav(db_pool, uid)
+                if _neuro_map:
+                    system_prompt = (system_prompt or "") + "\n\n---\n" + _neuro_map
+        except Exception as _nn_err:
+            print(f">>> [NEURO-NAV] non-fatal: {_nn_err}")
+
         # QUANTUM-CRYSTAL-ARCH: high-risk occupational prompt modifiers (reserved headroom)
         _pop_sfx = ""
         try:

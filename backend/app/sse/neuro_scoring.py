@@ -60,7 +60,9 @@ STEM_TO_POLE: Dict[str, Tuple[str, str]] = {
     # "boundaries" is the corrective move (a limit, an own name), not a deficit.
     # Enmeshment stays on codependency.
     "boundaries": ("separation", "mature"),
-    "codependency": ("separation", "deficit"),
+    # Co-dependency is the attachment defense (enmeshment), not a missing boundary.
+    # Boundaryless diffusion stays a separation deficit when the stem is about having no "no".
+    "codependency": ("attachment", "hyper"),
     "rejection": ("separation", "hyper"),
     # themes the miner already counts that previously moved no pole
     "anxiety": ("authority", "deficit"),
@@ -152,6 +154,101 @@ def all_domain_health(scores: Dict[str, Any]) -> Dict[str, float]:
 def neuro_health(scores: Dict[str, Any]) -> float:
     hd = all_domain_health(scores)
     return sum(hd.values()) / float(len(NEURO_STRUCTURES))
+
+
+# Three measurement ranges. Center and upper are both 0..1 and must not be
+# collapsed: center is calm integration, upper is defensive over-compensation.
+BAND_LOWER = "lower"    # deficit, stored -1..0 — passive / deficient injury path
+BAND_CENTER = "center"  # mature, 0..1 — authentic calm mastery
+BAND_UPPER = "upper"    # hyper, 0..1 — defensive / high-anxiety over-compensation
+BAND_BOTH = "oscillating"  # both injury paths loud; change still aims at center
+BAND_QUIET = "quiet"
+
+# Lived picture for the still. No structure names — safe if a phrase reaches the image prompt.
+IMAGE_CHANGE: Dict[str, Dict[str, str]] = {
+    "authority": {
+        BAND_LOWER: "The figure is small in the hall and will not take the floor. The meeting offers one step of a steady voice, not a throne and not a further collapse.",
+        BAND_CENTER: "The figure stands as an equal. Keep the light calm. Do not crown them and do not shrink them.",
+        BAND_UPPER: "The figure is gripping the hall too hard, the grip covering a fear. The meeting loosens that grip toward shared ground, without dropping them into helplessness.",
+        BAND_BOTH: "The figure swings between shrinking and forcing the room. The meeting finds the middle stance: a voice that neither disappears nor dominates.",
+        BAND_QUIET: "Nothing in this hall is loud yet. Keep the meeting open and ungraded.",
+    },
+    "integration": {
+        BAND_LOWER: "The figure is coming apart under one hard look, sunk in shame. The meeting helps them stay present with a flaw without the flaw becoming the whole person.",
+        BAND_CENTER: "The figure can own a mistake and still keep their worth. Deepen that groundedness. Do not polish them into a mask.",
+        BAND_UPPER: "The figure is wearing a perfect mask and will not let a crack show. The meeting lets one true flaw be visible without the mask shattering into self-hatred.",
+        BAND_BOTH: "The figure swings between self-hatred and a perfect mask. The meeting holds one real flaw and one real worth in the same light.",
+        BAND_QUIET: "No crack and no mask are loud yet. Keep the meeting open and ungraded.",
+    },
+    "separation": {
+        BAND_LOWER: "The figure has no edge: other people's weather moves straight through them, and they cannot say no. The meeting grows one calm limit that is not an exile.",
+        BAND_CENTER: "The figure keeps their own name and stays near. Deepen that. Do not wall them off and do not dissolve them.",
+        BAND_UPPER: "The figure has built a wall and reads closeness as a threat to freedom. The meeting opens one gate without tearing the wall down into diffusion.",
+        BAND_BOTH: "The figure swings between having no edge and sealing every gate. The meeting practices one limit that still lets someone near.",
+        BAND_QUIET: "No wall and no flood are loud yet. Keep the meeting open and ungraded.",
+    },
+    "attachment": {
+        BAND_LOWER: "The figure circles the fire and will not sit, shut off from relying on anyone. The meeting offers one moment of trusting nearness without fusion.",
+        BAND_CENTER: "The figure can ask for warmth and keep a self. Deepen that. Do not fuse them and do not send them back into the cold.",
+        BAND_UPPER: "The figure is fused to the other, smothering, giving themselves away to avoid being left. The meeting returns a little room without abandoning them.",
+        BAND_BOTH: "The figure swings between total shutdown and total fusion. The meeting practices nearness that still leaves room.",
+        BAND_QUIET: "No shutdown and no fusion are loud yet. Keep the meeting open and ungraded.",
+    },
+}
+
+
+def active_band(scores: Dict[str, Any], structure: str) -> str:
+    """Which path is driving this structure. Center is not the upper band.
+
+    Upper and center are both positive. The louder neural driver wins. When
+    both injury paths are material, the person is oscillating; the aim is
+    still the calm center, not either injury.
+    """
+    s = normalize_poles(scores)
+    lower = abs(s[f"{structure}_deficit"])
+    center = s[f"{structure}_mature"]
+    upper = s[f"{structure}_hyper"]
+    if lower < 0.2 and center < 0.2 and upper < 0.2:
+        return BAND_QUIET
+    if lower >= 0.35 and upper >= 0.35:
+        return BAND_BOTH
+    if upper >= 0.35 and upper >= center and upper >= lower:
+        return BAND_UPPER
+    if lower >= 0.35 and lower >= center and lower >= upper:
+        return BAND_LOWER
+    if center > 0 and center >= lower and center >= upper:
+        return BAND_CENTER
+    if lower >= upper and lower > 0:
+        return BAND_LOWER
+    if upper > 0:
+        return BAND_UPPER
+    return BAND_QUIET
+
+
+def image_change_line(scores: Dict[str, Any], structure: str) -> str:
+    """Client-safe direction for the still: change toward the calm center."""
+    band = active_band(scores, structure)
+    return IMAGE_CHANGE[structure][band]
+
+
+def compose_growth_navigation(scores: Dict[str, Any]) -> str:
+    """Main-chat map. Engine-only: Nate may read the labels; the client must not hear them."""
+    lines = [
+        "NEURO GROWTH MAP — internal only. Never say these labels. Never quote a number, a level, or a grade.",
+        "Each capacity has three paths of one injury: a passive deficient path (below center), "
+        "a calm integrated center, and a defensive over-compensation (above center, high-anxiety, not mastery). "
+        "The center and the defense both look strong. They are not the same. "
+        "Neuroplastic change always aims at the calm center. "
+        "Do not push a collapsed person up into the defense. Do not collapse a defended person down into shutdown. "
+        "If both injury paths are loud, they are swinging; meet the swing and aim at the middle.",
+    ]
+    for structure in NEURO_STRUCTURES:
+        band = active_band(scores, structure)
+        lines.append(f"- {structure}: path={band}. {IMAGE_CHANGE[structure][band]}")
+    lines.append(
+        "In this reply, meet the path they are on and offer one lived step toward the calm center. Do not name the map."
+    )
+    return "\n".join(lines)
 
 
 def classify_stage(scores: Dict[str, Any], structure: str) -> str:
@@ -441,6 +538,17 @@ def compose_neuro_bible(ctx: Dict[str, Any]) -> str:
         lines.append(f"Include this healing image in the scene and the image prompt: {healing}")
     if floor_id:
         lines.append(f"Coliseum floor for this still: {floor_id}.")
+    scores = ctx.get("scores") or {}
+    biome_id = ""
+    if isinstance(biome, dict):
+        biome_id = biome.get("biome") or ""
+    structure = BIOME_TO_STRUCTURE.get(biome_id) or champ.get("structure") or ""
+    if structure in NEURO_STRUCTURES and scores:
+        lines.append(image_change_line(scores, structure))
+        lines.append(
+            "The still is one step of change toward calm balance. Do not portrait the injury as destiny "
+            "and do not celebrate the defense as strength."
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -568,6 +676,7 @@ def four_move_braid_block(
     place_name: str,
     champion_name: str,
     visitors: Iterable[str] = (),
+    change_line: str = "",
 ) -> str:
     """Protocol block for Go Deeper on a Neuro panel. All four moves, braided,
     in-scene. No structure labels, no scores, no homework list."""
@@ -590,6 +699,9 @@ def four_move_braid_block(
         "Never name a category, a score, a level, or 'today we work on'. No grades, no checklist, "
         "no stock journaling trio. Speak place, figure, and the move itself.",
     ]
+    if (change_line or "").strip():
+        lines.append(change_line.strip())
+        lines.append("That is the step of change in this visit. Keep all four moves in the same scene.")
     return assert_client_safe("\n".join(lines))
 
 
@@ -602,5 +714,6 @@ def neuro_score_snapshot(scores: Dict[str, Any]) -> Dict[str, Any]:
         "h_d": hd,
         "h": neuro_health(s),
         "stages": {d: classify_stage(s, d) for d in NEURO_STRUCTURES},
+        "bands": {d: active_band(s, d) for d in NEURO_STRUCTURES},
         "selected_biome": select_neuro_biome(s),
     }

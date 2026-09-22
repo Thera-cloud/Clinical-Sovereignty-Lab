@@ -28,6 +28,7 @@ from app.sse.neuro_scoring import (
     resolve_panel_region,
     roll_coliseum_floor,
     AGE_GATE_EXCLUDE,
+    image_change_line,
     scores_from_theme_counts,
     select_neuro_biome,
     visiting_figures,
@@ -262,6 +263,9 @@ async def resolve_neuro_panel_context(
         "champion_purpose": champion.get("purpose", ""),
         "age_gated": bool(age_gated),
     }
+    structure = BIOME_TO_STRUCTURE.get(biome_id) or ""
+    if structure:
+        metadata["change_line"] = image_change_line(scores, structure)
     return {
         "biome": {"biome": biome_id, "description": desc, "healing_visual": healing},
         "character": (champion.get("name", ""), champion.get("visual_prompt_fragment", "")),
@@ -321,6 +325,33 @@ async def record_neuro_panel_outcome(
         await _persist_scores(user_id, ctx["scores"], biome_id, champion.get("name"), panel_id, db_pool)
     except Exception as e:
         logger.warning("record_neuro_panel_outcome failed for %s: %s", user_id, e)
+
+
+async def neuro_chat_addendum(db_pool, user_id: str) -> str:
+    """Main-chat growth map from the stored 12-pole vector. Empty if quiet or off."""
+    from app.sse.neuro_scoring import compose_growth_navigation, neuro_enabled, normalize_poles
+    if not neuro_enabled() or not db_pool or not user_id:
+        return ""
+    try:
+        async with db_pool.acquire() as conn:
+            raw = await conn.fetchval(
+                "SELECT neuro_scores FROM sse_user_journeys WHERE user_id = $1",
+                user_id,
+            )
+    except Exception as e:
+        logger.warning("neuro chat map skipped for %s: %s", user_id, e)
+        return ""
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return ""
+    scores = normalize_poles(raw if isinstance(raw, dict) else {})
+    if not any(abs(v) >= 0.2 for v in scores.values()):
+        return ""
+    return compose_growth_navigation(scores)
 
 
 async def record_origin_panel_outcome(user_id: str, db_pool) -> None:
