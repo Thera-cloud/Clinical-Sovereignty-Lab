@@ -301,7 +301,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert 'id="hosts"' in html
     assert "grid-template-columns:1fr 1fr 1fr" not in html
     sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
-    assert "max_tokens=400 if howto else 280" in sess_src
+    assert "max_tokens=260 if howto else 160" in sess_src
     assert "max_tokens=160 if howto else 120" not in sess_src
     voice_src = (ROOT / "backend/app/services/studio_phone_voice.py").read_text()
     assert "time() + 28.0" in voice_src
@@ -366,7 +366,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260909b" in url
+    assert "v=20260921c" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -417,7 +417,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "function freshCaps" in html
     assert "if (!fresh.length) return;" in html
     assert "capQueue.push({at: capAt, line: who + ': ' + j.text})" in html
-    assert "var LISTEN_SILENCE_MS = 6000;" in html
+    assert "var LISTEN_SILENCE_MS = 1800;" in html
     assert "function holdFloorMs" in html
     assert "function primeHold" in html
     assert "function deliverHold" in html
@@ -606,7 +606,8 @@ def test_studio_realm_rotation():
         assert "realm_shift" in room, rel
         assert "function holdFloorMs" in room, rel
         assert "function primeHold" in room, rel
-        assert "var LISTEN_SILENCE_MS = 6000;" in room, rel
+        assert "var LISTEN_SILENCE_MS = 1800;" in room, rel
+        assert "function playPrimedHold" in room, rel
         # The wait badge cannot be squeezed by the rail flex, or the count clips.
         assert "flex:0 0 auto;margin-top:auto" in room, rel
         assert "line-height:1.3;color:#C9A962" in room, rel

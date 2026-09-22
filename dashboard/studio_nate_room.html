@@ -158,8 +158,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   // Transcripts older than this are dropped instead of answered: STT rate limits once
   // produced 40-127s gaps, and a reply that late lands on top of a finished topic.
   var CAP_FRESH_MS = 20000;
-  var LISTEN_SILENCE_MS = 6000;
-  var LISTEN_HOLD_MS = 14000;
+  var LISTEN_SILENCE_MS = 1800;
+  var LISTEN_HOLD_MS = 7000;
+  var CAP_REC_TAIL_MS = 500;
   var listenOn = false, listenBuf = '', listenInterim = '', listenTimer = null;
   var capHold = {};
   var holdDraft = {id:0, text:'', event:'', reply:'', blob:null, abort:false, release:false, inflight:false, releaseText:'', releaseEvent:''};
@@ -269,6 +270,44 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       body: JSON.stringify(holdTurnBody(text, 'commit'))
     }).catch(function(){});
   }
+  function holdTextMatches(text){
+    var a = (holdDraft.text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    var b = (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (b.indexOf(a) === 0 && b.length - a.length <= 12) return true;
+    if (a.indexOf(b) === 0 && a.length - b.length <= 24) return true;
+    return false;
+  }
+  function playPrimedHold(text){
+    var reply = holdDraft.reply;
+    var blob = holdDraft.blob;
+    persistPrime(text);
+    abortHoldDraft();
+    if (!reply) { nateTurn(text, false, 'line'); return; }
+    addLine('Nate', reply);
+    pendingCaps.push('NATE: ' + reply);
+    if (pendingCaps.length > 40) pendingCaps = pendingCaps.slice(-40);
+    sendData({op:'nate_line', text:reply});
+    lastNateMs = nateTurnAt ? (Date.now() - nateTurnAt) : 0;
+    nateTurnAt = 0;
+    if (typeof paintDockMeta === 'function') paintDockMeta();
+    setStatus(guest ? 'Guest audio-only · Little Nate live.' : 'Little Nate live — chat or Talk anytime.');
+    if (blob && blob.size >= 80) {
+      if (!audioUnlocked){
+        pendingNate = reply;
+        pendingNateBlob = blob;
+        setStatus('Click once so speakers can play Little Nate.');
+        return;
+      }
+      var gen = ++speakGen;
+      nateSpeaking = true;
+      lnAvatar('warm');
+      playNateBlob(blob, gen);
+      return;
+    }
+    speakNate(reply);
+  }
   function deliverHold(text, event){
     if (holdDraft.inflight) {
       holdDraft.release = true;
@@ -278,9 +317,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       setStatus('Little Nate is already on this…');
       return;
     }
-    if (holdDraft.reply && !holdDraft.abort) {
-      abortHoldDraft();
-      nateTurn(text, false, event || 'line');
+    if (holdDraft.reply && !holdDraft.abort && holdTextMatches(text)) {
+      playPrimedHold(text);
       return;
     }
     nateTurn(text, false, event || 'line');
@@ -300,6 +338,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     holdDraft.reply = '';
     holdDraft.blob = null;
     holdDraft.inflight = true;
+    nateTurnAt = Date.now();
     lnAvatar('thoughtful', 'listening');
     setStatus('Little Nate is holding for you…');
     fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/turn', {
@@ -541,12 +580,22 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (expr) f.contentWindow.postMessage({type:'setExpression', expression:expr}, '*');
     if (voice) f.contentWindow.postMessage({type:'setVoiceState', state:voice}, '*');
   }
-  var nateAudioUrl = '', pendingNate = '', audioUnlocked = false;
+  var nateAudioUrl = '', pendingNate = '', pendingNateBlob = null, audioUnlocked = false;
   function speakerEl(){ return document.getElementById('nateSpeaker'); }
   function unlockAudio(){
     audioUnlocked = true;
     var a = speakerEl();
     if (a){ a.muted = false; a.volume = 1; }
+    if (pendingNateBlob){
+      var b = pendingNateBlob;
+      pendingNateBlob = null;
+      pendingNate = '';
+      var gen = ++speakGen;
+      nateSpeaking = true;
+      lnAvatar('warm');
+      playNateBlob(b, gen);
+      return;
+    }
     if (pendingNate){ var t = pendingNate; pendingNate = ''; speakNate(t); }
   }
   document.addEventListener('pointerdown', unlockAudio, true);
@@ -728,7 +777,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     capHold[id] = setTimeout(function(){
       delete capHold[id];
       stopCap(id);
-    }, LISTEN_SILENCE_MS);
+    }, CAP_REC_TAIL_MS);
   }
   function postCaption(id, blob){
     if (guest || lnPaused || !cfg.session || !cfg.token) return;
@@ -780,6 +829,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     speakGen += 1;
     nateSpeaking = false;
     pendingNate = '';
+    pendingNateBlob = null;
     var a = speakerEl();
     if (a){ try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {} }
     if (window.speechSynthesis) speechSynthesis.cancel();

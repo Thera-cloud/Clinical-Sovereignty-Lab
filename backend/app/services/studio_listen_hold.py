@@ -3,6 +3,7 @@
 Keep this twin of holdFloorMs() in studio_nate_room.html.
 Silence of LISTEN_SILENCE_MS commits a turn. Hold language and unfinished
 last words extend to LISTEN_HOLD_MS. Phrases are examples, not a whitelist.
+On-air floor is radio-tight so prime TTS can land as soon as the thought ends.
 """
 
 from __future__ import annotations
@@ -10,8 +11,8 @@ from __future__ import annotations
 import re
 import time
 
-LISTEN_SILENCE_MS = 6000
-LISTEN_HOLD_MS = 14000
+LISTEN_SILENCE_MS = 1800
+LISTEN_HOLD_MS = 7000
 
 _EXPLICIT = re.compile(
     r"\b("

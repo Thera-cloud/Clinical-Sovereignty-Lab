@@ -430,7 +430,7 @@ async def cohost_turn(
             prompt=prefix + blob,
             system=system,
             domain="culture",
-            max_tokens=400 if howto else 280,
+            max_tokens=260 if howto else 160,
             images=[jpeg] if jpeg else None,
         )
         gen = (out.get("text") or "").strip()

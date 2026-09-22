@@ -1,4 +1,4 @@
-"""Host/caller listen hold — 6s silence, unfinished thought extends."""
+"""Host/caller listen hold — 1.8s silence, unfinished thought extends."""
 
 from app.services.studio_listen_hold import LISTEN_HOLD_MS, LISTEN_SILENCE_MS, hold_floor_ms
 
@@ -79,10 +79,13 @@ def test_room_html_mirrors_hold():
     from pathlib import Path
 
     html = (Path(__file__).resolve().parents[2] / "mobile/web/studio_nate_room.html").read_text()
-    assert "var LISTEN_SILENCE_MS = 6000;" in html
-    assert "var LISTEN_HOLD_MS = 14000;" in html
+    assert "var LISTEN_SILENCE_MS = 1800;" in html
+    assert "var LISTEN_HOLD_MS = 7000;" in html
+    assert "var CAP_REC_TAIL_MS = 500;" in html
     assert "function holdFloorMs" in html
     assert "function primeHold" in html
     assert "function deliverHold" in html
+    assert "function playPrimedHold" in html
+    assert "holdTextMatches" in html
     assert "rec.continuous = true;" in html
     assert "function releaseCapSoon" in html
