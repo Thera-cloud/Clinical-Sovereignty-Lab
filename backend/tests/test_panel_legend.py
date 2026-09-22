@@ -17,9 +17,9 @@ def test_figure_in_panel_names_core_and_role():
         is_core=True,
         biome="night_path",
     )
-    assert "core figure" in text
-    assert "carries light" in text
     assert "Torchbearer waits" in text
+    assert "carries light" in text
+    assert "emerging" not in text.lower()
 
 
 def test_prior_note_links_earlier_biome():
@@ -45,10 +45,10 @@ def test_journey_thread_continues_from_prior():
         last_panel_summary="",
     )
     assert "Panel 4" in thread
-    assert "continuing read" in thread
+    assert "lantern" in thread.lower()
+    assert "continuing read" not in thread.lower()
     assert "Torchbearer" in thread
     assert "night path" in thread
-    assert "Ferryman" in thread
 
 
 def test_enrich_adds_descriptives_and_empty_scene_fallback():
@@ -80,7 +80,8 @@ def test_enrich_adds_descriptives_and_empty_scene_fallback():
     )
     assert empty["legend"]
     assert empty["legend"][0]["display_name"] == "The scene"
-    assert "biome" in empty["legend"][0]["meaning"].lower()
+    assert "mist" in empty["journey_thread"].lower()
+    assert "continuing read" not in empty["journey_thread"].lower()
 
 
 def test_name_mentioned_matches_bare_catalog_form():

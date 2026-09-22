@@ -368,8 +368,20 @@ def test_enrich_panel_legend_neuro_bundle():
     assert row["is_core"] and row["region"] == "neuro"
     assert row["purpose"] and row["archetype_mirror"]
     assert "Seeker" in row["archetype_mirror"]
+    assert "somewhere near it" not in row["archetype_mirror"]
     for k in ("purpose", "archetype_mirror", "figure_in_panel"):
         assert not ns.client_safe_violations(row[k]), (k, row[k])
+    aimed = ss.enrich_panel_legend(
+        legend, character_name="Warlord", narrative_text=nar,
+        biome="coliseum_of_ascendance", archetype_hint="Seeker", panel_sequence=3,
+        user_scores={"authority_hyper": 0.85},
+    )
+    mirror = aimed["legend"][0]["archetype_mirror"]
+    assert "gripping the hall" in mirror.lower()
+    assert "continuing read" not in aimed["journey_thread"].lower()
+    assert "gripping the hall" in aimed["journey_thread"].lower()
+    assert not ns.client_safe_violations(mirror)
+    assert not ns.client_safe_violations(aimed["journey_thread"])
 
 
 def test_enrich_panel_legend_origin_unchanged():

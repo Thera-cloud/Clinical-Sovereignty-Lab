@@ -609,38 +609,86 @@ def _lean(vec: Dict[str, float], structure: str) -> str:
     return "mature"
 
 
+# Second person, for the Legend. Same three bands as IMAGE_CHANGE, spoken to the
+# person rather than directed at the image model. No structure names, no scores.
+LEGEND_YOU: Dict[str, Dict[str, str]] = {
+    "authority": {
+        BAND_LOWER: "You are small in the hall and have not taken the floor. The step is one steady voice — not a throne, and not a further collapse.",
+        BAND_CENTER: "You are standing as an equal. Keep that. Do not take a crown, and do not shrink.",
+        BAND_UPPER: "You are gripping the hall hard, and the grip is covering a fear. The step is to loosen toward shared ground without falling into helplessness.",
+        BAND_BOTH: "You swing between shrinking and forcing the room. The step is a voice that neither disappears nor dominates.",
+        BAND_QUIET: "Nothing in this hall is loud in you yet. Stay with the meeting. It is not a grade.",
+    },
+    "integration": {
+        BAND_LOWER: "You are coming apart under one hard look, sunk in shame. The step is to stay present with a flaw without the flaw becoming all of you.",
+        BAND_CENTER: "You can own a mistake and still keep your worth. Deepen that. Do not polish it into a mask.",
+        BAND_UPPER: "You are wearing a perfect mask and will not let a crack show. The step is to let one true flaw be visible without the mask shattering into self-hatred.",
+        BAND_BOTH: "You swing between self-hatred and a perfect mask. The step is to hold one real flaw and one real worth in the same light.",
+        BAND_QUIET: "No crack and no mask are loud in you yet. Stay with the meeting. It is not a grade.",
+    },
+    "separation": {
+        BAND_LOWER: "You have no edge: other people's weather moves straight through you, and you cannot say no. The step is one calm limit that is not an exile.",
+        BAND_CENTER: "You keep your own name and stay near. Deepen that. Do not wall yourself off, and do not dissolve.",
+        BAND_UPPER: "You have built a wall and read closeness as a threat to freedom. The step is to open one gate without tearing the wall down into diffusion.",
+        BAND_BOTH: "You swing between having no edge and sealing every gate. The step is one limit that still lets someone near.",
+        BAND_QUIET: "No wall and no flood are loud in you yet. Stay with the meeting. It is not a grade.",
+    },
+    "attachment": {
+        BAND_LOWER: "You circle the fire and will not sit, shut off from relying on anyone. The step is one moment of trusting nearness without fusion.",
+        BAND_CENTER: "You can ask for warmth and keep a self. Deepen that. Do not fuse, and do not go back into the cold.",
+        BAND_UPPER: "You are fused to the other, giving yourself away to avoid being left. The step is a little room without abandonment.",
+        BAND_BOTH: "You swing between total shutdown and total fusion. The step is nearness that still leaves room.",
+        BAND_QUIET: "No shutdown and no fusion are loud in you yet. Stay with the meeting. It is not a grade.",
+    },
+}
+
+
+def legend_insight(scores: Optional[Dict[str, Any]], structure: str) -> str:
+    """Client-safe Legend line: where this person is, and the one step toward center."""
+    if structure not in NEURO_STRUCTURES:
+        return ""
+    band = active_band(scores or {}, structure)
+    return LEGEND_YOU[structure][band]
+
+
+def _band_lean(band: str) -> str:
+    return {BAND_LOWER: "deficit", BAND_CENTER: "mature", BAND_UPPER: "hyper"}.get(band, "")
+
+
 def compose_archetype_mirror(
     champion: Dict[str, Any],
     archetype_hint: str,
     user_scores: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """How this champion rhymes with THIS user's forged archetype — no numbers,
-    no structure labels. Composed from stance overlap, not a grade."""
+    """How this champion meets THIS person — no numbers, no structure labels.
+
+    Without a score vector, do not invent a shared stance. With one, say where
+    the person is (second person) and where the champion stands.
+    """
     name = (champion.get("name") or "this figure").strip()
     st = champion.get("structure") or BIOME_TO_STRUCTURE.get(champion.get("biome_id", ""), "authority")
     cvec = normalize_poles(champion.get("poles") or {})
     arch = (archetype_hint or "").strip() or "traveler"
-    if user_scores is not None:
-        uvec = normalize_poles(user_scores)
-        shared = _lean(uvec, st) == _lean(cvec, st)
-        lean = _lean(cvec, st)
-    else:
-        shared = True
-        lean = _lean(cvec, st)
-    phrase = _STANCE_PHRASES[st][lean]
+    phrase = _STANCE_PHRASES[st][_lean(cvec, st)]
     place = {
         "authority": "at the empty crowns",
         "integration": "on the center platform",
         "separation": "on the bridge between spires",
         "attachment": "beside the First Hearth",
     }[st]
-    if shared:
-        text = f"Your {arch} meets {name} {place} — both know {phrase}."
-    else:
+    if not user_scores:
         text = (
-            f"Your {arch} meets {name} {place}. They know {phrase}; "
-            "you are standing somewhere near it, which is why they are in frame."
+            f"Your {arch} meets {name} {place}. "
+            f"They know {phrase}. The meeting is for you to notice where you stand. It is not a grade."
         )
+        return assert_client_safe(text)
+    band = active_band(user_scores, st)
+    you = legend_insight(user_scores, st)
+    same = _band_lean(band) == _lean(cvec, st) and band not in (BAND_QUIET, BAND_BOTH)
+    if same:
+        text = f"Your {arch} meets {name} {place}. {you} They know that same pull: {phrase}."
+    else:
+        text = f"Your {arch} meets {name} {place}. {you} They stand somewhere else — they know {phrase}."
     return assert_client_safe(text)
 
 

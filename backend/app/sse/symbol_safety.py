@@ -661,25 +661,20 @@ def compose_figure_in_panel(
     is_core: bool = False,
     biome: str = "",
 ) -> str:
-    """Client-facing description of what this figure is doing in THIS panel."""
+    """What this figure is doing in THIS panel. The scene sentence leads."""
     biome_h = (biome or "").replace("_", " ").strip()
-    bits: List[str] = []
-    if is_core:
-        bits.append(
-            f"{name} is the core figure in this panel — the presence Little Nate "
-            "placed at the center of what is emerging."
-        )
-    else:
-        bits.append(
-            f"{name} is in this panel as a companion figure, not decoration."
-        )
-    if role:
-        bits.append(f"In your story they {role}.")
     mention = _sentence_mentioning(name, narrative)
+    bits: List[str] = []
     if mention:
-        bits.append(f"In this scene: {mention}")
+        bits.append(mention)
+    elif is_core and biome_h:
+        bits.append(f"{name} holds the center of {biome_h}.")
     elif biome_h:
-        bits.append(f"They appear in {biome_h}.")
+        bits.append(f"{name} stands in {biome_h}.")
+    else:
+        bits.append(f"{name} is in this still.")
+    if role and role.lower() not in " ".join(bits).lower():
+        bits.append(f"In your story they {role}.")
     return " ".join(bits)
 
 
@@ -716,16 +711,23 @@ def compose_journey_thread(
     character_name: str = "",
     prior_panels: Optional[List[Dict[str, Any]]] = None,
     last_panel_summary: str = "",
+    insight: str = "",
 ) -> str:
-    """How this panel continues Little Nate's subconscious read over time."""
+    """What this still is holding, then how it continues the last scene."""
     biome_h = (biome or "Thera-world").replace("_", " ").strip()
     prior = list(prior_panels or [])
     seq = panel_sequence or (len(prior) + 1)
-    parts = [
-        f"Panel {seq} of your journey — {biome_h}.",
-        "This is Little Nate's continuing read of what is emerging in you, "
-        "not a one-off illustration.",
-    ]
+    parts = [f"Panel {seq} of your journey — {biome_h}."]
+    reading = (insight or "").strip()
+    scene = _excerpt(narrative, 180)
+    if reading:
+        parts.append(reading)
+        if scene and scene.lower() not in reading.lower():
+            parts.append(f"In this still: {scene}")
+    elif scene:
+        parts.append(scene)
+    elif character_name:
+        parts.append(f"{character_name} is the figure in frame.")
     if prior:
         prev = prior[0]
         prev_biome = (prev.get("biome") or "").replace("_", " ").strip() or "the last scene"
@@ -733,12 +735,15 @@ def compose_journey_thread(
         excerpt = _excerpt(prev.get("narrative_text") or last_panel_summary or "", 140)
         cont = f"It continues from {prev_char} in {prev_biome}"
         parts.append(f"{cont}: {excerpt}" if excerpt else f"{cont}.")
-    if character_name:
-        parts.append(f"The core figure here is {character_name}.")
-    scene = _excerpt(narrative, 140)
-    if scene:
-        parts.append(f"What this panel is holding: {scene}")
     return " ".join(parts)
+
+
+_STOCK_MEANING = (
+    "emerging in you",
+    "random extra",
+    "ordinary form when the story",
+    "biome and atmosphere",
+)
 
 
 def enrich_panel_legend(
@@ -752,6 +757,8 @@ def enrich_panel_legend(
     panel_sequence: int = 0,
     last_panel_summary: str = "",
     archetype_hint: str = "",
+    user_scores: Optional[Dict[str, Any]] = None,
+    insight: str = "",
 ) -> Dict[str, Any]:
     """C3 payload: figure-level descriptives + journey continuity.
 
@@ -804,12 +811,30 @@ def enrich_panel_legend(
             is_core=is_core,
             biome=biome_label,
         )
+        meaning = (row.get("meaning") or "")
+        if any(s in meaning.lower() for s in _STOCK_MEANING):
+            row["meaning"] = ""
         champ = _neuro_champion(name) if name else None
         if champ:
             row["region"] = "neuro"
             row["purpose"] = _client_safe(champ.get("purpose") or "")
-            row["archetype_mirror"] = _client_safe(_archetype_mirror(champ, archetype_hint))
+            row["archetype_mirror"] = _client_safe(
+                _archetype_mirror(champ, archetype_hint, user_scores)
+            )
         enriched.append(row)
+    panel_insight = (insight or "").strip()
+    if neuro_panel and user_scores:
+        try:
+            from app.sse.neuro_scoring import legend_insight
+            from app.sse.thera_world_regions import BIOME_TO_STRUCTURE
+            computed = legend_insight(user_scores, BIOME_TO_STRUCTURE.get(biome) or "")
+            # A loud band is the person's step. A quiet vector keeps the still's own line.
+            if computed and "Stay with the meeting" not in computed:
+                panel_insight = computed
+            elif not panel_insight:
+                panel_insight = computed
+        except Exception:
+            pass
     return {
         "legend": enriched,
         "journey_thread": compose_journey_thread(
@@ -819,6 +844,7 @@ def enrich_panel_legend(
             character_name=core,
             prior_panels=prior_panels,
             last_panel_summary=last_panel_summary,
+            insight=panel_insight,
         ),
         "panel_sequence": panel_sequence or (len(prior_panels or []) + 1),
         "biome": biome,
@@ -828,10 +854,14 @@ def enrich_panel_legend(
     }
 
 
-def _archetype_mirror(champ: Dict[str, Any], archetype_hint: str) -> str:
+def _archetype_mirror(
+    champ: Dict[str, Any],
+    archetype_hint: str,
+    user_scores: Optional[Dict[str, Any]] = None,
+) -> str:
     try:
         from app.sse.neuro_scoring import compose_archetype_mirror
-        return compose_archetype_mirror(champ, archetype_hint or "")
+        return compose_archetype_mirror(champ, archetype_hint or "", user_scores)
     except Exception:
         return ""
 

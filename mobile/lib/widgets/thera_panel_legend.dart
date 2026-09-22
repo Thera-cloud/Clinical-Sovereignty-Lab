@@ -69,8 +69,8 @@ void showTheraPanelLegend({
               const SizedBox(height: 4),
               Text(
                 isNeuro
-                    ? 'Who stands in this scene, why they are here, and how they meet you where you are.'
-                    : 'How to read the figures in this panel, and how this scene continues Little Nate\'s understanding of you over time.',
+                    ? 'Why these figures are in this still, and the step this scene is holding.'
+                    : 'What each figure is doing in this still.',
                 style: const TextStyle(color: Color(0xFF888888), fontSize: 13, height: 1.4),
               ),
               if (thread.isNotEmpty) ...[

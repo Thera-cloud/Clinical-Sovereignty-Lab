@@ -5747,8 +5747,8 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
     ids = [i for i in {uid, uname} if i]
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT user_id, character_manifest, narrative_text, biome, generated_at, panel_tone "
-            "FROM sse_panel_log WHERE panel_id = $1", panel_id)
+            "SELECT user_id, character_manifest, narrative_text, biome, generated_at, panel_tone, "
+            "panel_metadata FROM sse_panel_log WHERE panel_id = $1", panel_id)
         if not row or row["user_id"] not in ids:
             raise HTTPException(404, "panel not found")
         owner = row["user_id"]
@@ -5756,7 +5756,7 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
             "SELECT cultural_context, spiritual_framework, archetype_hint "
             "FROM sse_identity_forge WHERE user_id = $1", owner)
         jrow = await conn.fetchrow(
-            "SELECT last_panel_npcs, last_panel_summary, panel_sequence, current_biome "
+            "SELECT last_panel_npcs, last_panel_summary, panel_sequence, current_biome, neuro_scores "
             "FROM sse_user_journeys WHERE user_id = $1", owner)
         prior_rows = await conn.fetch(
             "SELECT panel_id::text AS panel_id, character_manifest, narrative_text, biome, generated_at "
@@ -5808,6 +5808,22 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
         }
         for r in prior_rows
     ]
+    meta = row["panel_metadata"] if row["panel_metadata"] else {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    raw_scores = (jrow["neuro_scores"] if jrow else None) or None
+    if isinstance(raw_scores, str):
+        try:
+            raw_scores = json.loads(raw_scores)
+        except Exception:
+            raw_scores = None
+    if not isinstance(raw_scores, dict):
+        raw_scores = None
     bundle = enrich_panel_legend(
         legend,
         character_name=row["character_manifest"] or "",
@@ -5818,6 +5834,8 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
         panel_sequence=int(jrow["panel_sequence"] or 0) if jrow and is_latest else (len(prior_panels) + 1),
         last_panel_summary=(jrow["last_panel_summary"] if jrow else "") or "",
         archetype_hint=(idrow["archetype_hint"] if idrow else "") or "",
+        user_scores=raw_scores,
+        insight=(meta.get("change_line") or ""),
     )
     return {
         "panel_id": panel_id,
