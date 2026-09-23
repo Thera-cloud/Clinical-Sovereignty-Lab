@@ -327,6 +327,60 @@ async def record_neuro_panel_outcome(
         logger.warning("record_neuro_panel_outcome failed for %s: %s", user_id, e)
 
 
+async def set_explore_region(user_ids: List[str], region: str, db_pool) -> str:
+    """Store the client's story-path pick on every matching journey row."""
+    from app.sse.thera_world_regions import EXPLORE_WANDER, REGION_NEURO, REGION_ORIGIN
+    choice = (region or "").strip().lower()
+    if choice not in (EXPLORE_WANDER, REGION_ORIGIN, REGION_NEURO):
+        choice = EXPLORE_WANDER
+    ids = [i for i in user_ids if i]
+    if not ids or not db_pool:
+        return choice
+    try:
+        async with db_pool.acquire() as conn:
+            status = await conn.execute(
+                "UPDATE sse_user_journeys SET journey_metadata = "
+                "jsonb_set(COALESCE(journey_metadata, '{}'::jsonb), '{explore_region}', to_jsonb($1::text), true) "
+                "WHERE user_id = ANY($2::text[])",
+                choice, ids)
+        updated = 0
+        try:
+            updated = int(str(status).split()[-1])
+        except Exception:
+            updated = 0
+        if updated == 0:
+            from app.sse.thera_world_engine import get_or_create_journey
+            await get_or_create_journey(ids[0], db_pool)
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE sse_user_journeys SET journey_metadata = "
+                    "jsonb_set(COALESCE(journey_metadata, '{}'::jsonb), '{explore_region}', to_jsonb($1::text), true) "
+                    "WHERE user_id = $2",
+                    choice, ids[0])
+    except Exception as e:
+        logger.warning("set_explore_region failed: %s", e)
+    return choice
+
+
+async def read_explore_region(user_ids: List[str], db_pool) -> str:
+    from app.sse.neuro_scoring import explore_region_choice
+    from app.sse.thera_world_regions import EXPLORE_WANDER
+    ids = [i for i in user_ids if i]
+    if not ids or not db_pool:
+        return EXPLORE_WANDER
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT journey_metadata FROM sse_user_journeys WHERE user_id = ANY($1::text[]) LIMIT 1",
+                ids)
+        if not row:
+            return EXPLORE_WANDER
+        return explore_region_choice({"journey_metadata": row["journey_metadata"]})
+    except Exception as e:
+        logger.warning("read_explore_region failed: %s", e)
+        return EXPLORE_WANDER
+
+
 async def neuro_chat_addendum(db_pool, user_id: str) -> str:
     """Main-chat growth map from the stored 12-pole vector. Empty if quiet or off."""
     from app.sse.neuro_scoring import compose_growth_navigation, neuro_enabled, normalize_poles

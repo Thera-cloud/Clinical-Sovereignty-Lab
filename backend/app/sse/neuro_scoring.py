@@ -33,6 +33,7 @@ from app.sse.thera_world_regions import (
     NEURO_BIOMES,
     NEURO_POLES,
     NEURO_STRUCTURES,
+    EXPLORE_WANDER,
     REGION_NEURO,
     REGION_ORIGIN,
     STRUCTURE_TO_BIOME,
@@ -477,6 +478,22 @@ def neuro_unlocked(journey: Optional[Dict[str, Any]], scores: Optional[Dict[str,
     return False
 
 
+def explore_region_choice(journey: Optional[Dict[str, Any]]) -> str:
+    """Client pick stored on journey_metadata.explore_region. Default wander."""
+    meta = (journey or {}).get("journey_metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    choice = str(meta.get("explore_region") or EXPLORE_WANDER).strip().lower()
+    if choice in (REGION_ORIGIN, REGION_NEURO, EXPLORE_WANDER):
+        return choice
+    return EXPLORE_WANDER
+
+
 def resolve_panel_region(
     journey: Optional[Dict[str, Any]],
     scores: Dict[str, Any],
@@ -485,12 +502,17 @@ def resolve_panel_region(
 ) -> str:
     """Which stream fills today's single image slot.
 
-    Once Neuro is unlocked, Origin and Neuro alternate so the client walks the
-    whole Thera-world. A deeply strained structure may stay in Neuro a second
-    day. Healthy, quiet, and zero vectors are not locked out.
+    A client pick of Origin or Neuro wins. Wander (the default) alternates
+    once Neuro is unlocked. A deeply strained structure may stay in Neuro a
+    second day. Healthy, quiet, and zero vectors are not locked out.
     """
     if not neuro_enabled():
         return REGION_ORIGIN
+    choice = explore_region_choice(journey)
+    if choice == REGION_ORIGIN:
+        return REGION_ORIGIN
+    if choice == REGION_NEURO:
+        return REGION_NEURO
     if not neuro_unlocked(journey, scores):
         return REGION_ORIGIN
     hd = all_domain_health(scores)
@@ -744,7 +766,9 @@ def four_move_braid_block(
         lines.append(f"  - {mv['move']}")
     lines += [
         vis_line + "Work them together. Do not sequence only the move that matches the place.",
-        "Never name a category, a score, a level, or 'today we work on'. No grades, no checklist, "
+        "SIFT doorways still come first, as four choices the person can pick: Sense, Image, Feel, Think. "
+        "The four moves live inside whichever doorway they choose. Do not replace those choices.",
+        "Never name a category, a score, a level, or 'today we work on'. No grades, "
         "no stock journaling trio. Speak place, figure, and the move itself.",
     ]
     if (change_line or "").strip():

@@ -96,7 +96,7 @@ async def test_sse_panel_ref_injects_character_map_and_themes():
     assert "Little Nate" in ctx
     assert "SIFT" in ctx
     assert "unique sitting" in ctx
-    assert "walk SIFT" in ctx
+    assert "four choices" in ctx
     assert "Sense:" in ctx
     assert "one fresh doorway only" not in ctx
     assert "without needing to fix it" in ctx
@@ -354,3 +354,28 @@ def test_topics_from_ctx_are_scene_specific():
     assert "body-sense or image in the scene" not in blob
     assert "Serpent" in blob
     assert "using my trauma" in blob
+
+
+def test_ensure_sift_doorways_appends_when_model_skips_menu():
+    ctx = (
+        "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — unique sitting, not a template]\n"
+        "Core character manifested: Curiosity\n"
+        "Biome: open_sky\n"
+        "Scene narrative: Curiosity waits by an open door in the high air.\n"
+        "- [Sep 22] Client: I feel alone even when people are around.\n"
+    )
+    user = "[SSE Panel:x] I want to go deeper with you on this panel."
+    out = _sse.ensure_sift_doorways("Let us sit with this image together.", ctx, user)
+    assert "Four doorways into this still" in out
+    for name in ("Sense", "Image", "Feel", "Think"):
+        assert _sse._has_sift_menu(out) or name in out
+    assert _sse._has_sift_menu(out)
+    assert "Curiosity" in out
+    again = _sse.ensure_sift_doorways(out, ctx, user)
+    assert again.count("Four doorways into this still") == 1
+
+
+def test_ensure_sift_doorways_skips_followup():
+    ctx = "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — unique sitting]\nBiome: open_sky\n"
+    out = _sse.ensure_sift_doorways("Stay with the feeling.", ctx, "Feel")
+    assert out == "Stay with the feeling."

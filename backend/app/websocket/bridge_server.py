@@ -11135,16 +11135,20 @@ class AzureCortex:
                 full_response = _closed_response
             if _sse_panel_ctx:
                 try:
+                    # QUANTUM-CRYSTAL-ARCH — SIFT doorways land in the bubble even if the model skips them.
                     from app.services.sse_panel_chat_context import (
+                        ensure_sift_doorways as _sse_sift,
                         ensure_three_focus_topics as _sse_e,
                         sse_should_complete_focus_topics as _sse_need_e,
                     )
                     _sse_src = _qg_verbatim_user_text if _qg_verbatim_user_text else user_text
+                    _sse_before = full_response
                     if _sse_need_e(_sse_src, _sse_panel_ctx):
-                        _sse_fixed = _sse_e(full_response, _sse_panel_ctx)
-                        if _sse_fixed != full_response:
-                            print(f">>> [SSE PANEL] Completed missing focus topics for {uid}")
-                            full_response = _sse_fixed
+                        full_response = _sse_e(full_response, _sse_panel_ctx)
+                    full_response = _sse_sift(full_response, _sse_panel_ctx, _sse_src)
+                    if full_response != _sse_before:
+                        print(f">>> [SSE PANEL] Doorways completed for {uid}")
+                        await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                 except Exception as _sse_e_err:
                     print(f">>> [SSE PANEL] Focus-topic complete skipped: {_sse_e_err}")
             _final_response = full_response

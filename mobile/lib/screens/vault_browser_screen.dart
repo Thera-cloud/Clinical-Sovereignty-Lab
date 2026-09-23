@@ -15,6 +15,7 @@ import '../widgets/vault_preview_window.dart';
 import '../widgets/thera_panel_image.dart';
 import '../widgets/thera_go_deeper_ask.dart';
 import '../widgets/thera_panel_legend.dart';
+import '../widgets/thera_region_choice.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/web_download.dart';
 import 'nate_organizer_screen.dart';
@@ -468,6 +469,11 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               color: sjFolder ? const Color(0xFF00E5A0).withOpacity(0.5) : _VaultDesign.goldDim.withOpacity(0.5), size: 64),
             const SizedBox(height: 12),
             Text(emptyMsg, style: const TextStyle(color: _VaultDesign.textSecondary)),
+            if (sjFolder)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TheraRegionChoice(token: _token),
+              ),
             if (!sjFolder) ...[
               const SizedBox(height: 8),
               TextButton.icon(
@@ -487,6 +493,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       return false;
     }).toList() : <Map<String, dynamic>>[];
     return Column(children: [
+      if (sjSelected) TheraRegionChoice(token: _token),
       if (pushItems.isNotEmpty)
         Container(
           margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),

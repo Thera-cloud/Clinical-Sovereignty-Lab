@@ -17,6 +17,28 @@ from typing import Any, Dict, List, Optional
 REGION_ORIGIN = "origin"
 REGION_NEURO = "neuro"
 REGIONS = (REGION_ORIGIN, REGION_NEURO)
+EXPLORE_WANDER = "wander"
+
+
+def explore_region_choices() -> List[Dict[str, str]]:
+    """Client-facing story paths. New regions append here; the app renders the list."""
+    return [
+        {
+            "id": EXPLORE_WANDER,
+            "label": "Let the path choose",
+            "detail": "Origin and Neuro take turns. Your archetype walks both.",
+        },
+        {
+            "id": REGION_ORIGIN,
+            "label": "Origin",
+            "detail": "The path you already know, with your archetype.",
+        },
+        {
+            "id": REGION_NEURO,
+            "label": "Neuro",
+            "detail": "The places of change, with the same archetype.",
+        },
+    ]
 
 ORIGIN_BIOMES: tuple[str, ...] = (
     "dark_forest",

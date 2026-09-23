@@ -62,6 +62,7 @@ import 'widgets/vault_attachment_button.dart';
 import 'widgets/thera_panel_image.dart';
 import 'widgets/thera_go_deeper_ask.dart';
 import 'widgets/thera_panel_legend.dart';
+import 'widgets/thera_region_choice.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/coach_integrations_hub.dart';
 
@@ -5852,6 +5853,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                                   color: Color(0xFF4ECDC4),
                                   fontSize: 11,
                                   fontStyle: FontStyle.italic))),
+                    const SizedBox(height: 8),
+                    TheraRegionChoice(
+                      token: (widget.currentUserProfile?['token'] ?? '').toString(),
+                      initialRegion: (_recapData!['explore_region'] ?? 'wander').toString(),
+                    ),
                     const SizedBox(height: 8),
                     Wrap(spacing: 8, runSpacing: 4, children: [
                       _recapBtn('Continue Journey', () {

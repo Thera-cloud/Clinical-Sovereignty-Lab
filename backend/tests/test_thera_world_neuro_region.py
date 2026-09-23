@@ -206,6 +206,16 @@ def test_region_routing(monkeypatch):
     # unlocked via prior score row
     assert ns.resolve_panel_region({"neuro_last_scored_at": "2026-09-01"}, strained) == REGION_NEURO
     assert ns.resolve_panel_region({"neuro_scores": json.dumps({"authority_deficit": -0.2})}, strained) == REGION_NEURO
+    # explicit pick beats unlock and the alternate
+    origin_pick = {"current_biome": "open_sky", "journey_metadata": {"explore_region": "origin"}}
+    assert ns.resolve_panel_region(origin_pick, strained) == REGION_ORIGIN
+    neuro_pick = {"current_biome": "mirror_lake", "journey_metadata": {"explore_region": "neuro"}}
+    assert ns.resolve_panel_region(neuro_pick, {}) == REGION_NEURO
+    assert ns.resolve_panel_region(
+        {"journey_metadata": json.dumps({"explore_region": "neuro"})},
+        {"authority_mature": 0.9},
+        last_region=REGION_NEURO,
+    ) == REGION_NEURO
 
 
 def test_biome_rotation_skips_recent_places():

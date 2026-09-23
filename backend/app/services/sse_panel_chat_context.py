@@ -308,6 +308,53 @@ def sse_should_complete_focus_topics(user_text: str, ctx: str) -> bool:
     return bool(_CUTOFF_ASK_RE.search(blob))
 
 
+_SIFT_OPEN_RE = re.compile(
+    r"go deeper with you on this panel|walk sense,\s*image,\s*feel,\s*think|"
+    r"asking about my sovereign journey",
+    re.IGNORECASE,
+)
+_SIFT_LABELS = ("Sense", "Image", "Feel", "Think")
+
+
+def _has_sift_menu(text: str) -> bool:
+    """True when each doorway starts its own line, so a passing mention does not count."""
+    blob = text or ""
+    return all(re.search(rf"(?m)^\s*{name}\b", blob) for name in _SIFT_LABELS)
+
+
+def sift_doorway_block(ctx: str) -> str:
+    """Four panel-specific choices. Appended when the model skips the menu."""
+    char = _ctx_field(ctx, "Core character manifested") or "the figure in this still"
+    biome = _ctx_field(ctx, "Biome") or "this place"
+    narrative = _ctx_field(ctx, "Scene narrative")
+    scene = _first_clause(narrative) or f"{char} in {biome}"
+    client_line = _last_client_excerpt(ctx)
+    feel = f"Feel — the emotion under {char}."
+    if client_line:
+        feel = f'Feel — the emotion under {char}. You said "{client_line}".'
+    return "\n".join([
+        "Four doorways into this still. Stay with one.",
+        f"Sense — the ground, the breath, the texture around {scene}.",
+        f"Image — {char}, and what they are doing that you have not named.",
+        feel,
+        f"Think — the meaning you are making in {biome}, without fixing it.",
+        "Which doorway do you want?",
+    ])
+
+
+def ensure_sift_doorways(ai_text: str, ctx: str, user_text: str) -> str:
+    """First Go Deeper turn must show Sense, Image, Feel, Think as choices."""
+    if not ctx or "DEEP REFLECTION PROTOCOL" not in (ctx or ""):
+        return ai_text or ""
+    if not _SIFT_OPEN_RE.search(user_text or ""):
+        return ai_text or ""
+    text = ai_text or ""
+    if _has_sift_menu(text):
+        return text
+    block = sift_doorway_block(ctx)
+    return (text.rstrip() + "\n\n" + block).strip()
+
+
 def _ctx_field(ctx: str, label: str) -> str:
     m = re.search(rf"{re.escape(label)}:\s*(.+)", ctx or "")
     if not m:
@@ -393,15 +440,17 @@ def _build_deep_reflection_protocol(char_name: str) -> str:
         "THIS VISIT (warm mythic voice; no pipeline names; no section letters):",
         f"- Open on a concrete detail from Scene narrative or the image, then why {char_name} "
         "is in that spot today (one or two sentences, not a preamble).",
-        "- Then walk SIFT as a doorway into THIS scene. All four — unique to what is painted:",
+        "- Then offer SIFT as four choices the person can pick. Each choice is its own line, "
+        "tied to what is painted. Do not fold them into one paragraph. Use these labels:",
         "  Sense: one body or place detail (ground, breath, texture) tied to a landmark "
         "or object in Scene narrative.",
         f"  Image: which figure or symbol is calling — name {char_name} or another figure "
         "actually in the scene.",
         "  Feel: the emotion under that image, joined to a few quoted words from RECENT CHAT.",
         "  Think: the meaning they are making — no diagnosis, no fixing.",
-        "- Close with one invitation to stay with that figure or feeling. "
-        "Do not add a numbered 1/2/3 journaling list unless they asked for topics or said they were cut off.",
+        "- End by asking which doorway they want. On a later turn, if they name one "
+        "(Sense, Image, Feel, or Think), stay inside that doorway and do not repeat the menu.",
+        "- Do not add a numbered 1/2/3 journaling list unless they asked for topics or said they were cut off.",
         "- If RECENT CHAT already contains a numbered 1/2/3 closer from you, do not use "
         "numbered prompts this turn — still walk SIFT, then one new question.",
         "- If the client asked for focus topics or said they were cut off, after SIFT give three "

@@ -6194,7 +6194,45 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
     cached = _widget_cache.get(uid)
     if cached:
         result["widget_content"] = cached[1]
+    try:
+        from app.sse.neuro_region_engine import read_explore_region
+        from app.sse.thera_world_regions import explore_region_choices
+        result["regions"] = explore_region_choices()
+        result["explore_region"] = await read_explore_region(ids, pool)
+    except Exception:
+        result["explore_region"] = "wander"
+        result["regions"] = []
     return result
+
+
+@sse_client_router.get("/explore-regions")
+async def sse_explore_regions(request: Request, _user: dict = Depends(_sse_auth)):
+    """Story paths the client can walk. New regions appear here without an app rebuild of the list shape."""
+    from app.sse.neuro_region_engine import read_explore_region
+    from app.sse.thera_world_regions import explore_region_choices
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [uid, uname] if uid != uname else [uid]
+    pool = request.app.state.db_pool
+    selected = "wander"
+    try:
+        selected = await read_explore_region(ids, pool)
+    except Exception:
+        selected = "wander"
+    return {"selected": selected, "regions": explore_region_choices()}
+
+
+@sse_client_router.post("/explore-region")
+async def sse_set_explore_region(request: Request, _user: dict = Depends(_sse_auth)):
+    """Client chooses Origin, Neuro, or wander for the next story still."""
+    from app.sse.neuro_region_engine import set_explore_region
+    body = await request.json()
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [uid, uname] if uid != uname else [uid]
+    pool = request.app.state.db_pool
+    choice = await set_explore_region(ids, (body or {}).get("region") or "wander", pool)
+    return {"explore_region": choice}
 
 
 # ── Phase 6: Family Constellation (client endpoints) ──────────────────
