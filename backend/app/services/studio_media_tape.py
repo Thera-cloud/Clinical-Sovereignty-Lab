@@ -81,8 +81,11 @@ def tape_play_url(key: str, expires_in: int = 3600) -> str:
     if not path:
         return ""
     try:
-        from app.services.r2_storage import generate_presigned_url
+        from app.services.r2_storage import generate_presigned_url, head_object
 
+        meta = head_object(key=path) or {}
+        if int(meta.get("ContentLength") or 0) < 200:
+            return ""
         return generate_presigned_url(key=path, expires_in=expires_in) or ""
     except Exception:
         return ""

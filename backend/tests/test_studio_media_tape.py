@@ -25,6 +25,43 @@ def test_tape_play_url_empty_without_key():
     assert _tape.tape_play_url("   ") == ""
 
 
+def test_transcript_interleaves_nate_with_host():
+    lines = _ep.arrange_transcript(
+        [
+            {
+                "id": "h",
+                "role": "host",
+                "label": "Host",
+                "utterances_json": [
+                    {"t": "HOST", "text": "one"},
+                    {"t": "HOST", "text": "two"},
+                ],
+            },
+            {
+                "id": "n",
+                "role": "cohost_ai",
+                "label": "AI",
+                "utterances_json": [
+                    {"t": "NATE", "text": "reply one"},
+                    {"t": "NATE", "text": "reply two"},
+                ],
+            },
+        ]
+    )
+    assert [row["speaker"] for row in lines] == [
+        "Host",
+        "Little Nate",
+        "Host",
+        "Little Nate",
+    ]
+
+
+def test_program_out_signals_egress_start():
+    html = (ROOT / "mobile/web/studio_program_out.html").read_text()
+    assert "START_RECORDING" in html
+    assert "END_RECORDING" in html
+
+
 def test_session_media_key_convention():
     assert session_media_r2_key("abc-1") == "studio/abc-1.mp4"
     assert session_cut_r2_key("abc-1") == "studio/abc-1/cut.mp4"

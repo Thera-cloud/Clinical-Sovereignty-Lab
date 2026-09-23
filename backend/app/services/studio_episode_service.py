@@ -31,6 +31,20 @@ async def get_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]
             coach_id,
         )
         flags = []
+        fresh = None
+        if row and row.get("session_id"):
+            fresh = await _speaker_transcript(conn, str(row["session_id"]))
+            fresh = [line for line in fresh if str(line.get("text") or "").strip()]
+            if fresh:
+                await conn.execute(
+                    """
+                    UPDATE studio_episodes
+                    SET transcript_json = $2::jsonb, updated_at = NOW()
+                    WHERE id = $1::uuid
+                    """,
+                    episode_id,
+                    json.dumps(fresh),
+                )
         if row:
             flags = await conn.fetch(
                 """
@@ -41,7 +55,10 @@ async def get_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]
             )
     if not row:
         return {"ok": False, "reason": "not_found", "code": 404}
-    return {"ok": True, "episode": _ep(row), "flags": [_flag(f) for f in flags]}
+    episode = _ep(row)
+    if fresh:
+        episode["transcript"] = fresh
+    return {"ok": True, "episode": episode, "flags": [_flag(f) for f in flags]}
 
 
 async def approve_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
@@ -446,6 +463,66 @@ def LN_safe_desc() -> str:
     return f"Show with {LN_COHOST_LABEL}"
 
 
+def _line_speaker(role: str, tag: str) -> str:
+    tag_u = str(tag or "").upper()
+    role_s = str(role or "")
+    if tag_u == "NATE" or role_s == "cohost_ai":
+        return "Little Nate"
+    if tag_u == "CALLER" or role_s in ("caller", "guest"):
+        return "Caller"
+    if role_s == "host" or tag_u == "HOST":
+        return "Host"
+    return role_s or "Host"
+
+
+def arrange_transcript(legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Turn-order lines. Timed rows sort by `at`; older rows alternate legs."""
+    buckets: List[List[Dict[str, Any]]] = []
+    for leg in legs:
+        uttered = leg.get("utterances_json")
+        if isinstance(uttered, str):
+            try:
+                uttered = json.loads(uttered)
+            except Exception:
+                uttered = []
+        lines: List[Dict[str, Any]] = []
+        if isinstance(uttered, list):
+            for u in uttered:
+                if not isinstance(u, dict):
+                    continue
+                text = str(u.get("text") or "").strip()
+                if not text:
+                    continue
+                lines.append(
+                    {
+                        "speaker": _line_speaker(str(leg.get("role") or ""), str(u.get("t") or "")),
+                        "label": leg.get("label"),
+                        "leg_id": str(leg.get("id") or ""),
+                        "text": text,
+                        "at": str(u.get("at") or ""),
+                    }
+                )
+        if lines:
+            buckets.append(lines)
+    flat = [line for bucket in buckets for line in bucket]
+    if any(line.get("at") for line in flat):
+        flat.sort(key=lambda line: str(line.get("at") or "9"))
+        ordered = flat
+    else:
+        ordered = []
+        index = 0
+        while True:
+            progressed = False
+            for bucket in buckets:
+                if index < len(bucket):
+                    ordered.append(bucket[index])
+                    progressed = True
+            if not progressed:
+                break
+            index += 1
+    return [{k: v for k, v in line.items() if k != "at"} for line in ordered]
+
+
 async def _speaker_transcript(conn, session_id: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     try:
@@ -464,33 +541,7 @@ async def _speaker_transcript(conn, session_id: str) -> List[Dict[str, Any]]:
             """,
             session_id,
         )
-    for leg in legs:
-        uttered = leg.get("utterances_json") if hasattr(leg, "get") else None
-        if isinstance(uttered, str):
-            try:
-                uttered = json.loads(uttered)
-            except Exception:
-                uttered = []
-        if isinstance(uttered, list) and uttered:
-            for u in uttered:
-                if isinstance(u, dict):
-                    out.append(
-                        {
-                            "speaker": leg["role"],
-                            "label": leg.get("label"),
-                            "leg_id": str(leg["id"]),
-                            "text": u.get("text") or "",
-                        }
-                    )
-        else:
-            out.append(
-                {
-                    "speaker": leg["role"],
-                    "label": leg.get("label"),
-                    "leg_id": str(leg["id"]),
-                    "text": "",
-                }
-            )
+    out.extend(arrange_transcript([dict(leg) for leg in legs]))
     topics = await conn.fetch(
         """
         SELECT t.topic_deidentified

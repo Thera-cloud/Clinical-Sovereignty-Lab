@@ -130,9 +130,22 @@ body.has-program #compose{visibility:hidden}
       if (msg.op === 'chat' && msg.text) addLine(msg.who || 'Host', msg.text);
     } catch (e) {}
   });
+  var tapeArmed = false;
+  function armTape(){
+    if (tapeArmed) return;
+    tapeArmed = true;
+    console.log('START_RECORDING');
+  }
+  room.on(LK.RoomEvent.TrackSubscribed, function(){
+    setTimeout(armTape, 400);
+  });
   room.on(LK.RoomEvent.ParticipantConnected, paintCallers);
   room.on(LK.RoomEvent.ParticipantDisconnected, paintCallers);
-  room.connect(url, token).then(paintCallers).catch(function(){});
+  room.connect(url, token).then(function(){
+    paintCallers();
+    setTimeout(armTape, 2500);
+  }).catch(function(){});
+  window.addEventListener('pagehide', function(){ console.log('END_RECORDING'); });
 })();
 </script>
 </body>

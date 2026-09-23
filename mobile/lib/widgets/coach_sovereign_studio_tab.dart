@@ -1044,6 +1044,16 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     await _post('/api/studio/episodes/$eid/apply-cuts', {'cuts': cuts});
   }
 
+  String _speakerLabel(String raw) {
+    final s = raw.trim().toLowerCase();
+    if (s == 'cohost_ai' || s == 'nate' || s == 'little nate') {
+      return 'Little Nate';
+    }
+    if (s == 'host') return 'Host';
+    if (s == 'caller' || s == 'guest') return 'Caller';
+    return raw.isEmpty ? 'Speaker' : raw;
+  }
+
   Future<void> _openTranscript(String eid) async {
     final r = await http.get(
       Uri.parse('${AppConfig.apiBaseUrl}/api/studio/episodes/$eid'),
@@ -1065,18 +1075,22 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         title: const Text('Speaker transcript',
             style: TextStyle(color: _text, fontSize: 14)),
         content: SizedBox(
-          width: 420,
+          width: 480,
+          height: 420,
           child: segs.isEmpty
               ? const Text('No speaker lines yet',
                   style: TextStyle(color: _muted, fontSize: 12))
               : ListView(
-                  shrinkWrap: true,
-                  children: segs
-                      .map((s) => Text(
-                            '${s['speaker'] ?? '?'}: ${s['text'] ?? ''}',
-                            style: const TextStyle(color: _text, fontSize: 12),
-                          ))
-                      .toList(),
+                  children: segs.map((s) {
+                    final who = _speakerLabel('${s['speaker'] ?? ''}');
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        '$who: ${s['text'] ?? ''}',
+                        style: const TextStyle(color: _text, fontSize: 12),
+                      ),
+                    );
+                  }).toList(),
                 ),
         ),
         actions: [
@@ -1813,19 +1827,29 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
                         child: const Text('Transcript',
                             style: TextStyle(fontSize: 11)),
                       ),
-                      if ((e['tape_url'] ?? '').toString().isNotEmpty ||
-                          _tapeUrl.isNotEmpty)
-                        TextButton(
-                          onPressed: () {
-                            final url = (e['tape_url'] ?? _tapeUrl).toString();
-                            if (url.isEmpty) return;
-                            launchUrl(Uri.parse(url),
-                                mode: LaunchMode.externalApplication,
-                                webOnlyWindowName: '_blank');
-                          },
-                          child: const Text('Watch tape',
-                              style: TextStyle(fontSize: 11)),
+                      TextButton(
+                        onPressed: () {
+                          final url = (e['tape_url'] ?? '').toString();
+                          if (url.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                    'No tape for this session. The recorder did not finish a file.'),
+                              ),
+                            );
+                            return;
+                          }
+                          launchUrl(Uri.parse(url),
+                              mode: LaunchMode.externalApplication,
+                              webOnlyWindowName: '_blank');
+                        },
+                        child: Text(
+                          (e['tape_url'] ?? '').toString().isEmpty
+                              ? 'No tape'
+                              : 'Watch tape',
+                          style: const TextStyle(fontSize: 11),
                         ),
+                      ),
                       TextButton(
                         onPressed: _busy
                             ? null

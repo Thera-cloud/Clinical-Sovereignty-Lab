@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from app.services.studio_invariants import LN_COHOST_LABEL, guest_video_allowed
@@ -113,6 +114,23 @@ async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]
             coach_id,
         )
     if not row:
+        async with db_pool.acquire() as conn:
+            ended = await conn.fetchrow(
+                """
+                SELECT s.id FROM studio_sessions s
+                JOIN studio_shows sh ON sh.id = s.show_id
+                WHERE s.id = $1::uuid AND sh.coach_id = $2 AND s.state = 'ended'
+                """,
+                session_id,
+                coach_id,
+            )
+        if ended:
+            return {
+                "ok": True,
+                "session_id": str(ended["id"]),
+                "state": "ended",
+                "already": True,
+            }
         return {"ok": False, "reason": "not_found", "code": 404}
     from app.services.studio_meter import add_session_minutes, post_session_billing, session_minutes
 
@@ -225,7 +243,11 @@ async def _persist_line(db_pool, session_id: str, role: str, speaker: str, text:
         return
     import json
 
-    blob = json.dumps([{"t": speaker, "text": (text or "").strip()[:500]}])
+    blob = json.dumps([{
+        "t": speaker,
+        "text": (text or "").strip()[:500],
+        "at": datetime.now(timezone.utc).isoformat(),
+    }])
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
