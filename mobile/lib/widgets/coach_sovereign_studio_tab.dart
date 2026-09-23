@@ -809,6 +809,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
             msg = _ytWatch.isNotEmpty ? 'Live $_ytWatch' : 'YouTube live armed';
           } else if (j['applied'] == true) {
             msg = 'Cuts applied';
+          } else if (j['deleted'] == true) {
+            msg = 'Tape deleted';
           } else if (j['reason'] != null && '${j['reason']}'.isNotEmpty) {
             msg = j['reason'].toString();
           }
@@ -1031,6 +1033,35 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       out.add({'start_s': a, 'end_s': b});
     }
     return out;
+  }
+
+  Future<void> _deleteTape(String eid, String title) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Delete this tape?',
+            style: TextStyle(color: _text, fontSize: 14)),
+        content: Text(
+          'Removes the video for $title from storage. The transcript stays. This cannot be undone.',
+          style: const TextStyle(color: _text, fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete tape',
+                style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    await _post('/api/studio/episodes/$eid/delete-tape');
+    if (_editEid == eid && mounted) setState(() => _tapeUrl = '');
   }
 
   Future<void> _applyCuts(String eid) async {
@@ -1862,6 +1893,13 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
                         onPressed: _busy ? null : () => _applyCuts(eid),
                         child: const Text('Apply cuts',
                             style: TextStyle(fontSize: 11)),
+                      ),
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _deleteTape(eid, '${e['title'] ?? 'this session'}'),
+                        child: const Text('Delete tape',
+                            style: TextStyle(fontSize: 11, color: Colors.red)),
                       ),
                       TextButton(
                         onPressed: _busy

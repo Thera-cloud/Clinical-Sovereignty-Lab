@@ -176,9 +176,31 @@ def _r2_has(key: str) -> bool:
     try:
         from app.services.r2_storage import head_object
 
-        return bool(head_object(key=key))
+        meta = head_object(key=key) or {}
+        return int(meta.get("ContentLength") or 0) >= 200
     except Exception:
         return False
+
+
+def tape_keys_for_delete(session_id: str, stored: List[str]) -> List[str]:
+    """R2 keys this episode may remove. Only studio/{session} objects."""
+    from app.services.studio_livekit import session_cut_r2_key, session_media_r2_key
+
+    sid = (session_id or "").strip()
+    keys: List[str] = []
+    candidates = list(stored or [])
+    if sid:
+        candidates.extend([session_media_r2_key(sid), session_cut_r2_key(sid)])
+    for raw in candidates:
+        key = str(raw or "").strip().lstrip("/")
+        if not key.startswith("studio/"):
+            continue
+        if sid and sid not in key:
+            continue
+        if ".." in key or key in keys:
+            continue
+        keys.append(key)
+    return keys
 
 
 async def apply_cuts(
@@ -249,6 +271,77 @@ async def apply_cuts(
         "media_master_r2_key": master,
         "cuts": [{"start_s": a, "end_s": b} for a, b in windows],
     }
+
+
+async def delete_tape(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
+    """Remove this episode's video from R2 and clear the tape pointers."""
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.id, e.session_id, e.media_r2_key, e.media_master_r2_key,
+                   e.media_cut_r2_key, ss.media_r2_key AS session_key
+            FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            LEFT JOIN studio_sessions ss ON ss.id = e.session_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+    if not row:
+        return {"ok": False, "reason": "not_found", "code": 404}
+    sid = str(row.get("session_id") or "")
+    keys = tape_keys_for_delete(
+        sid,
+        [
+            str(row.get("media_r2_key") or ""),
+            str(row.get("media_master_r2_key") or ""),
+            str(row.get("media_cut_r2_key") or ""),
+            str(row.get("session_key") or ""),
+        ],
+    )
+    from app.services.r2_storage import delete_object_async
+
+    removed: List[str] = []
+    failed: List[str] = []
+    for key in keys:
+        gone = await delete_object_async(key=key)
+        if gone or not _r2_has(key):
+            removed.append(key)
+        else:
+            failed.append(key)
+    if failed:
+        return {
+            "ok": False,
+            "reason": "r2_delete_failed",
+            "code": 502,
+            "removed": removed,
+            "failed": failed,
+        }
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE studio_episodes
+            SET media_r2_key = NULL,
+                media_master_r2_key = NULL,
+                media_cut_r2_key = NULL,
+                updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            episode_id,
+        )
+        if sid:
+            await conn.execute(
+                """
+                UPDATE studio_sessions
+                SET media_r2_key = NULL, media_ready = FALSE
+                WHERE id = $1::uuid
+                """,
+                sid,
+            )
+    return {"ok": True, "deleted": True, "removed": len(removed)}
 
 
 async def _ffmpeg_cut_r2(

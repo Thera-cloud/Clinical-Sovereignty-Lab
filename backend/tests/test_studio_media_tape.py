@@ -20,6 +20,21 @@ add_cuts = _ep.add_cuts
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_delete_keys_stay_inside_the_session():
+    sid = "22659f6a-8d0f-4b19-97f3-466d91f15c24"
+    keys = _tape.tape_keys_for_delete(
+        sid,
+        [
+            f"studio/{sid}.mp4",
+            f"studio/{sid}/cut.mp4",
+            "studio/other-session.mp4",
+            "../secrets.env",
+            "",
+        ],
+    )
+    assert keys == [f"studio/{sid}.mp4", f"studio/{sid}/cut.mp4"]
+
+
 def test_tape_play_url_empty_without_key():
     assert _tape.tape_play_url("") == ""
     assert _tape.tape_play_url("   ") == ""

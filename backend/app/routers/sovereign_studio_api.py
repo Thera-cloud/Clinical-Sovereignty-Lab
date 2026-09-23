@@ -569,6 +569,16 @@ async def episode_apply_cuts(
     )
 
 
+@router.post("/episodes/{episode_id}/delete-tape")
+async def episode_delete_tape(
+    episode_id: UUID, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_media_tape import delete_tape
+
+    return _raise(await delete_tape(_pool(request), str(episode_id), _hw(user)))
+
+
 @router.post("/episodes/{episode_id}/approve")
 async def episode_approve(episode_id: UUID, request: Request, user: Dict = Depends(require_coach)):
     _flag()
