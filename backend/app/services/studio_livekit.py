@@ -38,7 +38,12 @@ def room_embed_url(lk_url: str, token: str, role: str, session_id: str = "") -> 
             "api": api,
         }
     )
-    return f"{room_origin()}/studio_nate_room.html?v=20260922b#{q}"
+    return f"{room_origin()}/studio_nate_room.html?v=20260923a#{q}"
+
+
+def program_out_url() -> str:
+    """Public page LiveKit egress Chrome loads. It draws the podcast stage."""
+    return f"{room_origin()}/studio_program_out.html"
 
 
 def verify_livekit_jwt(token: str) -> Dict[str, Any]:
@@ -488,9 +493,11 @@ async def start_room_egress(
     body: Dict[str, Any] = {
         "room_name": room,
         "layout": "speaker",
+        "custom_base_url": program_out_url(),
         "audio_only": False,
         "file_outputs": [file_out],
     }
+    plan["program_out"] = body["custom_base_url"]
     if rtmp_url and live_unlocked:
         body["stream_outputs"] = [{"protocol": "RTMP", "urls": [rtmp_url]}]
     started = await _twirp(

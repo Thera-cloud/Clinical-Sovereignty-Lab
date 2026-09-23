@@ -49,6 +49,7 @@ paths = (
     "payment-cancelled",
     "studio_livekit_room.html",
     "studio_nate_room.html",
+    "studio_program_out.html",
     "livekit-client.umd.min.js",
     "avatar-modes/expression_viewer.html",
     "avatar-modes/studio_portrait.html",

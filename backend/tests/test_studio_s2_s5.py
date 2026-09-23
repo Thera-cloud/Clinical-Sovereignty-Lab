@@ -280,6 +280,8 @@ def test_s4_apply_probe_egress_billing_autoscale():
     html = _lk.ROOM_HTML
     assert "captureStream" in html
     assert "ln-envelope" in html
+    assert "studio-program" in html
+    assert "preferCurrentTab" in html
     assert "cdn.jsdelivr.net" not in html
     assert "btnMute" in html
     assert "Toss to Nate" in html
@@ -370,7 +372,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260922b" in url
+    assert "v=20260923a" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]

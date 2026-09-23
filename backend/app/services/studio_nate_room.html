@@ -676,10 +676,47 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!f || !f.contentWindow) return;
     if (expr) f.contentWindow.postMessage({type:'setExpression', expression:expr}, '*');
     if (voice) f.contentWindow.postMessage({type:'setVoiceState', state:voice}, '*');
+    sendData({op:'program', expression:expr || '', voice:voice || ''});
   }
   var nateAudioUrl = '', pendingNate = '', pendingNateBlob = null, audioUnlocked = false;
   function speakerEl(){ return document.getElementById('nateSpeaker'); }
+  var programStream = null, programAsked = false;
+  function publishProgram(){
+    if (guest || !programStream || !room || !room.localParticipant) return;
+    var vt = programStream.getVideoTracks()[0];
+    if (!vt) return;
+    var opts = {name:'studio-program'};
+    if (LK.Track && LK.Track.Source) opts.source = LK.Track.Source.ScreenShare;
+    var cropped = Promise.resolve();
+    if (window.CropTarget && vt.cropTo){
+      var stage = document.getElementById('stage');
+      if (stage) cropped = CropTarget.fromElement(stage).then(function(target){ return vt.cropTo(target); });
+    }
+    cropped.catch(function(){}).then(function(){
+      return room.localParticipant.publishTrack(vt, opts);
+    }).then(function(){
+      setStatus('Tape is this view.');
+    }).catch(function(){});
+  }
+  function askProgramCapture(){
+    if (guest || programAsked || !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return;
+    programAsked = true;
+    navigator.mediaDevices.getDisplayMedia({
+      video:{frameRate:30},
+      audio:false,
+      preferCurrentTab:true,
+      selfBrowserSurface:'include',
+      surfaceSwitching:'exclude',
+      monitorTypeSurfaces:'exclude'
+    }).then(function(stream){
+      programStream = stream;
+      publishProgram();
+    }).catch(function(){
+      setStatus('View not shared — the tape uses the host camera and Little Nate.');
+    });
+  }
   function unlockAudio(){
+    askProgramCapture();
     audioUnlocked = true;
     var a = speakerEl();
     if (a){ a.muted = false; a.volume = 1; }
@@ -1691,7 +1728,6 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         drawEnv(0.28 + 0.45*Math.abs(Math.sin(t/8)));
       }, 80);
       var opts = {name:'ln-envelope'};
-      if (LK.Track && LK.Track.Source) opts.source = LK.Track.Source.ScreenShare;
       return room.localParticipant.publishTrack(vt, opts).catch(function(){ return null; });
     });
   }).then(function(){
@@ -1707,7 +1743,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         });
       });
     }
-    setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — Bring on moves Caller ID 1 to air.');
+    setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — click once so the tape is this view.');
+    publishProgram();
     greeted = true;
     if (!guest) warmThinkClip();
     if (!guest) armHostSpace();
@@ -1720,7 +1757,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
           headers: {'Authorization':'Bearer ' + cfg.token}
         }).then(function(r){ return r.json(); }).then(function(j){
           if (j && (j.started || j.reason === 'already'))
-            setStatus('Room recording / RTMP armed.');
+            setStatus(programStream ? 'Tape is this view.' : 'Tape armed. Click once so it records this view.');
         }).catch(function(){});
       }, 8000);
     }

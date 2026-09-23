@@ -45,7 +45,9 @@ def test_booth_routes_and_cache_bump():
     assert '/sessions/{session_id}/booth/legs' in api
     assert '/sessions/{session_id}/lookup' in api
     live = (ROOT / "backend/app/services/studio_livekit.py").read_text()
-    assert "v=20260922b" in live
+    assert "v=20260923a" in live
+    assert "studio_program_out.html" in live
+    assert "custom_base_url" in live
     assert 'with_name("studio_nate_room.html")' in live
     assert "RemoveParticipant" in live
     sess = (ROOT / "backend/app/services/studio_session_service.py").read_text()
@@ -94,3 +96,7 @@ def test_six_room_copies_match():
     assert 'id="sfxList"' in src
     assert "booth/ln-scan" in src
     assert "screener then waiting room" in src
+    prog = (ROOT / "mobile/web/studio_program_out.html").read_text()
+    assert "studio-program" in prog
+    assert "ln-envelope" in prog
+    assert "custom_base_url" not in prog

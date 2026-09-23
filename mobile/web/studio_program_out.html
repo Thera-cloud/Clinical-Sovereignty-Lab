@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sovereign Studio Program</title>
+<style>
+html,body{height:100%;margin:0;background:#050505;color:#E8D5A3;font-family:DM Sans,sans-serif;overflow:hidden}
+#program{display:none;position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#050505;z-index:5}
+body.has-program #program{display:block}
+body.has-program #compose{visibility:hidden}
+#compose{position:absolute;inset:0;display:flex;flex-direction:column}
+#bar{padding:10px 16px;border-bottom:1px solid #222;color:#C9A962;letter-spacing:1px;font-size:12px;display:flex;gap:12px}
+#bar .live{color:#EF4444;letter-spacing:2px}
+#bar .title{flex:1;text-align:center}
+#stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px;grid-template-rows:minmax(0,1fr) auto;gap:12px;padding:12px;min-height:0}
+#hosts{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0}
+#hosts.sharing{grid-template-columns:1fr 1fr minmax(240px,1.15fr)}
+#shareTile{display:none}
+#hosts.sharing #shareTile{display:flex}
+.tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
+.tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px}
+.tile .box{flex:1;position:relative;min-height:0;background:#0A0A0A;overflow:hidden}
+.tile .box video,.tile .box iframe{position:absolute;inset:0;width:100%;height:100%;border:0;object-fit:cover;background:#050505}
+#rail{background:#111;border:1px solid #222;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:8px}
+#activeName,#callerList{font-size:12px;color:#E8D5A3}
+#transcript{grid-column:1 / -1;min-height:120px;max-height:22vh;background:#111;border:1px solid #222;border-radius:8px;overflow:auto;padding:8px 10px;font-size:12px}
+#transcript .ln{color:#4ECDC4}
+#transcript .host{color:#E8D5A3}
+#transcript .caller{color:#9D4EDD}
+</style>
+</head>
+<body>
+<video id="program" autoplay muted playsinline></video>
+<div id="compose">
+  <div id="bar"><span class="live">● LIVE</span><span class="title">SOVEREIGN STUDIO LIVE</span></div>
+  <div id="stage">
+    <div id="hosts">
+      <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"></div></div>
+      <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate" src="/avatar-modes/studio_portrait.html?v=20260909b" allow="autoplay"></iframe></div></div>
+      <div class="tile" id="shareTile"><h3>ON SCREEN</h3><div class="box" id="shareBox"></div></div>
+    </div>
+    <aside id="rail">
+      <div id="activeName">No active caller</div>
+      <div id="callerList"></div>
+    </aside>
+    <section id="transcript"></section>
+  </div>
+</div>
+<script src="/livekit-client.umd.min.js"></script>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var url = q.get('url') || '';
+  var token = q.get('token') || '';
+  var LK = window.LivekitClient;
+  if (!LK || !url || !token) return;
+  var room = new LK.Room();
+  function ident(p){ return ((p && p.identity) || '').toLowerCase(); }
+  function isHost(p){ var id = ident(p); return id.indexOf('host') === 0; }
+  function isCaller(p){
+    var id = ident(p);
+    return id.indexOf('guest') === 0 || id.indexOf('caller') === 0 || id.indexOf('web-') === 0;
+  }
+  function paintCallers(){
+    var names = [];
+    if (room.remoteParticipants) room.remoteParticipants.forEach(function(p){
+      if (isCaller(p)) names.push(p.identity);
+    });
+    var active = document.getElementById('activeName');
+    var list = document.getElementById('callerList');
+    active.textContent = names.length ? names[0] : 'No active caller';
+    list.textContent = names.slice(1).join(' · ');
+  }
+  function addLine(who, text){
+    if (!text) return;
+    var log = document.getElementById('transcript');
+    var d = document.createElement('div');
+    var key = String(who || '');
+    d.className = (key === 'Nate' || key === 'Little Nate') ? 'ln' : (key === 'Caller' || key === 'CALLER' ? 'caller' : 'host');
+    d.textContent = key + ': ' + text;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+  function lnAvatar(expr, voice){
+    var f = document.getElementById('lnAvatar');
+    if (!f || !f.contentWindow) return;
+    if (expr) f.contentWindow.postMessage({type:'setExpression', expression:expr}, '*');
+    if (voice) f.contentWindow.postMessage({type:'setVoiceState', state:voice}, '*');
+  }
+  function put(box, track){
+    var el = track.attach();
+    el.muted = true;
+    el.autoplay = true;
+    el.playsInline = true;
+    box.innerHTML = '';
+    box.appendChild(el);
+    el.play().catch(function(){});
+  }
+  room.on(LK.RoomEvent.TrackSubscribed, function(track, pub){
+    var name = (pub && (pub.trackName || pub.name)) || '';
+    if (name === 'ln-envelope' || track.kind !== 'video') return;
+    if (name === 'studio-program'){
+      var el = track.attach();
+      el.id = 'program';
+      el.muted = true;
+      el.autoplay = true;
+      el.playsInline = true;
+      var old = document.getElementById('program');
+      if (old) old.replaceWith(el);
+      else document.body.appendChild(el);
+      document.body.classList.add('has-program');
+      el.play().catch(function(){});
+      return;
+    }
+    if (name === 'studio-share'){
+      document.getElementById('hosts').classList.add('sharing');
+      put(document.getElementById('shareBox'), track);
+      return;
+    }
+    var part = arguments[2];
+    if (isHost(part)) put(document.getElementById('hostBox'), track);
+  });
+  room.on(LK.RoomEvent.DataReceived, function(payload){
+    try {
+      var msg = JSON.parse(new TextDecoder().decode(payload));
+      if (msg.op === 'program') lnAvatar(msg.expression, msg.voice);
+      if (msg.op === 'nate_line' && msg.text) addLine('Nate', msg.text);
+      if (msg.op === 'caption' && msg.text) addLine(msg.speaker || 'HOST', msg.text);
+      if (msg.op === 'chat' && msg.text) addLine(msg.who || 'Host', msg.text);
+    } catch (e) {}
+  });
+  room.on(LK.RoomEvent.ParticipantConnected, paintCallers);
+  room.on(LK.RoomEvent.ParticipantDisconnected, paintCallers);
+  room.connect(url, token).then(paintCallers).catch(function(){});
+})();
+</script>
+</body>
+</html>
