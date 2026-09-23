@@ -71,7 +71,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #dock button.warn{border-color:#EF4444;color:#EF4444}
 #dock .meta{color:#8B7355;font-size:11px;align-self:center}
 #sfxIn{display:none;width:110px;background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px}
-#styleSel{background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px;max-width:120px}
+#styleSel,#micSel,#camSel{background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px;max-width:180px}
 @media (max-width:960px){
   #stage{grid-template-columns:1fr;grid-template-rows:auto auto auto}
   #hosts{grid-template-columns:1fr;min-height:280px}
@@ -121,7 +121,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="holdMedia" aria-hidden="true"></div>
 <div id="dock">
   <button id="btnMute" type="button">Mute</button>
+  <select id="micSel" title="Microphone"><option value="">Default microphone</option></select>
   <button id="btnCam" type="button">Camera</button>
+  <select id="camSel" title="Camera"><option value="">Default camera</option></select>
   <button id="btnShare" type="button">Share</button>
   <button id="btnFile" type="button">File</button>
   <button id="btnLookup" type="button">Look up</button>
@@ -680,7 +682,75 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   var nateAudioUrl = '', pendingNate = '', pendingNateBlob = null, audioUnlocked = false;
   function speakerEl(){ return document.getElementById('nateSpeaker'); }
-  var programStream = null, programAsked = false;
+  var programStream = null, programAsked = false, chosenMic = '', chosenCam = '', deviceFill = false;
+  function micConstraints(){
+    var c = {noiseSuppression:true, autoGainControl:true, echoCancellation:!programStream};
+    if (chosenMic) c.deviceId = chosenMic;
+    return c;
+  }
+  function camConstraints(){
+    var c = {};
+    if (chosenCam) c.deviceId = chosenCam;
+    return c;
+  }
+  function localId(){
+    return (room && room.localParticipant && room.localParticipant.identity) || '';
+  }
+  function hostUsesMicTape(){ return !!programStream || !!chosenMic; }
+  function rebindHostHear(){
+    rememberLocalMic();
+    var id = localId();
+    if (!id) return;
+    stopCap(id);
+    if (hostUsesMicTape()){
+      try { if (rec) rec.stop(); } catch (e) {}
+      startCap(id);
+      return;
+    }
+    if (listenOn && hasSpeechRec()){
+      try { startListenRec(document.getElementById('btnTalk')); } catch (e2) {}
+      return;
+    }
+    startCap(id);
+  }
+  function restoreHostMic(){
+    if (guest || !room || !room.localParticipant || !micOn) return Promise.resolve();
+    return room.localParticipant.setMicrophoneEnabled(true, micConstraints()).then(function(){
+      rebindHostHear();
+      setStatus(programStream
+        ? 'Tape is this view. Little Nate can hear this microphone.'
+        : 'Microphone is live for Little Nate.');
+    }).catch(function(){
+      setStatus('Microphone dropped — pick it again under Mic.');
+    });
+  }
+  function fillDeviceSelect(sel, kind, chosen){
+    if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    navigator.mediaDevices.enumerateDevices().then(function(list){
+      var cur = chosen || sel.value || '';
+      deviceFill = true;
+      sel.innerHTML = '';
+      var blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = kind === 'audioinput' ? 'Default microphone' : 'Default camera';
+      sel.appendChild(blank);
+      var n = 0;
+      (list || []).forEach(function(d){
+        if (!d || d.kind !== kind) return;
+        n += 1;
+        var o = document.createElement('option');
+        o.value = d.deviceId || '';
+        o.textContent = d.label || ((kind === 'audioinput' ? 'Microphone ' : 'Camera ') + n);
+        sel.appendChild(o);
+      });
+      if (cur) sel.value = cur;
+      deviceFill = false;
+    }).catch(function(){ deviceFill = false; });
+  }
+  function refreshDevices(){
+    fillDeviceSelect(document.getElementById('micSel'), 'audioinput', chosenMic);
+    fillDeviceSelect(document.getElementById('camSel'), 'videoinput', chosenCam);
+  }
   function publishProgram(){
     if (guest || !programStream || !room || !room.localParticipant) return;
     var vt = programStream.getVideoTracks()[0];
@@ -710,7 +780,13 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       monitorTypeSurfaces:'exclude'
     }).then(function(stream){
       programStream = stream;
+      var vt = stream.getVideoTracks()[0];
+      if (vt) vt.addEventListener('ended', function(){
+        programStream = null;
+        restoreHostMic();
+      });
       publishProgram();
+      restoreHostMic();
     }).catch(function(){
       setStatus('View not shared — the tape uses the host camera and Little Nate.');
     });
@@ -941,7 +1017,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function startCap(id){
     if (guest || lnPaused || !cfg.session || !cfg.token || capRecs[id]) return;
-    if (listenOn && hasSpeechRec() && room && room.localParticipant && id === room.localParticipant.identity) return;
+    if (listenOn && hasSpeechRec() && !hostUsesMicTape() && room && room.localParticipant && id === room.localParticipant.identity) return;
     var mst = audioTracks[id];
     if (!mst || !window.MediaRecorder) return;
     var stream = new MediaStream([mst]);
@@ -1234,6 +1310,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }).then(function(){
       markShareTab('screen');
       setStatus('On screen — sending Nate a still of the page.');
+      restoreHostMic();
     }).catch(function(e){
       if (e && e.name === 'NotAllowedError') setStatus('Screen share cancelled.');
       else setStatus('Screen share failed.');
@@ -1561,7 +1638,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   renderWait();
     if (guest) {
-    ['btnCam','btnShare','btnFile','btnLookup','btnSfx'].forEach(function(id){
+    ['btnCam','camSel','btnShare','btnFile','btnLookup','btnSfx'].forEach(function(id){
       var el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -1702,11 +1779,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (pub && pub.track) rememberAudio(room.localParticipant, pub.track);
   });
   room.connect(cfg.url, cfg.token).then(function(){
-    return room.localParticipant.setMicrophoneEnabled(true, {
-      echoCancellation:true,
-      noiseSuppression:true,
-      autoGainControl:true
-    });
+    return room.localParticipant.setMicrophoneEnabled(true, micConstraints());
   }).then(function(){
     micOn = !!(room.localParticipant && room.localParticipant.isMicrophoneEnabled);
     if (!micOn) setStatus('Microphone did not start — allow mic for this tab, then tap Unmute.');
@@ -1715,7 +1788,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     muteBtn.classList.toggle('on', !micOn);
   }).then(function(){
     if (guest) return room.localParticipant.setCameraEnabled(false);
-    return room.localParticipant.setCameraEnabled(true).then(function(){
+    return room.localParticipant.setCameraEnabled(true, camConstraints()).then(function(){
       camOn = true;
       attachLocalCam();
       var stream = document.getElementById('env').captureStream(12);
@@ -1732,6 +1805,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   }).then(function(){
     rememberLocalMic();
+    refreshDevices();
+    if (programStream) restoreHostMic();
     if (room && room.remoteParticipants){
       room.remoteParticipants.forEach(function(p){
         if (p && p.identity) enqueue(p.identity);
@@ -1862,6 +1937,27 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (room && room.localParticipant) startCap(room.localParticipant.identity);
     }
   };
+  var micSel = document.getElementById('micSel');
+  if (micSel) micSel.onchange = function(){
+    if (deviceFill) return;
+    chosenMic = this.value || '';
+    restoreHostMic();
+  };
+  var camSel = document.getElementById('camSel');
+  if (camSel) camSel.onchange = function(){
+    if (deviceFill || guest || !room) return;
+    chosenCam = this.value || '';
+    var preview = document.getElementById('hostVid');
+    var held = preview && preview.srcObject;
+    if (held && held.getTracks) held.getTracks().forEach(function(t){ try { t.stop(); } catch (e) {} });
+    room.localParticipant.setCameraEnabled(true, camConstraints()).then(function(){
+      camOn = true;
+      attachLocalCam();
+      setStatus('Camera switched.');
+    }).catch(function(){ setStatus('Camera did not switch.'); });
+  };
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener)
+    navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
   document.getElementById('btnMute').onclick = function(){
     if (!room) return;
     micOn = !micOn;
