@@ -38,7 +38,7 @@ def room_embed_url(lk_url: str, token: str, role: str, session_id: str = "") -> 
             "api": api,
         }
     )
-    return f"{room_origin()}/studio_nate_room.html?v=20260923b#{q}"
+    return f"{room_origin()}/studio_nate_room.html?v=20260924a#{q}"
 
 
 def program_out_url() -> str:

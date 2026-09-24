@@ -68,7 +68,7 @@ def forget_share_frame(session_id: str) -> None:
 
 
 _HOST: Dict[str, Dict[str, Any]] = {}
-_HOST_TTL = 45.0
+_HOST_TTL = 90.0
 _LOOK_ME = re.compile(
     r"\b(look at me|see me|my face|how do i look|what do you see|on (?:the )?camera|in my space)\b",
     re.I,

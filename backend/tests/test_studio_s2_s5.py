@@ -309,7 +309,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert 'id="hosts"' in html
     assert "grid-template-columns:1fr 1fr 1fr" not in html
     sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
-    assert "max_tokens=260 if howto else 160" in sess_src
+    assert "live_reply_max_tokens(blob, howto)" in sess_src
     assert "max_tokens=160 if howto else 120" not in sess_src
     voice_src = (ROOT / "backend/app/services/studio_phone_voice.py").read_text()
     assert "time() + 45.0" in voice_src
@@ -374,7 +374,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260923b" in url
+    assert "v=20260924a" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -725,7 +725,7 @@ def test_studio_share_host_only():
     assert "share_kind" in sess_src
     assert "never when a caller asks" in sess_src
     assert "cannot see the page yet" in sess_src
-    assert "images=[jpeg] if jpeg else None" in sess_src
+    assert "images=images or None" in sess_src
     assert "needs_eyes" in sess_src
 
     assert share.classify_share_asset("notes.txt", "text/plain") == "txt"

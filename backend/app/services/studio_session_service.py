@@ -14,6 +14,18 @@ logger = logging.getLogger("studio_session")
 
 _THREAD: Dict[str, list] = {}
 _THREAD_MAX = 40
+# 3-minute spoken reply (~450 words) stays intact in the transcript.
+_LINE_STORE = 3600
+
+
+def live_reply_max_tokens(blob: str, howto: bool) -> int:
+    """Spoken length: 1 min ~210, 2 min ~420, 3 min ~630 tokens."""
+    words = len((blob or "").split())
+    if howto or words >= 80:
+        return 630
+    if words >= 40:
+        return 420
+    return 210
 
 
 async def create_session(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
@@ -192,9 +204,9 @@ def remember_line(session_id: str, speaker: str, text: str) -> None:
     if not sid or len(line) < 8:
         return
     buf = _THREAD.setdefault(sid, [])
-    if buf and buf[-1] == line[:500]:
+    if buf and buf[-1] == line[:_LINE_STORE]:
         return
-    buf.append(line[:500])
+    buf.append(line[:_LINE_STORE])
     _THREAD[sid] = buf[-_THREAD_MAX:]
 
 
@@ -245,7 +257,7 @@ async def _persist_line(db_pool, session_id: str, role: str, speaker: str, text:
 
     blob = json.dumps([{
         "t": speaker,
-        "text": (text or "").strip()[:500],
+        "text": (text or "").strip()[:_LINE_STORE],
         "at": datetime.now(timezone.utc).isoformat(),
     }])
     try:
@@ -323,8 +335,14 @@ async def cohost_turn(
     }
     can_see = note_has_seen_content(share_n) or bool(jpeg)
     host = host_space_seen(sid)
+    host_jpeg = (host.get("jpeg") or "").strip()
     if want_host_jpeg(kind, blob, bool(host.get("notable")), jpeg):
-        jpeg = jpeg or (host.get("jpeg") or "")
+        jpeg = jpeg or host_jpeg
+    images = []
+    if jpeg:
+        images.append(jpeg)
+    if host_jpeg and host_jpeg not in images:
+        images.append(host_jpeg)
     if kind in ("toss", "open", "caller_join"):
         prime_clear(sid)
     # Screen shares change every second. A primed line without the still is fiction.
@@ -388,8 +406,8 @@ async def cohost_turn(
     host_block = host_space_block(host)
     if host_block:
         system += host_block
-        if jpeg and not (seen.get("jpeg") or ""):
-            system += " A still of Big Nate on the host camera is attached."
+    if host_jpeg:
+        system += " A still of the host camera is attached. Use only what is actually in that frame — face, posture, and what sits behind him."
     room = f"Room: {live} live caller(s), {hold} waiting."
     if realm_name and realm_shift:
         room += " The realm just shifted in behind you this second."
@@ -463,8 +481,8 @@ async def cohost_turn(
             prompt=prefix + blob,
             system=system,
             domain="culture",
-            max_tokens=260 if howto else 160,
-            images=[jpeg] if jpeg else None,
+            max_tokens=live_reply_max_tokens(blob, howto),
+            images=images or None,
         )
         gen = (out.get("text") or "").strip()
         if gen:

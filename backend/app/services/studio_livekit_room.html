@@ -165,6 +165,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var CAP_REC_TAIL_MS = 500;
   var THINK_HOLD_MS = 12000;
   var BARGE_MS = 5500;
+  var YIELD_LINE = 'Sorry — go ahead. I will wait until you are done.';
+  var apologyPlaying = false, apologyGen = 0, yieldQuietUntil = 0;
   var THINK_LINE = 'Let me take a moment to gather that — I will come right back.';
   var thinkTimer = null, thinkBlob = null, thinkUrl = '';
   var listenOn = false, listenBuf = '', listenInterim = '', listenTimer = null;
@@ -295,7 +297,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function grabHostJpeg(){
     try {
-      var v = document.getElementById('hostVid');
+      var v = document.querySelector('#hostBox video') || document.getElementById('hostVid');
       if (!v || !v.videoWidth) return null;
       var w = v.videoWidth, h = v.videoHeight;
       var scale = Math.min(1, 640 / Math.max(w, h));
@@ -328,7 +330,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (guest) return;
     if (hostSpaceTimer) clearInterval(hostSpaceTimer);
     pushHostSpace();
-    hostSpaceTimer = setInterval(function(){ pushHostSpace(); }, 20000);
+    hostSpaceTimer = setInterval(function(){ pushHostSpace(); }, 8000);
   }
   function pushShareFrame(){
     if (guest || !shareState.on || shareState.kind === 'search' || !cfg.session || !cfg.token) return Promise.resolve();
@@ -407,6 +409,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     speakNate(reply);
   }
   function deliverHold(text, event){
+    if (stillYielding()) {
+      holdDraft.release = true;
+      holdDraft.releaseText = text;
+      holdDraft.releaseEvent = event || holdDraft.event || 'line';
+      return;
+    }
     if (holdDraft.inflight) {
       holdDraft.release = true;
       holdDraft.releaseText = text;
@@ -460,7 +468,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }).catch(function(){}).then(function(){
       if (id !== holdDraft.id) return;
       holdDraft.inflight = false;
-      if (holdDraft.release) deliverHold(holdDraft.releaseText || holdDraft.text, holdDraft.releaseEvent || holdDraft.event);
+      if (holdDraft.release && !stillYielding()) deliverHold(holdDraft.releaseText || holdDraft.text, holdDraft.releaseEvent || holdDraft.event);
     });
   }
   function maybePrime(text, event){
@@ -828,6 +836,13 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     a.onended = function(){
       if (gen !== speakGen) return;
       nateSpeaking = false;
+      if (gen === apologyGen) {
+        apologyPlaying = false;
+        apologyGen = 0;
+        yieldQuietUntil = Date.now() + LISTEN_HOLD_MS;
+        lnAvatar('attentive', 'idle');
+        return;
+      }
       lnAvatar('attentive', 'idle');
       drainTurns();
     };
@@ -965,7 +980,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     function fireCaps(){
       capPauseTimer = null;
       if (lnPaused || guest) { pendingCaps = []; capQueue = []; return; }
-      if (nateSpeaking || turnBusy || Object.keys(capRecs).length) {
+      if (nateSpeaking || turnBusy || stillYielding() || Object.keys(capRecs).length) {
         capPauseTimer = setTimeout(fireCaps, 400);
         return;
       }
@@ -1004,6 +1019,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }).then(function(r){ return r.json(); }).then(function(j){
       if (!j || !j.ok || !j.text) return;
       if ((j.text || '').trim().length < 8) return;
+      if (nateSpeaking) yieldForSpeaker();
       var who = j.speaker === 'caller' ? 'CALLER' : 'HOST';
       lastHeard = j.text;
       addLine(who, j.text);
@@ -1035,6 +1051,21 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       postCaption(id, ev.data);
     };
     try { recd.start(); } catch (e) { delete capRecs[id]; }
+  }
+  function yieldForSpeaker(){
+    if (apologyPlaying || lnPaused) return;
+    apologyPlaying = true;
+    abortHoldDraft();
+    turnQ = [];
+    stopNateVoice();
+    setStatus('Little Nate is waiting until you finish.');
+    setTimeout(function(){
+      speakNate(YIELD_LINE);
+      apologyGen = speakGen;
+    }, 60);
+  }
+  function stillYielding(){
+    return apologyPlaying || Date.now() < yieldQuietUntil;
   }
   function stopNateVoice(){
     speakGen += 1;
@@ -1747,13 +1778,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null; }
       return;
     }
-    if (bargeTimer) return;
-    bargeTimer = setTimeout(function(){
-      bargeTimer = null;
-      if (!nateSpeaking) return;
-      stopNateVoice();
-      setStatus('Little Nate yielded — the on-air caller has the floor.');
-    }, BARGE_MS);
+    yieldForSpeaker();
   });
   room.on(LK.RoomEvent.DataReceived, function(payload, participant){
     try {
@@ -1865,7 +1890,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       listenBuf = '';
       listenInterim = '';
       if (!text) return;
-      if (nateSpeaking || turnBusy) {
+      if (nateSpeaking && !apologyPlaying) yieldForSpeaker();
+      if (nateSpeaking || turnBusy || stillYielding()) {
         listenBuf = text;
         if (listenOn) armListenCommit();
         return;
@@ -1900,6 +1926,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       listenInterim = mid.replace(/\s+/g, ' ').trim();
       lastHeard = (listenBuf + ' ' + listenInterim).replace(/\s+/g, ' ').trim();
       if (!lastHeard) return;
+      if (nateSpeaking && !apologyPlaying) yieldForSpeaker();
+      else if (stillYielding()) yieldQuietUntil = Date.now() + LISTEN_HOLD_MS;
       armListenCommit();
     };
     rec.onerror = function(ev){
