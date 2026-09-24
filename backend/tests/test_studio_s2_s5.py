@@ -530,6 +530,7 @@ def test_studio_product_thread_and_onair_guards():
     assert "betterhelp" not in clean.lower()
     assert "calm" not in clean.lower()
     assert "Sovereign Sanctuary" in clean
+    assert "calm" in sanitize_onair("Stay calm and take the note.").lower()
     _sess.remember_line("sid-thread", "HOST", "we are talking about the Little Nate app")
     _sess.remember_line("sid-thread", "HOST", "tell us how it works")
     prior = _sess.thread_text("sid-thread")

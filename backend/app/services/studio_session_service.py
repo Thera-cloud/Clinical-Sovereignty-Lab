@@ -410,7 +410,7 @@ async def cohost_turn(
         system += " A still of the host camera is attached. Use only what is actually in that frame — face, posture, and what sits behind him."
     room = f"Room: {live} live caller(s), {hold} waiting."
     if realm_name and realm_shift:
-        room += " The realm just shifted in behind you this second."
+        room += " Do not say aloud: The realm just shifted in behind you this second."
     if share_k:
         room += f" On screen: {share_k}."
         if can_see:
@@ -429,8 +429,41 @@ async def cohost_turn(
                 "You look things up and bring stings only when the host asks — "
                 "never when a caller asks.\n"
             )
+    from app.services.studio_show_thread import (
+        apply_turn,
+        fresh_notes,
+        interpret,
+        needs_lookup,
+        note_citations,
+        turn_block,
+    )
+
+    move = interpret(sid, speaker or "host", blob)
+    fresh = ""
+    if needs_lookup(speaker or "host", blob):
+        found = await fresh_notes(blob)
+        if found:
+            note_citations(sid, found)
+            fresh = "\n".join(
+                f"- {row.get('title') or 'note'}: {row.get('snippet') or ''}".strip()
+                for row in found
+            )
+    from app.services.studio_public_depth import depth_for_show, guard_onair
+
+    depth = await depth_for_show(db_pool, blob)
+    if depth:
+        system += "\n\n" + depth
     prior = thread_text(session_id)
     prior_block = f"THIS_SHOW so far:\n{prior}\n\n" if prior else ""
+    system += "\n\n" + turn_block(
+        sid,
+        move,
+        host_seen=bool(host_jpeg),
+        host_note=str((host or {}).get("note") or ""),
+        share_seen=bool(can_see and jpeg),
+        share_note=share_n,
+        fresh=fresh,
+    )
     if kind == "open":
         prefix = (
             f"{room} Show just went live. Warm hello, then a small joke or take of your own. "
@@ -493,7 +526,7 @@ async def cohost_turn(
     if inv6_blocks(reply):
         reply = "I'll keep this on the educational side and stay with the room."
         provider = "inv6_filter"
-    cleaned = sanitize_onair(reply)
+    cleaned = guard_onair(sanitize_onair(reply))
     if cleaned != reply:
         reply = cleaned
         provider = "onair_guard"
@@ -505,6 +538,7 @@ async def cohost_turn(
             provider = "onair_guard"
     if not (reply or "").strip():
         reply = "Yeah, man — that tracks."
+    apply_turn(sid, speaker or "host", blob, move, reply)
     if kind == "prime":
         prime_store(sid, blob, reply)
         return {

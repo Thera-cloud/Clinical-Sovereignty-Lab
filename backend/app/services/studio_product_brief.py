@@ -150,7 +150,7 @@ _SHOW_ONLY = re.compile(
 _COMPETITOR = re.compile(
     r"\b("
     r"betterhelp|better help|talkspace|talk space|cerebral|brightside|"
-    r"headspace|calm|insight timer|ten percent happier|"
+    r"headspace|(?:download|try|use|the)\s+calm|calm app|insight timer|ten percent happier|"
     r"woebot|wysa|youper|replika|character\.?ai|"
     r"noom|lyra|spring health|modern health"
     r")\b",
