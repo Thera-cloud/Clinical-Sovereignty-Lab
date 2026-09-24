@@ -273,7 +273,7 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
             """,
             show_id,
         )
-    from app.services.studio_media_tape import tape_play_url
+    from app.services.studio_media_tape import tape_play_url, tape_removed_marker
 
     episodes = []
     for r in rows:
@@ -283,6 +283,8 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
                 cuts = json.loads(cuts)
             except Exception:
                 cuts = []
+        if tape_removed_marker(cuts):
+            continue
         key = (r.get("media_cut_r2_key") or r.get("media_r2_key") or "").strip()
         episodes.append(
             {

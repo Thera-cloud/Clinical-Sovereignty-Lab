@@ -20,6 +20,13 @@ add_cuts = _ep.add_cuts
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_removed_marker_hides_episode_from_edit():
+    assert _tape.tape_removed_marker({"removed": True}) is True
+    assert _tape.tape_removed_marker('{"removed": true}') is True
+    assert _tape.tape_removed_marker([{"start_s": 1, "end_s": 2}]) is False
+    assert _tape.tape_removed_marker([]) is False
+
+
 def test_delete_keys_stay_inside_the_session():
     sid = "22659f6a-8d0f-4b19-97f3-466d91f15c24"
     keys = _tape.tape_keys_for_delete(

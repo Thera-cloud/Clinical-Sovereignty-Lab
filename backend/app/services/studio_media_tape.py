@@ -182,6 +182,16 @@ def _r2_has(key: str) -> bool:
         return False
 
 
+def tape_removed_marker(cuts: Any) -> bool:
+    """True when delete_tape hid this episode from the EDIT list."""
+    if isinstance(cuts, str):
+        try:
+            cuts = json.loads(cuts)
+        except Exception:
+            return False
+    return isinstance(cuts, dict) and cuts.get("removed") is True
+
+
 def tape_keys_for_delete(session_id: str, stored: List[str]) -> List[str]:
     """R2 keys this episode may remove. Only studio/{session} objects."""
     from app.services.studio_livekit import session_cut_r2_key, session_media_r2_key
@@ -327,6 +337,7 @@ async def delete_tape(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]
             SET media_r2_key = NULL,
                 media_master_r2_key = NULL,
                 media_cut_r2_key = NULL,
+                cuts_json = '{"removed": true}'::jsonb,
                 updated_at = NOW()
             WHERE id = $1::uuid
             """,

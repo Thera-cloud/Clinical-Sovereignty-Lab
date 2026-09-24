@@ -782,7 +782,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     } catch (_) {}
   }
 
-  Future<void> _post(String path, [Map<String, dynamic>? body]) async {
+  Future<bool> _post(String path, [Map<String, dynamic>? body]) async {
     if (path.contains('/end')) {
       _egressRetry?.cancel();
       _stopCallerPoll();
@@ -794,7 +794,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       headers: _h,
       body: json.encode(body ?? {}),
     );
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() => _busy = false);
     String msg = '${r.statusCode}';
     if (r.statusCode == 200) {
@@ -810,7 +810,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
           } else if (j['applied'] == true) {
             msg = 'Cuts applied';
           } else if (j['deleted'] == true) {
-            msg = 'Tape deleted';
+            msg = 'Removed from EDIT';
           } else if (j['reason'] != null && '${j['reason']}'.isNotEmpty) {
             msg = j['reason'].toString();
           }
@@ -834,6 +834,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     if (path.contains('/end') && r.statusCode == 200 && _episodes.isNotEmpty) {
       await _openEditor(_episodes.first);
     }
+    return r.statusCode == 200;
   }
 
   Future<void> _connectYoutube() async {
@@ -1043,7 +1044,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         title: const Text('Delete this tape?',
             style: TextStyle(color: _text, fontSize: 14)),
         content: Text(
-          'Removes the video for $title from storage. The transcript stays. This cannot be undone.',
+          'Removes $title from EDIT and deletes the video from storage. This cannot be undone.',
           style: const TextStyle(color: _text, fontSize: 12),
         ),
         actions: [
@@ -1060,8 +1061,16 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
       ),
     );
     if (yes != true || !mounted) return;
-    await _post('/api/studio/episodes/$eid/delete-tape');
-    if (_editEid == eid && mounted) setState(() => _tapeUrl = '');
+    final ok = await _post('/api/studio/episodes/$eid/delete-tape');
+    if (!ok || !mounted) return;
+    setState(() {
+      _episodes.removeWhere((e) => (e['id'] ?? '').toString() == eid);
+      if (_editEid == eid) {
+        _editEid = '';
+        _tapeUrl = '';
+        _episodeFlags = [];
+      }
+    });
   }
 
   Future<void> _applyCuts(String eid) async {
