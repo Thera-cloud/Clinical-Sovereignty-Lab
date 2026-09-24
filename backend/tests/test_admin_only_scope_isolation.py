@@ -47,6 +47,7 @@ _PROTECTED_FILES = {
     "services/quantum_crystal_orchestrator.py": 2,
     "services/newsletter_library_recall.py": 2,
     "services/quantum_knowledge_field.py": 2,
+    "services/studio_public_depth.py": 1,
 }
 
 # 2026-07-09 audit, part 4: these files also query `user_id IS NULL`, but are
@@ -107,6 +108,7 @@ _FORBIDDEN_OLD_SNIPPETS: dict[str, list[str]] = {
     "services/quantum_knowledge_field.py": [
         "scope NOT IN ('archived', 'admin_only')",
     ],
+    "services/studio_public_depth.py": [],
 }
 
 
