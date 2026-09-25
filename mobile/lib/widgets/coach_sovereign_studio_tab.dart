@@ -71,6 +71,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   Map<String, dynamic>? _selected;
   List<Map<String, dynamic>> _parts = [];
   List<Map<String, dynamic>> _episodes = [];
+  List<Map<String, dynamic>> _landing = [];
   int _callersLogged = 0;
   int _callersOpted = 0;
   List<String> _recentTopics = [];
@@ -94,6 +95,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   Timer? _tick;
   Timer? _egressRetry;
   Timer? _callerPoll;
+  Timer? _tapePoll;
+  bool _tapePollBusy = false;
   int _egressAttempts = 0;
   int _secs = 0;
   int _personaEpoch = 0;
@@ -123,6 +126,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     _tick?.cancel();
     _egressRetry?.cancel();
     _callerPoll?.cancel();
+    _tapePoll?.cancel();
     stopStudioPlayback();
     if (_recordingPart != null) {
       _recorder.stop();
@@ -765,6 +769,7 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         if (epR.statusCode == 200) {
           final j = json.decode(epR.body);
           _episodes = List<Map<String, dynamic>>.from((j['episodes'] ?? []) as List);
+          _landing = List<Map<String, dynamic>>.from((j['landing'] ?? []) as List);
         }
         if (memR.statusCode == 200) {
           final j = json.decode(memR.body) as Map<String, dynamic>;

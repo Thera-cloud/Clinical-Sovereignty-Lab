@@ -175,6 +175,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var THINK_LINE = 'Let me take a moment to gather that — I will come right back.';
   var thinkTimer = null, thinkBlob = null, thinkUrl = '';
   var listenOn = false, listenBuf = '', listenInterim = '', listenTimer = null;
+  var talkRec = null, talkSliceTimer = null;
   var capHold = {};
   var holdDraft = {id:0, text:'', event:'', reply:'', blob:null, abort:false, release:false, inflight:false, releaseText:'', releaseEvent:''};
   var turnQ = [], turnBusy = false, speakGen = 0;
@@ -311,10 +312,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       c.width = Math.max(2, Math.round(w * scale));
       c.height = Math.max(2, Math.round(h * scale));
       var ctx = c.getContext('2d');
-      var zoom = hostZoom > 1 ? hostZoom : 1;
-      var zw = w / zoom, zh = h / zoom;
+      var zoom = (hostZoom >= 0.5 && hostZoom <= 2.5) ? hostZoom : 1;
       if (hostMirror) { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
-      ctx.drawImage(v, (w - zw) / 2, (h - zh) / 2, zw, zh, 0, 0, c.width, c.height);
+      if (zoom < 1) {
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, c.width, c.height);
+        var dw = c.width * zoom, dh = c.height * zoom;
+        ctx.drawImage(v, 0, 0, w, h, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
+      } else {
+        var zw = w / zoom, zh = h / zoom;
+        ctx.drawImage(v, (w - zw) / 2, (h - zh) / 2, zw, zh, 0, 0, c.width, c.height);
+      }
       var data = c.toDataURL('image/jpeg', 0.68);
       var raw = atob((data.split(',')[1] || ''));
       var u8 = new Uint8Array(raw.length);
@@ -700,18 +708,137 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   var nateAudioUrl = '', pendingNate = '', pendingNateBlob = null, audioUnlocked = false;
   function speakerEl(){ return document.getElementById('nateSpeaker'); }
-  var tapeRec = null, tapeIndex = 0, tapeCtx = null, tapeDest = null, tapeHooked = false, tapeStarted = false;
-  function hookNateSpeaker(){
-    var a = speakerEl();
-    if (!a || tapeHooked) return;
-    if (!tapeCtx) tapeCtx = new AudioContext();
-    if (!tapeDest) tapeDest = tapeCtx.createMediaStreamDestination();
+  var tapeRec = null, tapeIndex = 0, tapeCtx = null, tapeDest = null, tapeStarted = false, tapeArming = false;
+  var tapeCanvas = null, tapeDrawTimer = null, tapeSources = {}, unlockOnce = false;
+  function hookShowAudio(el){
+    if (!el || el._tapeHooked || !tapeCtx || !tapeDest) return;
     try {
-      var src = tapeCtx.createMediaElementSource(a);
+      var src = tapeCtx.createMediaElementSource(el);
       src.connect(tapeDest);
       src.connect(tapeCtx.destination);
-      tapeHooked = true;
+      el._tapeHooked = true;
     } catch (e) {}
+  }
+  function hookNateSpeaker(){
+    hookShowAudio(speakerEl());
+    hookShowAudio(document.getElementById('nateThinker'));
+  }
+  function mixTrack(id, mst){
+    if (!tapeCtx || !tapeDest || !mst) return;
+    var prev = tapeSources[id];
+    if (prev && prev.track === mst) return;
+    if (prev) { try { prev.node.disconnect(); } catch (e) {} }
+    try {
+      var node = tapeCtx.createMediaStreamSource(new MediaStream([mst]));
+      node.connect(tapeDest);
+      tapeSources[id] = {node: node, track: mst};
+    } catch (e2) {}
+  }
+  function mixShowAudio(){
+    if (!tapeCtx || !tapeDest) return;
+    rememberLocalMic();
+    Object.keys(audioTracks).forEach(function(k){
+      mixTrack('aud:' + k, audioTracks[k]);
+    });
+  }
+  function mediaSize(el){
+    if (!el) return [0, 0];
+    return [el.videoWidth || el.naturalWidth || el.width || 0, el.videoHeight || el.naturalHeight || el.height || 0];
+  }
+  function drawTile(ctx, el, x, y, w, h, mirror, zoom, contain){
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.fillStyle = '#0A0A0A';
+    ctx.fillRect(x, y, w, h);
+    var size = mediaSize(el);
+    var vw = size[0], vh = size[1];
+    if (el && vw && vh) {
+      zoom = (zoom >= 0.5 && zoom <= 2.5) ? zoom : 1;
+      var scale = (contain ? Math.min(w / vw, h / vh) : Math.max(w / vw, h / vh)) * zoom;
+      var dw = vw * scale, dh = vh * scale;
+      var dx = x + (w - dw) / 2;
+      var dy = y + (h - dh) / 2;
+      if (mirror) {
+        ctx.translate(x + w, y);
+        ctx.scale(-1, 1);
+        ctx.translate(-x, -y);
+      }
+      try { ctx.drawImage(el, dx, dy, dw, dh); } catch (e) {}
+    }
+    ctx.restore();
+  }
+  function tileLabel(ctx, text, x, y, w){
+    ctx.fillStyle = 'rgba(5,5,5,0.62)';
+    ctx.fillRect(x, y, w, 26);
+    ctx.fillStyle = '#C9A962';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(text, x + 8, y + 18);
+  }
+  function ensureTapeCanvas(){
+    if (tapeCanvas) return tapeCanvas;
+    tapeCanvas = document.createElement('canvas');
+    tapeCanvas.width = 1280;
+    tapeCanvas.height = 720;
+    tapeCanvas.setAttribute('aria-hidden', 'true');
+    tapeCanvas.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(tapeCanvas);
+    return tapeCanvas;
+  }
+  function paintTapeFrame(){
+    var c = ensureTapeCanvas();
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, c.width, c.height);
+    var pad = 12, gap = 10, railW = 240;
+    var hosts = document.getElementById('hosts');
+    var sharing = !!(hosts && hosts.classList.contains('sharing'));
+    var cols = sharing ? 3 : 2;
+    var stageW = c.width - pad * 2 - railW - gap;
+    var stageH = c.height - pad * 2;
+    var tileW = (stageW - gap * (cols - 1)) / cols;
+    var hostEl = document.querySelector('#hostBox video') || document.getElementById('hostVid');
+    drawTile(ctx, hostEl, pad, pad, tileW, stageH, !!hostMirror, hostZoom || 1, false);
+    tileLabel(ctx, 'HOST', pad, pad, tileW);
+    var nx = pad + tileW + gap;
+    var nateDoc = null;
+    try { nateDoc = document.getElementById('lnAvatar').contentDocument; } catch (e) {}
+    if (nateDoc) {
+      drawTile(ctx, nateDoc.getElementById('world'), nx, pad, tileW, stageH, false, 1, false);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(nx, pad, tileW, stageH);
+      ctx.clip();
+      var face = nateDoc.getElementById('face');
+      var fs = mediaSize(face);
+      if (face && fs[0] && fs[1]) {
+        try { ctx.drawImage(face, nx, pad, tileW, stageH); } catch (e2) {}
+      }
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#111';
+      ctx.fillRect(nx, pad, tileW, stageH);
+    }
+    tileLabel(ctx, 'LITTLE NATE', nx, pad, tileW);
+    if (sharing) {
+      var sx = nx + tileW + gap;
+      var shareEl = document.querySelector('#shareBox img.share-img')
+        || document.querySelector('#shareBox canvas.share-still')
+        || document.getElementById('shareVid');
+      drawTile(ctx, shareEl, sx, pad, tileW, stageH, false, 1, true);
+      tileLabel(ctx, 'ON SCREEN', sx, pad, tileW);
+    }
+    var rx = pad + stageW + gap;
+    ctx.fillStyle = '#111';
+    ctx.fillRect(rx, pad, railW, stageH);
+    var caller = document.querySelector('#activeMedia video');
+    if (caller) drawTile(ctx, caller, rx + 8, pad + 34, railW - 16, 200, false, 1, false);
+    var nameEl = document.getElementById('activeName');
+    tileLabel(ctx, 'CALLER', rx, pad, railW);
+    ctx.fillStyle = '#E8D5A3';
+    ctx.font = '14px sans-serif';
+    ctx.fillText((nameEl && nameEl.textContent) ? nameEl.textContent.slice(0, 22) : 'No one on air', rx + 8, pad + 260);
   }
   function uploadTapePart(blob){
     if (guest || !blob || !blob.size || !cfg.session || !cfg.token) return;
@@ -735,45 +862,48 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     }).catch(function(){});
   }
   function startShowTape(){
-    if (guest || tapeStarted || !room || !window.MediaRecorder) return;
-    hookNateSpeaker();
-    if (tapeCtx && tapeCtx.resume) tapeCtx.resume().catch(function(){});
-    var tracks = [];
-    var video = null;
-    if (programStream && programStream.getVideoTracks) video = programStream.getVideoTracks()[0];
-    if (!video && room.localParticipant && room.localParticipant.videoTrackPublications){
-      room.localParticipant.videoTrackPublications.forEach(function(pub){
-        var src = pub && pub.source;
-        var isCam = (typeof LK !== 'undefined' && LK && LK.Track && LK.Track.Source && src === LK.Track.Source.Camera) || src === 'camera';
-        if (isCam && pub.track && pub.track.mediaStreamTrack) video = pub.track.mediaStreamTrack;
-      });
-    }
-    if (video) tracks.push(video);
-    if (room.localParticipant && room.localParticipant.audioTrackPublications){
-      room.localParticipant.audioTrackPublications.forEach(function(pub){
-        if (pub.track && pub.track.mediaStreamTrack && tapeCtx && tapeDest){
-          try {
-            tapeCtx.createMediaStreamSource(new MediaStream([pub.track.mediaStreamTrack])).connect(tapeDest);
-          } catch (e) {}
-        }
-      });
-    }
-    if (tapeDest) tapeDest.stream.getAudioTracks().forEach(function(t){ tracks.push(t); });
-    if (!tracks.length) return;
-    var mime = '';
-    if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
-      mime = 'video/webm;codecs=vp8,opus';
-    else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm'))
-      mime = 'video/webm';
-    try {
-      tapeRec = mime ? new MediaRecorder(new MediaStream(tracks), {mimeType: mime}) : new MediaRecorder(new MediaStream(tracks));
-    } catch (e) { return; }
-    tapeStarted = true;
-    tapeRec.ondataavailable = function(ev){
-      if (ev.data && ev.data.size) uploadTapePart(ev.data);
-    };
-    tapeRec.onstop = function(){ finishShowTape(); };
-    tapeRec.start(4000);
+    if (guest || tapeStarted || tapeArming || !audioUnlocked || !room || !window.MediaRecorder) return;
+    tapeArming = true;
+    if (!tapeCtx) tapeCtx = new AudioContext();
+    if (!tapeDest) tapeDest = tapeCtx.createMediaStreamDestination();
+    var resume = (tapeCtx.resume) ? tapeCtx.resume() : Promise.resolve();
+    resume.then(function(){
+      if (tapeStarted) { tapeArming = false; return; }
+      hookNateSpeaker();
+      mixShowAudio();
+      var canvas = ensureTapeCanvas();
+      paintTapeFrame();
+      if (!tapeDrawTimer) tapeDrawTimer = setInterval(paintTapeFrame, 66);
+      var video = null;
+      try { video = canvas.captureStream(15).getVideoTracks()[0]; } catch (e) {}
+      var tracks = [];
+      if (video) tracks.push(video);
+      var hooked = speakerEl() && speakerEl()._tapeHooked;
+      var haveMix = (tapeCtx && tapeCtx.state === 'running') && (Object.keys(tapeSources).length > 0 || hooked);
+      var mixed = (haveMix && tapeDest) ? tapeDest.stream.getAudioTracks() : [];
+      if (mixed.length) mixed.forEach(function(t){ tracks.push(t); });
+      else if (audioTracks[localId()]) tracks.push(audioTracks[localId()]);
+      if (!tracks.length) { tapeArming = false; return; }
+      var mime = '';
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
+        mime = 'video/webm;codecs=vp8,opus';
+      else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm'))
+        mime = 'video/webm';
+      try {
+        tapeRec = mime ? new MediaRecorder(new MediaStream(tracks), {mimeType: mime}) : new MediaRecorder(new MediaStream(tracks));
+      } catch (err) { tapeArming = false; return; }
+      tapeStarted = true;
+      tapeArming = false;
+      tapeRec.ondataavailable = function(ev){
+        if (ev.data && ev.data.size) uploadTapePart(ev.data);
+      };
+      tapeRec.onstop = function(){
+        if (tapeDrawTimer) { clearInterval(tapeDrawTimer); tapeDrawTimer = null; }
+        finishShowTape();
+      };
+      tapeRec.start(4000);
+      setStatus('Tape is recording this window, with the microphone and Little Nate.');
+    }).catch(function(){ tapeArming = false; });
   }
   var programStream = null, programAsked = false, chosenMic = '', chosenCam = '', deviceFill = false;
   function micConstraints(){
@@ -898,23 +1028,33 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   }
   function unlockAudio(){
-    askProgramCapture();
-    audioUnlocked = true;
-    hookNateSpeaker();
-    if (tapeCtx && tapeCtx.resume) tapeCtx.resume().catch(function(){});
-    var a = speakerEl();
-    if (a){ a.muted = false; a.volume = 1; }
-    if (pendingNateBlob){
-      var b = pendingNateBlob;
-      pendingNateBlob = null;
-      pendingNate = '';
-      var gen = ++speakGen;
-      nateSpeaking = true;
-      lnAvatar('warm');
-      playNateBlob(b, gen);
+    if (unlockOnce) {
+      if (tapeCtx && tapeCtx.resume) tapeCtx.resume().catch(function(){});
+      if (!tapeStarted) startShowTape();
       return;
     }
-    if (pendingNate){ var t = pendingNate; pendingNate = ''; speakNate(t); }
+    unlockOnce = true;
+    audioUnlocked = true;
+    if (!tapeCtx) tapeCtx = new AudioContext();
+    if (!tapeDest) tapeDest = tapeCtx.createMediaStreamDestination();
+    var resume = tapeCtx.resume ? tapeCtx.resume() : Promise.resolve();
+    resume.then(function(){
+      hookNateSpeaker();
+      startShowTape();
+      var a = speakerEl();
+      if (a){ a.muted = false; a.volume = 1; }
+      if (pendingNateBlob){
+        var b = pendingNateBlob;
+        pendingNateBlob = null;
+        pendingNate = '';
+        var gen = ++speakGen;
+        nateSpeaking = true;
+        lnAvatar('warm');
+        playNateBlob(b, gen);
+        return;
+      }
+      if (pendingNate){ var t = pendingNate; pendingNate = ''; speakNate(t); }
+    }).catch(function(){});
   }
   document.addEventListener('pointerdown', unlockAudio, true);
   document.addEventListener('keydown', unlockAudio, true);
@@ -995,7 +1135,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   try {
     hostMirror = localStorage.getItem('studioHostMirror') === '1';
     var savedZoom = parseFloat(localStorage.getItem('studioHostZoom') || '1');
-    if (savedZoom >= 1 && savedZoom <= 2.5) hostZoom = savedZoom;
+    if (savedZoom >= 0.5 && savedZoom <= 2.5) hostZoom = savedZoom;
   } catch (e) {}
   function applyHostFrame(){
     var box = document.getElementById('hostBox');
@@ -1069,6 +1209,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (!track || track.kind !== 'audio') return;
     var id = (participant && participant.identity) || 'unknown';
     audioTracks[id] = track.mediaStreamTrack || track;
+    if (tapeCtx && tapeDest) mixTrack('aud:' + id, audioTracks[id]);
   }
   function rememberLocalMic(){
     try {
@@ -1160,7 +1301,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function startCap(id){
     if (guest || lnPaused || !cfg.session || !cfg.token || capRecs[id]) return;
-    if (listenOn && hasSpeechRec() && !hostUsesMicTape() && room && room.localParticipant && id === room.localParticipant.identity) return;
+    if (listenOn && room && room.localParticipant && id === room.localParticipant.identity) return;
     var mst = audioTracks[id];
     if (!mst || !window.MediaRecorder) return;
     var stream = new MediaStream([mst]);
@@ -1816,7 +1957,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     applyHostFrame();
   };
   function nudgeZoom(dir){
-    hostZoom = Math.max(1, Math.min(2.5, Math.round((hostZoom + dir * 0.15) * 100) / 100));
+    hostZoom = Math.max(0.5, Math.min(2.5, Math.round((hostZoom + dir * 0.15) * 100) / 100));
     try { localStorage.setItem('studioHostZoom', String(hostZoom)); } catch (e) {}
     applyHostFrame();
   }
@@ -1987,7 +2128,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         });
       });
     }
-    setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — click once so the tape is this view.');
+    setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — click once so the tape records this window with sound.');
     publishProgram();
     greeted = true;
     if (!guest) startShowTape();
@@ -2005,7 +2146,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
           headers: {'Authorization':'Bearer ' + cfg.token}
         }).then(function(r){ return r.json(); }).then(function(j){
           if (j && (j.started || j.reason === 'already'))
-            setStatus(programStream ? 'Tape is this view.' : 'Tape armed. Click once so it records this view.');
+            setStatus(tapeStarted ? 'Tape is recording this window, with the microphone and Little Nate.' : 'Click once so the tape records this window with sound.');
         }).catch(function(){});
       }, 8000);
     }
@@ -2089,12 +2230,87 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     };
     try { rec.start(); } catch (e) {}
   }
+  function stopTalkMic(){
+    if (talkSliceTimer) { clearTimeout(talkSliceTimer); talkSliceTimer = null; }
+    var recd = talkRec;
+    talkRec = null;
+    try { if (recd && recd.state === 'recording') recd.stop(); } catch (e) {}
+  }
+  function postTalkSlice(blob){
+    if (!listenOn || guest || !cfg.session || !cfg.token || !blob) return;
+    var fd = new FormData();
+    fd.append('file', blob, 'talk.webm');
+    fd.append('speaker', 'host');
+    fd.append('identity', (room && room.localParticipant && room.localParticipant.identity) || '');
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/cohost/caption', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      body: fd
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if (!listenOn || !j || !j.ok || !j.text) return;
+      var piece = (j.text || '').replace(/\s+/g, ' ').trim();
+      if (piece.length < 2) return;
+      listenBuf = (listenBuf + ' ' + piece).replace(/\s+/g, ' ').trim();
+      listenInterim = '';
+      lastHeard = listenBuf;
+      if (nateSpeaking && !apologyPlaying) yieldForSpeaker();
+      else if (stillYielding()) yieldQuietUntil = Date.now() + LISTEN_HOLD_MS;
+      armListenCommit();
+    }).catch(function(){});
+  }
+  function startTalkMic(){
+    // Safari captions the host mic on the default device. Talk records the Mic menu track.
+    if (!listenOn || guest) return;
+    if (!room || !room.localParticipant) {
+      setStatus('Talk needs the live microphone. Unmute, then tap Talk.');
+      return;
+    }
+    rememberLocalMic();
+    var id = room.localParticipant.identity;
+    var mst = audioTracks[id];
+    if (!mst || mst.readyState === 'ended') {
+      setStatus('Talk cannot hear the Mic menu. Pick the Mac microphone, then tap Talk.');
+      return;
+    }
+    stopCap(id);
+    var stream = new MediaStream([mst]);
+    var mime = '';
+    try {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mime = 'audio/webm;codecs=opus';
+      else if (MediaRecorder.isTypeSupported('audio/webm')) mime = 'audio/webm';
+    } catch (e) {}
+    var recd;
+    try { recd = mime ? new MediaRecorder(stream, {mimeType: mime}) : new MediaRecorder(stream); }
+    catch (e) {
+      setStatus('Talk could not open this microphone. Type the line.');
+      return;
+    }
+    talkRec = recd;
+    recd.ondataavailable = function(ev){
+      if (!listenOn || !ev.data || ev.data.size < 400) return;
+      postTalkSlice(ev.data);
+    };
+    recd.onstop = function(){
+      if (talkRec === recd) talkRec = null;
+      if (listenOn) startTalkMic();
+    };
+    try { recd.start(); }
+    catch (e) {
+      talkRec = null;
+      setStatus('Talk could not open this microphone. Type the line.');
+      return;
+    }
+    talkSliceTimer = setTimeout(function(){
+      talkSliceTimer = null;
+      try { if (recd.state === 'recording') recd.stop(); } catch (e2) {}
+    }, 2000);
+  }
   document.getElementById('btnTalk').onclick = function(){
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var btn = this;
     if (listenOn){
       listenOn = false;
       if (listenTimer) { clearTimeout(listenTimer); listenTimer = null; }
+      stopTalkMic();
       try { if (rec) rec.stop(); } catch (e) {}
       rec = null;
       btn.classList.remove('on');
@@ -2105,11 +2321,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     listenBuf = '';
     btn.classList.add('on');
     btn.textContent = 'Listening';
+    if (!guest) {
+      setStatus('Talk is on the Mic menu selection.');
+      startTalkMic();
+      return;
+    }
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR){
       if (room && room.localParticipant) stopCap(room.localParticipant.identity);
       startListenRec(btn);
     } else {
-      setStatus('Talk on — Safari captions the host mic. Type if you need a typed line.');
+      setStatus('Talk on — type if you need a typed line.');
       if (room && room.localParticipant) startCap(room.localParticipant.identity);
     }
   };

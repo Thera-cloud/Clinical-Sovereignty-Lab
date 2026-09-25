@@ -247,6 +247,53 @@ async def resolve_flag(
     return {"ok": True, "status": "overridden"}
 
 
+async def _landing_tapes(db_pool, show_id: str) -> list:
+    """Sessions whose tape is still arriving, before an Edit row exists."""
+    from app.services.studio_media_tape import tape_coach_status, tape_slice_progress
+
+    if not db_pool:
+        return []
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT s.id, s.state, sh.name
+            FROM studio_sessions s
+            JOIN studio_shows sh ON sh.id = s.show_id
+            WHERE s.show_id = $1::uuid
+              AND s.started_at > NOW() - INTERVAL '8 hours'
+              AND COALESCE(s.media_ready, FALSE) = FALSE
+              AND NOT EXISTS (
+                SELECT 1 FROM studio_episodes e WHERE e.session_id = s.id
+              )
+              AND s.state IN ('active', 'ended')
+            ORDER BY s.started_at DESC
+            LIMIT 5
+            """,
+            show_id,
+        )
+    landing = []
+    for row in rows:
+        prog = tape_slice_progress(str(row["id"]))
+        status = tape_coach_status(
+            media_ready=False,
+            parts=int(prog["parts"]),
+            session_state=str(row["state"] or ""),
+        )
+        if status == "none":
+            continue
+        landing.append(
+            {
+                "session_id": str(row["id"]),
+                "state": row["state"],
+                "title": f"{row['name']} session",
+                "tape_status": status,
+                "tape_parts": int(prog["parts"]),
+                "tape_bytes": int(prog["bytes"]),
+            }
+        )
+    return landing
+
+
 async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
     if not db_pool:
         return {"ok": False, "episodes": [], "code": 503}
@@ -260,9 +307,10 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
             return {"ok": False, "reason": "not_found", "code": 404}
         rows = await conn.fetch(
             """
-            SELECT e.id, e.state, e.title, e.created_at, e.cuts_json,
+            SELECT e.id, e.session_id, e.state, e.title, e.created_at, e.cuts_json,
                    e.media_r2_key, e.media_cut_r2_key, e.youtube_video_id,
                    COALESCE(sess.media_ready, FALSE) AS media_ready,
+                   COALESCE(sess.state, '') AS session_state,
               (SELECT COUNT(*) FROM studio_compliance_flags f
                 WHERE f.episode_id = e.id AND f.status = 'open') AS open_flags
             FROM studio_episodes e
@@ -273,7 +321,12 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
             """,
             show_id,
         )
-    from app.services.studio_media_tape import tape_play_url, tape_removed_marker
+    from app.services.studio_media_tape import (
+        tape_coach_status,
+        tape_play_url,
+        tape_removed_marker,
+        tape_slice_progress,
+    )
 
     episodes = []
     for r in rows:
@@ -286,6 +339,13 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
         if tape_removed_marker(cuts):
             continue
         key = (r.get("media_cut_r2_key") or r.get("media_r2_key") or "").strip()
+        ready = bool(r.get("media_ready"))
+        prog = tape_slice_progress(str(r.get("session_id") or ""))
+        status = tape_coach_status(
+            media_ready=ready,
+            parts=int(prog["parts"]),
+            session_state=str(r.get("session_state") or ""),
+        )
         episodes.append(
             {
                 "id": str(r["id"]),
@@ -294,13 +354,17 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
                 "open_flags": int(r["open_flags"] or 0),
                 "media_r2_key": r.get("media_r2_key") or "",
                 "media_cut_r2_key": r.get("media_cut_r2_key") or "",
-                "media_ready": bool(r.get("media_ready")),
+                "media_ready": ready,
+                "tape_status": status,
+                "tape_parts": int(prog["parts"]),
+                "tape_bytes": int(prog["bytes"]),
                 "youtube_video_id": r.get("youtube_video_id") or "",
                 "cuts": cuts if isinstance(cuts, list) else [],
-                "tape_url": tape_play_url(key),
+                "tape_url": tape_play_url(key) if ready else "",
             }
         )
-    return {"ok": True, "episodes": episodes}
+    landing = await _landing_tapes(db_pool, show_id)
+    return {"ok": True, "episodes": episodes, "landing": landing}
 
 
 async def create_from_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]:

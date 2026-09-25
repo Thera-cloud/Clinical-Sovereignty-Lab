@@ -75,6 +75,38 @@ def _num(raw: Any) -> Optional[float]:
         return None
 
 
+def tape_slice_progress(session_id: str) -> Dict[str, int]:
+    """How much of the live room recording is already on this server."""
+    folder = _tape_dir(session_id)
+    parts = 0
+    total = 0
+    if not folder.is_dir():
+        return {"parts": 0, "bytes": 0}
+    try:
+        for path in folder.glob("*.bin"):
+            parts += 1
+            try:
+                total += path.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        return {"parts": 0, "bytes": 0}
+    return {"parts": parts, "bytes": total}
+
+
+def tape_coach_status(*, media_ready: bool, parts: int, session_state: str) -> str:
+    """What EDIT should say. Uploading stays visible until the file is ready."""
+    if media_ready:
+        return "ready"
+    if parts > 0:
+        return "uploading"
+    if (session_state or "") == "active":
+        return "waiting"
+    if (session_state or "") == "ended":
+        return "missed"
+    return "none"
+
+
 def tape_play_url(key: str, expires_in: int = 3600) -> str:
     """Presigned R2 GET for coach review player. Empty when R2/key missing."""
     path = (key or "").strip()
