@@ -18,11 +18,46 @@ _MAX_WINDOW_S = 3600.0
 _MAX_TOTAL_S = 7200.0
 _MAX_DOWNLOAD_B = 400_000_000
 
+STORYBOARD_SLOTS: Tuple[Dict[str, Any], ...] = (
+    {"id": 1, "slot": "intro", "label": "Podcast Intro", "max_s": 20.0, "kind": "video"},
+    {"id": 2, "slot": "hook", "label": "Hook Video", "max_s": 30.0, "kind": "video"},
+    {"id": 3, "slot": "topic1", "label": "Topic 1", "max_s": 330.0, "kind": "video"},
+    {"id": 4, "slot": "commercial", "label": "Commercial Plug", "max_s": 120.0, "kind": "mixed"},
+    {"id": 5, "slot": "topic2", "label": "Topic 2", "max_s": 330.0, "kind": "video"},
+    {"id": 6, "slot": "closing", "label": "Closing Plug", "max_s": 120.0, "kind": "mixed"},
+    {"id": 7, "slot": "credential", "label": "Credential Video", "max_s": 60.0, "kind": "video"},
+)
+
+
+def storyboard_blueprint() -> List[Dict[str, Any]]:
+    return [dict(row) for row in STORYBOARD_SLOTS]
+
+
+def edited_title(title: str) -> str:
+    raw = (title or "").strip() or "Episode"
+    if "(Edited Version)" in raw:
+        return raw
+    return f"{raw} (Edited Version)"
+
+
+def clip_fits_slot(duration_s: float, max_s: float) -> bool:
+    return duration_s > 0.04 and duration_s <= (float(max_s) + 0.08)
+
 
 def parse_cut_windows(cuts: Any) -> List[Tuple[float, float]]:
     out: List[Tuple[float, float]] = []
     if not cuts:
         return out
+    if isinstance(cuts, dict):
+        if cuts.get("removed"):
+            return out
+        nested = (
+            cuts.get("storyboard")
+            or cuts.get("windows")
+            or cuts.get("slots")
+            or cuts.get("cuts")
+        )
+        return parse_cut_windows(nested)
     if isinstance(cuts, str):
         parts = [p.strip() for p in cuts.split(",") if p.strip()]
         parsed: List[Any] = []
@@ -39,19 +74,24 @@ def parse_cut_windows(cuts: Any) -> List[Tuple[float, float]]:
         if isinstance(item, (list, tuple)) and len(item) >= 2:
             start, end = _num(item[0]), _num(item[1])
         elif isinstance(item, dict):
+            clip = item.get("clip") if isinstance(item.get("clip"), dict) else item
             start = _num(
-                item.get("start_s")
-                if item.get("start_s") is not None
-                else item.get("start")
-                if item.get("start") is not None
-                else item.get("start_sec")
+                clip.get("start_s")
+                if clip.get("start_s") is not None
+                else clip.get("start")
+                if clip.get("start") is not None
+                else clip.get("start_sec")
+                if clip.get("start_sec") is not None
+                else clip.get("startTime")
             )
             end = _num(
-                item.get("end_s")
-                if item.get("end_s") is not None
-                else item.get("end")
-                if item.get("end") is not None
-                else item.get("end_sec")
+                clip.get("end_s")
+                if clip.get("end_s") is not None
+                else clip.get("end")
+                if clip.get("end") is not None
+                else clip.get("end_sec")
+                if clip.get("end_sec") is not None
+                else clip.get("endTime")
             )
         if start is None or end is None:
             continue
@@ -274,6 +314,111 @@ def tape_removed_marker(cuts: Any) -> bool:
     return isinstance(cuts, dict) and cuts.get("removed") is True
 
 
+def slot_spec(slot_id: Any) -> Optional[Dict[str, Any]]:
+    try:
+        sid = int(slot_id)
+    except (TypeError, ValueError):
+        sid = 0
+    for row in STORYBOARD_SLOTS:
+        if int(row["id"]) == sid or str(row["slot"]) == str(slot_id):
+            return dict(row)
+    return None
+
+
+def normalize_storyboard(raw: Any) -> Tuple[List[Dict[str, Any]], str]:
+    """Seven slots. Empty clips stay null. Over-length clips are rejected."""
+    incoming: List[Any] = []
+    if isinstance(raw, dict):
+        incoming = list(raw.get("storyboard") or raw.get("slots") or [])
+    elif isinstance(raw, list):
+        incoming = list(raw)
+    by_id: Dict[int, Dict[str, Any]] = {}
+    for item in incoming:
+        if not isinstance(item, dict):
+            continue
+        spec = slot_spec(item.get("id") or item.get("slot"))
+        if not spec:
+            continue
+        clip = item.get("clip") if isinstance(item.get("clip"), dict) else item
+        start = _num(
+            clip.get("start_s")
+            if clip.get("start_s") is not None
+            else clip.get("startTime")
+        )
+        end = _num(
+            clip.get("end_s") if clip.get("end_s") is not None else clip.get("endTime")
+        )
+        if start is None or end is None or end <= start:
+            continue
+        duration = end - start
+        if not clip_fits_slot(duration, float(spec["max_s"])):
+            return [], f"slot_{spec['id']}_over_max"
+        source_id = str(clip.get("source_id") or clip.get("sourceMediaId") or "master")
+        by_id[int(spec["id"])] = {
+            "id": int(spec["id"]),
+            "slot": spec["slot"],
+            "label": spec["label"],
+            "max_s": spec["max_s"],
+            "kind": spec["kind"],
+            "clip": {
+                "source_id": source_id,
+                "source_title": str(
+                    clip.get("source_title") or clip.get("sourceTitle") or ""
+                ),
+                "r2_key": str(clip.get("r2_key") or clip.get("r2Key") or ""),
+                "start_s": start,
+                "end_s": end,
+                "duration_s": duration,
+                "audio_id": str(
+                    clip.get("audio_id") or clip.get("backgroundAudioId") or ""
+                ),
+                "audio_r2_key": str(
+                    clip.get("audio_r2_key") or clip.get("backgroundAudioKey") or ""
+                ),
+            },
+        }
+    slots: List[Dict[str, Any]] = []
+    for spec in STORYBOARD_SLOTS:
+        filled = by_id.get(int(spec["id"]))
+        if filled:
+            slots.append(filled)
+        else:
+            slots.append(
+                {
+                    "id": int(spec["id"]),
+                    "slot": spec["slot"],
+                    "label": spec["label"],
+                    "max_s": spec["max_s"],
+                    "kind": spec["kind"],
+                    "clip": None,
+                }
+            )
+    return slots, ""
+
+
+def storyboard_segments(
+    slots: List[Dict[str, Any]], master_key: str
+) -> List[Dict[str, Any]]:
+    segs: List[Dict[str, Any]] = []
+    master = (master_key or "").strip()
+    for slot in slots:
+        clip = slot.get("clip") if isinstance(slot, dict) else None
+        if not isinstance(clip, dict):
+            continue
+        key = (clip.get("r2_key") or "").strip() or master
+        if not key:
+            continue
+        segs.append(
+            {
+                "r2_key": key,
+                "start_s": float(clip["start_s"]),
+                "end_s": float(clip["end_s"]),
+                "audio_key": (clip.get("audio_r2_key") or "").strip(),
+            }
+        )
+    return segs
+
+
 def tape_keys_for_delete(session_id: str, stored: List[str]) -> List[str]:
     """R2 keys this episode may remove. Only studio/{session} objects."""
     from app.services.studio_livekit import session_cut_r2_key, session_media_r2_key
@@ -296,16 +441,26 @@ def tape_keys_for_delete(session_id: str, stored: List[str]) -> List[str]:
 
 
 async def apply_cuts(
-    db_pool, episode_id: str, coach_id: str, cuts: Optional[List[Any]] = None
+    db_pool,
+    episode_id: str,
+    coach_id: str,
+    cuts: Optional[List[Any]] = None,
+    storyboard: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
+    slots: List[Dict[str, Any]] = []
     windows = parse_cut_windows(cuts)
+    if storyboard is not None:
+        slots, err = normalize_storyboard(storyboard)
+        if err:
+            return {"ok": False, "reason": err, "code": 422}
+        windows = parse_cut_windows(slots)
     if not db_pool:
         return {"ok": False, "reason": "no_db", "code": 503}
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             SELECT e.id, e.session_id, e.media_r2_key, e.media_master_r2_key,
-                   e.cuts_json, s.coach_id
+                   e.cuts_json, e.title, s.coach_id
             FROM studio_episodes e
             JOIN studio_shows s ON s.id = e.show_id
             WHERE e.id = $1::uuid AND s.coach_id = $2
@@ -315,6 +470,8 @@ async def apply_cuts(
         )
     if not row:
         return {"ok": False, "reason": "not_found", "code": 404}
+    if tape_removed_marker(row.get("cuts_json")):
+        return {"ok": False, "reason": "tape_deleted", "code": 409}
     if not windows:
         windows = parse_cut_windows(row.get("cuts_json"))
     if not windows:
@@ -332,10 +489,22 @@ async def apply_cuts(
     from app.services.studio_livekit import session_cut_r2_key
 
     dest = session_cut_r2_key(str(row.get("session_id") or episode_id))
-    rendered = await _ffmpeg_cut_r2(master, dest, windows)
+    segs = storyboard_segments(slots, master) if slots else []
+    mixed = bool(segs) and (
+        len({s["r2_key"] for s in segs}) > 1 or any(s.get("audio_key") for s in segs)
+    )
+    if mixed:
+        rendered = await _ffmpeg_storyboard(dest, segs)
+    else:
+        rendered = await _ffmpeg_cut_r2(master, dest, windows)
     if not rendered.get("ok"):
         rendered.setdefault("code", 409)
         return rendered
+    win_payload = [{"start_s": a, "end_s": b} for a, b in windows]
+    payload: Any = (
+        {"storyboard": slots, "windows": win_payload} if slots else win_payload
+    )
+    new_title = edited_title(str(row.get("title") or ""))
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -345,13 +514,15 @@ async def apply_cuts(
                     media_master_r2_key = COALESCE(media_master_r2_key, $3),
                     media_cut_r2_key = $4,
                     media_r2_key = $4,
+                    title = $5,
                     updated_at = NOW()
                 WHERE id = $1::uuid
                 """,
                 episode_id,
-                json.dumps([{"start_s": a, "end_s": b} for a, b in windows]),
+                json.dumps(payload),
                 master,
                 dest,
+                new_title,
             )
     except Exception as exc:
         logger.warning("studio cut stamp failed: %s", exc)
@@ -361,8 +532,50 @@ async def apply_cuts(
         "applied": True,
         "media_r2_key": dest,
         "media_master_r2_key": master,
-        "cuts": [{"start_s": a, "end_s": b} for a, b in windows],
+        "cuts": win_payload,
+        "title": new_title,
+        "storyboard": slots,
     }
+
+
+async def save_storyboard(
+    db_pool, episode_id: str, coach_id: str, storyboard: Optional[List[Any]]
+) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    slots, err = normalize_storyboard(storyboard or [])
+    if err:
+        return {"ok": False, "reason": err, "code": 422}
+    windows = parse_cut_windows(slots)
+    payload = {
+        "storyboard": slots,
+        "windows": [{"start_s": a, "end_s": b} for a, b in windows],
+    }
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.id, e.cuts_json
+            FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        if tape_removed_marker(row.get("cuts_json")):
+            return {"ok": False, "reason": "tape_deleted", "code": 409}
+        await conn.execute(
+            """
+            UPDATE studio_episodes
+            SET cuts_json = $2::jsonb, updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            episode_id,
+            json.dumps(payload),
+        )
+    return {"ok": True, "storyboard": slots, "windows": len(windows)}
 
 
 async def delete_tape(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
@@ -476,6 +689,155 @@ async def _ffmpeg_cut_r2(
             logger.warning("studio cut upload: %s", exc)
             return {"ok": False, "reason": "r2_write_failed"}
     return {"ok": True, "bytes": len(out)}
+
+
+async def _ffmpeg_storyboard(
+    dest_key: str, segments: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    try:
+        from app.services.r2_storage import (
+            download_bytes_async,
+            is_r2_configured,
+            upload_bytes_async,
+        )
+    except Exception as exc:
+        return {"ok": False, "reason": f"r2_import:{exc}"}
+    if not is_r2_configured():
+        return {"ok": False, "reason": "r2_not_configured"}
+    if not segments:
+        return {"ok": False, "reason": "cuts required"}
+    unique = []
+    for seg in segments:
+        key = (seg.get("r2_key") or "").strip()
+        if key and key not in unique:
+            unique.append(key)
+        audio = (seg.get("audio_key") or "").strip()
+        if audio and audio not in unique:
+            unique.append(audio)
+    blobs: Dict[str, bytes] = {}
+    for key in unique:
+        blob = await download_bytes_async(key=key)
+        if not blob or len(blob) < 200:
+            return {"ok": False, "reason": "r2_empty"}
+        if len(blob) > _MAX_DOWNLOAD_B:
+            return {"ok": False, "reason": "tape_too_large", "code": 413}
+        blobs[key] = blob
+    with tempfile.TemporaryDirectory(prefix="studio_sb_") as tmp:
+        local: Dict[str, str] = {}
+        for i, key in enumerate(unique):
+            path = os.path.join(tmp, f"src{i}.bin")
+            Path(path).write_bytes(blobs[key])
+            local[key] = path
+        parts: List[str] = []
+        for i, seg in enumerate(segments):
+            src = local[seg["r2_key"]]
+            part = os.path.join(tmp, f"part{i}.mp4")
+            if not _ffmpeg_one(src, part, float(seg["start_s"]), float(seg["end_s"])):
+                return {"ok": False, "reason": "ffmpeg_failed"}
+            audio = (seg.get("audio_key") or "").strip()
+            if audio and audio in local:
+                mixed = os.path.join(tmp, f"mix{i}.mp4")
+                if _ffmpeg_overlay_audio(part, local[audio], mixed):
+                    part = mixed
+            parts.append(part)
+        dest = os.path.join(tmp, "cut.mp4")
+        lst = os.path.join(tmp, "concat.txt")
+        Path(lst).write_text("".join(f"file '{p}'\n" for p in parts), encoding="utf-8")
+        if not _ffmpeg_concat_list(lst, dest):
+            return {"ok": False, "reason": "ffmpeg_failed"}
+        out = Path(dest).read_bytes()
+        if len(out) < 200:
+            return {"ok": False, "reason": "cut_empty"}
+        try:
+            await upload_bytes_async(key=dest_key, content=out, content_type="video/mp4")
+        except Exception as exc:
+            logger.warning("studio storyboard upload: %s", exc)
+            return {"ok": False, "reason": "r2_write_failed"}
+    return {"ok": True, "bytes": len(out)}
+
+
+def _ffmpeg_overlay_audio(video: str, audio: str, dest: str) -> bool:
+    mix = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        video,
+        "-i",
+        audio,
+        "-filter_complex",
+        "[1:a]volume=0.28[a1];[0:a][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]",
+        "-map",
+        "0:v:0",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-ac",
+        "2",
+        "-shortest",
+        dest,
+    ]
+    try:
+        proc = subprocess.run(mix, capture_output=True, timeout=180)
+        if proc.returncode == 0 and os.path.isfile(dest) and os.path.getsize(dest) > 200:
+            return True
+        replace = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            video,
+            "-i",
+            audio,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-shortest",
+            dest,
+        ]
+        proc2 = subprocess.run(replace, capture_output=True, timeout=180)
+        return proc2.returncode == 0 and os.path.isfile(dest) and os.path.getsize(dest) > 200
+    except Exception as exc:
+        logger.warning("studio ffmpeg mix: %s", exc)
+        return False
+
+
+def _ffmpeg_concat_list(lst: str, dest: str) -> bool:
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        lst,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-c:a",
+        "aac",
+        dest,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=300)
+        return proc.returncode == 0 and os.path.isfile(dest) and os.path.getsize(dest) > 200
+    except Exception as exc:
+        logger.warning("studio ffmpeg concat mix: %s", exc)
+        return False
 
 
 def _ffmpeg_windows(src: str, dest: str, windows: List[Tuple[float, float]]) -> bool:

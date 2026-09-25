@@ -61,6 +61,7 @@ class SessionCreate(BaseModel):
 
 class CutsBody(BaseModel):
     cuts: Optional[list] = None
+    storyboard: Optional[list] = None
 
 
 class FlagResolveBody(BaseModel):
@@ -554,7 +555,79 @@ async def episode_cuts(
     _flag()
     from app.services.studio_episode_service import add_cuts
 
-    return _raise(await add_cuts(_pool(request), str(episode_id), _hw(user), body.cuts or []))
+    return _raise(await add_cuts(_pool(request), str(episode_id), _hw(user), body.cuts or [], storyboard=body.storyboard))
+
+
+@router.put("/episodes/{episode_id}/storyboard")
+async def episode_storyboard(
+    episode_id: UUID, body: CutsBody, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_media_tape import save_storyboard
+
+    return _raise(
+        await save_storyboard(_pool(request), str(episode_id), _hw(user), body.storyboard or [])
+    )
+
+
+@router.get("/storyboard-slots")
+async def storyboard_slots(user: Dict = Depends(require_coach)):
+    _flag()
+    from app.services.studio_media_tape import storyboard_blueprint
+
+    return {"ok": True, "slots": storyboard_blueprint()}
+
+
+@router.get("/episodes/{episode_id}/assets")
+async def episode_assets_list(
+    episode_id: UUID, request: Request, user: Dict = Depends(require_coach)
+):
+    _flag()
+    from app.services.studio_episode_service import list_episode_assets
+
+    return _raise(await list_episode_assets(_pool(request), str(episode_id), _hw(user)))
+
+
+@router.post("/episodes/{episode_id}/assets")
+async def episode_assets_upload(
+    episode_id: UUID,
+    request: Request,
+    user: Dict = Depends(require_coach),
+    file: UploadFile = File(...),
+    kind: str = Form("video"),
+    title: str = Form(""),
+):
+    _flag()
+    from app.services.studio_episode_service import upload_episode_asset
+
+    raw = await file.read()
+    return _raise(
+        await upload_episode_asset(
+            _pool(request),
+            str(episode_id),
+            _hw(user),
+            filename=file.filename or "clip.bin",
+            content=raw,
+            content_type=file.content_type or "application/octet-stream",
+            kind=kind,
+            title=title or (file.filename or "Clip"),
+        )
+    )
+
+
+@router.delete("/episodes/{episode_id}/assets/{asset_id}")
+async def episode_assets_delete(
+    episode_id: UUID,
+    asset_id: UUID,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
+    _flag()
+    from app.services.studio_episode_service import delete_episode_asset
+
+    return _raise(
+        await delete_episode_asset(_pool(request), str(episode_id), str(asset_id), _hw(user))
+    )
 
 
 @router.post("/episodes/{episode_id}/apply-cuts")
@@ -565,7 +638,13 @@ async def episode_apply_cuts(
     from app.services.studio_media_tape import apply_cuts
 
     return _raise(
-        await apply_cuts(_pool(request), str(episode_id), _hw(user), body.cuts)
+        await apply_cuts(
+            _pool(request),
+            str(episode_id),
+            _hw(user),
+            body.cuts,
+            storyboard=body.storyboard,
+        )
     )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from xml.sax.saxutils import escape
 
 from app.services.studio_invariants import (
@@ -58,6 +58,8 @@ async def get_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]
     episode = _ep(row)
     if fresh:
         episode["transcript"] = fresh
+    assets = await list_episode_assets(db_pool, episode_id, coach_id)
+    episode["assets"] = assets.get("assets") if assets.get("ok") else []
     return {"ok": True, "episode": episode, "flags": [_flag(f) for f in flags]}
 
 
@@ -170,8 +172,16 @@ async def reject_episode(db_pool, episode_id: str, coach_id: str) -> Dict[str, A
 
 
 async def add_cuts(
-    db_pool, episode_id: str, coach_id: str, cuts: List[Any]
+    db_pool,
+    episode_id: str,
+    coach_id: str,
+    cuts: Optional[List[Any]] = None,
+    storyboard: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
+    if storyboard is not None:
+        from app.services.studio_media_tape import save_storyboard
+
+        return await save_storyboard(db_pool, episode_id, coach_id, storyboard)
     if not cuts:
         return {"ok": False, "reason": "cuts required", "code": 422}
     if not db_pool:
@@ -349,18 +359,22 @@ async def list_episodes(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
         episodes.append(
             {
                 "id": str(r["id"]),
+                "session_id": str(r.get("session_id") or ""),
                 "state": r["state"],
                 "title": r["title"],
                 "open_flags": int(r["open_flags"] or 0),
                 "media_r2_key": r.get("media_r2_key") or "",
                 "media_cut_r2_key": r.get("media_cut_r2_key") or "",
+                "media_master_r2_key": r.get("media_master_r2_key") or "",
                 "media_ready": ready,
                 "tape_status": status,
                 "tape_parts": int(prog["parts"]),
                 "tape_bytes": int(prog["bytes"]),
                 "youtube_video_id": r.get("youtube_video_id") or "",
-                "cuts": cuts if isinstance(cuts, list) else [],
+                "cuts": _cut_windows(cuts),
+                "storyboard": _storyboard_from_cuts(cuts),
                 "tape_url": tape_play_url(key) if ready else "",
+                "master_tape_url": _master_url(r) if ready else "",
             }
         )
     landing = await _landing_tapes(db_pool, show_id)
@@ -645,6 +659,7 @@ def _ep(row) -> Dict[str, Any]:
     return {
         "id": str(row["id"]),
         "show_id": str(row["show_id"]),
+        "session_id": str(row.get("session_id") or ""),
         "state": row["state"],
         "title": row.get("title"),
         "approved_by": row.get("approved_by"),
@@ -653,9 +668,24 @@ def _ep(row) -> Dict[str, Any]:
         "media_master_r2_key": row.get("media_master_r2_key") or "",
         "media_cut_r2_key": row.get("media_cut_r2_key") or "",
         "youtube_video_id": row.get("youtube_video_id") or "",
-        "cuts": cuts if isinstance(cuts, list) else [],
+        "cuts": _cut_windows(cuts),
+        "storyboard": _storyboard_from_cuts(cuts),
         "tape_url": _tape_url(row),
+        "master_tape_url": _master_url(row),
     }
+
+
+def _cut_windows(cuts: Any) -> List[Dict[str, Any]]:
+    from app.services.studio_media_tape import parse_cut_windows
+
+    return [{"start_s": a, "end_s": b} for a, b in parse_cut_windows(cuts)]
+
+
+def _storyboard_from_cuts(cuts: Any) -> List[Dict[str, Any]]:
+    from app.services.studio_media_tape import normalize_storyboard
+
+    slots, _err = normalize_storyboard(cuts if isinstance(cuts, (dict, list)) else [])
+    return slots
 
 
 def _tape_url(row) -> str:
@@ -668,6 +698,187 @@ def _tape_url(row) -> str:
         or ""
     )
     return tape_play_url(str(key))
+
+
+def _master_url(row) -> str:
+    from app.services.studio_media_tape import tape_play_url
+
+    master = (row.get("media_master_r2_key") or "").strip()
+    if master:
+        return tape_play_url(master)
+    cut = (row.get("media_cut_r2_key") or "").strip()
+    raw = (row.get("media_r2_key") or "").strip()
+    if cut and raw == cut:
+        return tape_play_url(raw)
+    return tape_play_url(raw)
+
+
+_ASSET_KINDS = {"video", "audio", "b-roll", "commercial"}
+_MAX_ASSET_B = 80_000_000
+
+
+def _asset_row(row, play_url: str = "") -> Dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "title": row.get("title") or "",
+        "kind": row.get("kind") or "video",
+        "r2_key": row.get("r2_key") or "",
+        "content_type": row.get("content_type") or "",
+        "bytes": int(row.get("bytes") or 0),
+        "duration_s": float(row["duration_s"]) if row.get("duration_s") is not None else None,
+        "url": play_url,
+        "created_at": str(row.get("created_at") or ""),
+    }
+
+
+async def list_episode_assets(db_pool, episode_id: str, coach_id: str) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503, "assets": []}
+    from app.services.studio_media_tape import tape_play_url
+
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT a.*
+                FROM studio_episode_assets a
+                JOIN studio_episodes e ON e.id = a.episode_id
+                JOIN studio_shows s ON s.id = e.show_id
+                WHERE a.episode_id = $1::uuid AND s.coach_id = $2
+                ORDER BY a.created_at ASC
+                """,
+                episode_id,
+                coach_id,
+            )
+    except Exception as exc:
+        logger.warning("studio assets list: %s", exc)
+        return {"ok": True, "assets": []}
+    return {
+        "ok": True,
+        "assets": [_asset_row(r, tape_play_url(str(r.get("r2_key") or ""))) for r in rows],
+    }
+
+
+async def upload_episode_asset(
+    db_pool,
+    episode_id: str,
+    coach_id: str,
+    *,
+    filename: str,
+    content: bytes,
+    content_type: str,
+    kind: str,
+    title: str,
+    duration_s: Optional[float] = None,
+) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    if not content or len(content) < 200:
+        return {"ok": False, "reason": "empty_file", "code": 422}
+    if len(content) > _MAX_ASSET_B:
+        return {"ok": False, "reason": "file_too_large", "code": 413}
+    kind = (kind or "video").strip().lower()
+    if kind not in _ASSET_KINDS:
+        if (content_type or "").startswith("audio/"):
+            kind = "audio"
+        else:
+            kind = "video"
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.id, e.session_id
+            FROM studio_episodes e
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE e.id = $1::uuid AND s.coach_id = $2
+            """,
+            episode_id,
+            coach_id,
+        )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        session_id = str(row.get("session_id") or episode_id)
+        ext = "mp4"
+        name = (filename or "clip").lower()
+        for cand in ("webm", "mov", "mp3", "wav", "m4a", "aac", "ogg", "mp4"):
+            if name.endswith("." + cand):
+                ext = cand
+                break
+        if kind == "audio" and ext in ("mp4", "webm", "mov"):
+            ext = "mp3"
+        import uuid as _uuid
+
+        asset_id = str(_uuid.uuid4())
+        r2_key = f"studio/{session_id}/assets/{asset_id}.{ext}"
+        try:
+            from app.services.r2_storage import upload_bytes_async
+
+            await upload_bytes_async(
+                key=r2_key,
+                content=content,
+                content_type=content_type or "application/octet-stream",
+            )
+        except Exception as exc:
+            logger.warning("studio asset upload: %s", exc)
+            return {"ok": False, "reason": "r2_write_failed", "code": 500}
+        try:
+            saved = await conn.fetchrow(
+                """
+                INSERT INTO studio_episode_assets
+                    (id, episode_id, session_id, coach_id, title, kind, r2_key,
+                     content_type, bytes, duration_s)
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING *
+                """,
+                asset_id,
+                episode_id,
+                session_id if session_id else None,
+                coach_id,
+                (title or filename or "Clip").strip()[:180],
+                kind,
+                r2_key,
+                content_type or "application/octet-stream",
+                len(content),
+                duration_s,
+            )
+        except Exception as exc:
+            logger.warning("studio asset insert: %s", exc)
+            return {"ok": False, "reason": "asset_table", "code": 503}
+    from app.services.studio_media_tape import tape_play_url
+
+    return {"ok": True, "asset": _asset_row(saved, tape_play_url(r2_key))}
+
+
+async def delete_episode_asset(
+    db_pool, episode_id: str, asset_id: str, coach_id: str
+) -> Dict[str, Any]:
+    if not db_pool:
+        return {"ok": False, "reason": "no_db", "code": 503}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT a.id, a.r2_key
+            FROM studio_episode_assets a
+            JOIN studio_episodes e ON e.id = a.episode_id
+            JOIN studio_shows s ON s.id = e.show_id
+            WHERE a.id = $1::uuid AND a.episode_id = $2::uuid AND s.coach_id = $3
+            """,
+            asset_id,
+            episode_id,
+            coach_id,
+        )
+        if not row:
+            return {"ok": False, "reason": "not_found", "code": 404}
+        await conn.execute(
+            "DELETE FROM studio_episode_assets WHERE id = $1::uuid",
+            asset_id,
+        )
+    try:
+        from app.services.r2_storage import delete_object
+
+        delete_object(key=str(row.get("r2_key") or ""))
+    except Exception:
+        pass
+    return {"ok": True, "deleted": True}
 
 
 def _flag(row) -> Dict[str, Any]:

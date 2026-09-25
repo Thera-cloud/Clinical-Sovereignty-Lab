@@ -12,6 +12,7 @@ import '../services/coach_web_recorder.dart';
 import '../services/studio_livekit_room.dart';
 import '../services/studio_part_player.dart';
 import 'coach_studio_persona_tools.dart';
+import 'coach_studio_podcast_editor.dart';
 
 const _lnLabel = 'Little Nate (co-host)';
 const _verticals = <String>[
@@ -92,6 +93,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   final List<_KeepRange> _keepRows = [];
   String _editEid = '';
   String _tapeUrl = '';
+  bool _podcastEditor = false;
+  Map<String, dynamic>? _editEpisode;
   Timer? _tick;
   Timer? _egressRetry;
   Timer? _callerPoll;
@@ -194,12 +197,15 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
     }
   }
 
-  Future<void> _openEditor(Map<String, dynamic> episode) async {
+  Future<void> _openEditor(Map<String, dynamic> episode,
+      {bool board = true}) async {
     final eid = (episode['id'] ?? '').toString();
     if (eid.isEmpty) return;
     _editEid = eid;
     _tapeUrl = (episode['tape_url'] ?? '').toString();
     _loadCuts(episode['cuts']);
+    _editEpisode = Map<String, dynamic>.from(episode);
+    _podcastEditor = board;
     setState(() {});
     try {
       final r = await http.get(
@@ -214,6 +220,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
           List<Map<String, dynamic>>.from((j['flags'] ?? []) as List);
       final url = (ep['tape_url'] ?? '').toString();
       if (url.isNotEmpty) _tapeUrl = url;
+      _editEpisode = ep;
+      _podcastEditor = board;
       setState(() {});
     } catch (_) {}
     _studioTabs.animateTo(2);
@@ -1074,11 +1082,21 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
         _editEid = '';
         _tapeUrl = '';
         _episodeFlags = [];
+        _podcastEditor = false;
+        _editEpisode = null;
       }
     });
   }
 
   Future<void> _applyCuts(String eid) async {
+    Map<String, dynamic>? match;
+    for (final e in _episodes) {
+      if ((e['id'] ?? '').toString() == eid) match = e;
+    }
+    if (match != null) {
+      await _openEditor(match, board: true);
+      return;
+    }
     var cuts = _cutsFromKeepRows();
     if (cuts.isEmpty) cuts = _parseCuts(_cutsCtrl.text);
     if (cuts.isEmpty) {
@@ -1776,6 +1794,19 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
   }
 
   Widget _editPane() {
+    if (_podcastEditor && _editEpisode != null) {
+      return CoachStudioPodcastEditor(
+        token: widget.token,
+        episode: _editEpisode!,
+        onBack: () {
+          setState(() {
+            _podcastEditor = false;
+          });
+          _refresh();
+        },
+        onRefresh: _refresh,
+      );
+    }
     return ListView(
       padding: const EdgeInsets.only(top: 12),
       children: [
@@ -1783,8 +1814,8 @@ class _CoachSovereignStudioTabState extends State<CoachSovereignStudioTab>
             style: TextStyle(color: _gold, fontSize: 11, letterSpacing: 1)),
         const SizedBox(height: 6),
         const Text(
-          'Keep-ranges stay. FFmpeg concatenates them into studio/{session}/cut.mp4. '
-          'Watch the tape, add start/end seconds, then Apply cuts.',
+          'Apply Cuts opens the 7-slot editor. The uncut master stays pinned. '
+          'Approve & Publish Cut writes studio/{session}/cut.mp4 without replacing the original tape.',
           style: TextStyle(color: _muted, fontSize: 12),
         ),
         const SizedBox(height: 8),

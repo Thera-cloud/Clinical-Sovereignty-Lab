@@ -117,6 +117,67 @@ def test_parse_cut_windows_shapes():
     assert parse_cut_windows([[1, 5]]) == [(1.0, 5.0)]
     assert parse_cut_windows([{"start_s": 10, "end_s": 5}]) == []
     assert parse_cut_windows([]) == []
+    nested = {
+        "storyboard": [
+            {"id": 1, "clip": {"start_s": 1, "end_s": 8, "source_id": "master"}},
+            {"id": 2, "clip": None},
+            {"id": 3, "start_s": 40, "end_s": 70},
+        ]
+    }
+    assert parse_cut_windows(nested) == [(1.0, 8.0), (40.0, 70.0)]
+
+
+def test_storyboard_limits_and_title():
+    slots = _tape.storyboard_blueprint()
+    assert [s["max_s"] for s in slots] == [20.0, 30.0, 330.0, 120.0, 330.0, 120.0, 60.0]
+    assert slots[1]["label"] == "Hook Video"
+    assert _tape.clip_fits_slot(20, 20) is True
+    assert _tape.clip_fits_slot(20.2, 20) is False
+    assert _tape.edited_title("The Moments Between") == "The Moments Between (Edited Version)"
+    filled, err = _tape.normalize_storyboard(
+        [{"id": 1, "start_s": 0, "end_s": 12, "source_title": "Master"}]
+    )
+    assert err == ""
+    assert filled[0]["clip"]["duration_s"] == 12
+    assert filled[1]["clip"] is None
+    over, over_err = _tape.normalize_storyboard([{"id": 1, "start_s": 0, "end_s": 40}])
+    assert over == []
+    assert over_err == "slot_1_over_max"
+
+
+def test_apply_cuts_storyboard_over_max_offline():
+    out = asyncio.run(
+        apply_cuts(
+            None,
+            "ep",
+            "coach",
+            storyboard=[{"id": 1, "start_s": 0, "end_s": 99}],
+        )
+    )
+    assert out["ok"] is False
+    assert out["code"] == 422
+    assert "over_max" in str(out.get("reason") or "")
+
+
+def test_migration_443_and_editor_ui():
+    sql = (ROOT / "backend/migrations/443_studio_episode_assets.sql").read_text()
+    assert "studio_episode_assets" in sql
+    src = (ROOT / "backend/app/routers/sovereign_studio_api.py").read_text()
+    assert "storyboard-slots" in src
+    assert "/episodes/{episode_id}/assets" in src
+    dart = (ROOT / "mobile/lib/widgets/coach_studio_podcast_editor.dart").read_text()
+    assert "Uncut Master Tape" in dart
+    assert "Approve & Publish Cut" in dart
+    assert "Add to Storyboard" in dart
+    assert "ADJUST PLACED CLIP" in dart
+    assert "Publish Successful!" in dart
+    assert "Invalid Clip" in dart
+    assert "Stitch Time:" in dart
+    assert "Upload New Media" in dart
+    assert "Return to Dashboard" in dart
+    assert "Hook Video" in dart
+    tab = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
+    assert "CoachStudioPodcastEditor" in tab
 
 
 def test_apply_cuts_offline_no_db():

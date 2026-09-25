@@ -134,6 +134,10 @@ def test_migration_407_and_api_routes():
     dart = (ROOT / "mobile/lib/widgets/coach_sovereign_studio_tab.dart").read_text()
     assert "EPISODE REVIEW" in dart
     assert "Apply cuts" in dart
+    assert "CoachStudioPodcastEditor" in dart
+    editor = (ROOT / "mobile/lib/widgets/coach_studio_podcast_editor.dart").read_text()
+    assert "Podcast Intro" in editor
+    assert "Credential Video" in editor
     assert "tape ready" in dart
     assert "Tab(text: 'EDIT')" in dart
     assert "Add keep range" in dart
