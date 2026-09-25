@@ -1008,7 +1008,9 @@ async def cohost_speak_public(session_id: UUID, body: CohostSpeakBody, request: 
     from app.services.studio_session_service import synthesize_cohost_line
 
     audio = await synthesize_cohost_line(
-        line, voice_router=getattr(request.app.state, "voice_router", None)
+        line,
+        voice_router=getattr(request.app.state, "voice_router", None),
+        session_id=str(session_id),
     )
     if not audio:
         raise HTTPException(502, "tts")

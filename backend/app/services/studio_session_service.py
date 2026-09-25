@@ -556,14 +556,14 @@ async def cohost_turn(
     return {"ok": True, "text": reply, "provider": provider, "toss": bool(toss), "event": kind}
 
 
-async def synthesize_cohost_line(text: str, voice_router=None) -> bytes:
+async def synthesize_cohost_line(text: str, voice_router=None, session_id: str = "") -> bytes:
     line = (text or "").strip()
     if not line:
         return b""
     try:
         from app.services.studio_phone_voice import synthesize_studio_voice
 
-        audio = await synthesize_studio_voice(line)
+        audio = await synthesize_studio_voice(line, session_id=session_id)
         if audio:
             return audio
     except Exception as exc:

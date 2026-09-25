@@ -162,6 +162,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var CAP_FRESH_MS = 20000;
   var LISTEN_SILENCE_MS = 1800;
   var LISTEN_HOLD_MS = 7000;
+  var SMART_TURN_MS = 700;
   var CAP_REC_TAIL_MS = 500;
   var THINK_HOLD_MS = 12000;
   var BARGE_MS = 5500;
@@ -192,6 +193,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var last = (words[words.length - 1] || '').replace(/[^a-z']+$/i, '');
     if (/^(and|but|or|so|because|if|when|that|the|a|an|to|for|with|of|my|our|just|like|um|uh|ah|er|well|then|about|this|is|are|was|were|have|has|had|been|can|will|would|could|should)$/.test(last))
       return LISTEN_HOLD_MS;
+    if (/[.?!]$/.test(t)) return SMART_TURN_MS;
     return LISTEN_SILENCE_MS;
   }
   function abortHoldDraft(){

@@ -4,7 +4,9 @@ from app.services.studio_listen_hold import LISTEN_HOLD_MS, LISTEN_SILENCE_MS, h
 
 
 def test_finished_thought_is_base_silence():
-    assert hold_floor_ms("I want to talk about my week.") == LISTEN_SILENCE_MS
+    from app.services.studio_voice_floor import SMART_TURN_MS
+
+    assert hold_floor_ms("I want to talk about my week.") == SMART_TURN_MS
     assert hold_floor_ms("How are you feeling Nate") == LISTEN_SILENCE_MS
 
 
@@ -81,6 +83,8 @@ def test_room_html_mirrors_hold():
     html = (Path(__file__).resolve().parents[2] / "mobile/web/studio_nate_room.html").read_text()
     assert "var LISTEN_SILENCE_MS = 1800;" in html
     assert "var LISTEN_HOLD_MS = 7000;" in html
+    assert "var SMART_TURN_MS = 700;" in html
+    assert "return SMART_TURN_MS;" in html
     assert "var CAP_REC_TAIL_MS = 500;" in html
     assert "var THINK_HOLD_MS = 12000;" in html
     assert "var BARGE_MS = 5500;" in html

@@ -197,10 +197,18 @@ async def synthesize_onyx_wav(text: str) -> Optional[bytes]:
     return None
 
 
-async def synthesize_studio_voice(text: str) -> bytes:
+async def synthesize_studio_voice(text: str, session_id: str = "") -> bytes:
     line = (text or "").strip()
     if not line:
         return b""
+    try:
+        from app.services.studio_voice_floor import speak_guarded
+
+        warm = await speak_guarded(session_id, line)
+        if warm:
+            return warm
+    except Exception as exc:
+        logger.warning("studio voice floor skipped: %s", exc)
     rex = await synthesize_rex_wav(line)
     if rex:
         return rex

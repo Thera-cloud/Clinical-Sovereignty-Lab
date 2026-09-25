@@ -45,7 +45,7 @@ def test_booth_routes_and_cache_bump():
     assert '/sessions/{session_id}/booth/legs' in api
     assert '/sessions/{session_id}/lookup' in api
     live = (ROOT / "backend/app/services/studio_livekit.py").read_text()
-    assert "v=20260924a" in live
+    assert "v=20260925b" in live
     assert "studio_program_out.html" in live
     assert "custom_base_url" in live
     assert 'with_name("studio_nate_room.html")' in live

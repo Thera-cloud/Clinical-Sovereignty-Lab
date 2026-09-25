@@ -13,6 +13,8 @@ import time
 
 LISTEN_SILENCE_MS = 1800
 LISTEN_HOLD_MS = 7000
+# Closed sentence: same floor as Think Fast server_vad. Host and caller share it.
+SMART_TURN_MS = 700
 
 _EXPLICIT = re.compile(
     r"\b("
@@ -89,6 +91,10 @@ def hold_floor_ms(text: str, base_ms: int = LISTEN_SILENCE_MS, hold_ms: int = LI
     last = re.sub(r"[^a-z']+$", "", words[-1])
     if last in _TRAIL:
         return hold_ms
+    if re.search(r"[.?!][\"']?$", low):
+        from app.services.studio_voice_floor import SMART_TURN_MS
+
+        return SMART_TURN_MS
     return base_ms
 
 
