@@ -43,6 +43,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #waitHint{display:block;font-size:10px;color:#8B7355;margin-top:2px}
 .tile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#111;border:1px solid #222;border-radius:8px}
 .tile h3{margin:0;padding:8px 10px;font-size:11px;color:#C9A962;letter-spacing:1px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+#hostCamTools{display:flex;align-items:center;gap:4px}
+#hostCamTools button{background:#111;color:#E8D5A3;border:1px solid #8B7355;border-radius:4px;padding:2px 7px;font-size:11px;letter-spacing:0;cursor:pointer;line-height:1.2}
+#hostCamTools button.on{border-color:#C9A962;color:#C9A962}
+#hostZoomLabel{font-size:10px;color:#8B7355;min-width:34px;text-align:center;letter-spacing:0}
 #btnShareClose{background:#111;color:#E8D5A3;border:1px solid #8B7355;border-radius:4px;padding:3px 8px;font-size:10px;letter-spacing:1px;cursor:pointer}
 #shareTabs{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px;flex:0 0 auto}
 #shareTabs button{background:#111;color:#8B7355;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:10px;letter-spacing:1px;cursor:pointer}
@@ -92,7 +96,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="status">Connecting…</div>
 <div id="stage">
   <div id="hosts">
-    <div class="tile" id="hostTile"><h3>HOST</h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
+    <div class="tile" id="hostTile"><h3>HOST <span id="hostCamTools"><button type="button" id="btnHostFlip" title="Flip the picture so your movement matches what you see">Flip</button><button type="button" id="btnZoomOut" title="Zoom out">−</button><span id="hostZoomLabel">100%</span><button type="button" id="btnZoomIn" title="Zoom in">+</button></span></h3><div class="box" id="hostBox"><video id="hostVid" autoplay muted playsinline></video></div></div>
     <div class="tile" id="lnTile"><h3>LITTLE NATE (CO-HOST)</h3><div class="box"><iframe id="lnAvatar" title="Little Nate (co-host)" src="/avatar-modes/studio_portrait.html?v=20260909b" allow="autoplay"></iframe><canvas id="env" width="160" height="160"></canvas><audio id="nateSpeaker" controls playsinline></audio><audio id="nateThinker" playsinline></audio></div></div>
     <div class="tile" id="shareTile"><h3>ON SCREEN <button type="button" id="btnShareClose">Close</button></h3><div id="shareTabs"><button type="button" id="tabShareScreen" data-share="screen">Screen</button><button type="button" id="tabShareImage" data-share="image">Image</button><button type="button" id="tabShareDoc" data-share="doc">Document</button><button type="button" id="tabShareVideo" data-share="video">Video</button><button type="button" id="tabShareLookup" data-share="lookup">Lookup</button></div><div class="box" id="shareBox"><video id="shareVid" autoplay muted playsinline></video><div id="shareCards" class="cards" hidden></div><div id="shareEmpty" class="empty">Share a screen, drop a file, or look it up</div></div></div>
   </div>
@@ -306,7 +310,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       var c = document.createElement('canvas');
       c.width = Math.max(2, Math.round(w * scale));
       c.height = Math.max(2, Math.round(h * scale));
-      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      var ctx = c.getContext('2d');
+      var zoom = hostZoom > 1 ? hostZoom : 1;
+      var zw = w / zoom, zh = h / zoom;
+      if (hostMirror) { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(v, (w - zw) / 2, (h - zh) / 2, zw, zh, 0, 0, c.width, c.height);
       var data = c.toDataURL('image/jpeg', 0.68);
       var raw = atob((data.split(',')[1] || ''));
       var u8 = new Uint8Array(raw.length);
@@ -893,6 +901,26 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       drainTurns();
     });
   }
+  var hostMirror = false, hostZoom = 1;
+  try {
+    hostMirror = localStorage.getItem('studioHostMirror') === '1';
+    var savedZoom = parseFloat(localStorage.getItem('studioHostZoom') || '1');
+    if (savedZoom >= 1 && savedZoom <= 2.5) hostZoom = savedZoom;
+  } catch (e) {}
+  function applyHostFrame(){
+    var box = document.getElementById('hostBox');
+    if (!box) return;
+    var vids = box.querySelectorAll('video');
+    var t = hostMirror ? ('scaleX(' + (-hostZoom) + ')') : ('scale(' + hostZoom + ')');
+    for (var i = 0; i < vids.length; i++) {
+      vids[i].style.transform = t;
+      vids[i].style.transformOrigin = 'center center';
+    }
+    var flip = document.getElementById('btnHostFlip');
+    if (flip) flip.classList.toggle('on', hostMirror);
+    var label = document.getElementById('hostZoomLabel');
+    if (label) label.textContent = Math.round(hostZoom * 100) + '%';
+  }
   function fitMedia(el, contain){
     if (!el) return;
     el.removeAttribute('width'); el.removeAttribute('height');
@@ -908,6 +936,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       var v = document.getElementById('hostVid');
       v.srcObject = ms;
       fitMedia(v);
+      applyHostFrame();
       v.play().catch(function(){});
     }).catch(function(){});
   }
@@ -923,6 +952,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       var box = document.getElementById('hostBox');
       box.innerHTML = '';
       box.appendChild(el);
+      applyHostFrame();
     });
   }
   function sendData(obj){
@@ -1685,6 +1715,19 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   document.getElementById('btnChat').onclick = function(){
     document.getElementById('transcript').classList.toggle('collapsed');
   };
+  document.getElementById('btnHostFlip').onclick = function(){
+    hostMirror = !hostMirror;
+    try { localStorage.setItem('studioHostMirror', hostMirror ? '1' : '0'); } catch (e) {}
+    applyHostFrame();
+  };
+  function nudgeZoom(dir){
+    hostZoom = Math.max(1, Math.min(2.5, Math.round((hostZoom + dir * 0.15) * 100) / 100));
+    try { localStorage.setItem('studioHostZoom', String(hostZoom)); } catch (e) {}
+    applyHostFrame();
+  }
+  document.getElementById('btnZoomOut').onclick = function(){ nudgeZoom(-1); };
+  document.getElementById('btnZoomIn').onclick = function(){ nudgeZoom(1); };
+  applyHostFrame();
   if (!cfg.url || !cfg.token){
     setStatus('LiveKit pending — set LIVEKIT_URL + JWT, then Start session.');
     return;
