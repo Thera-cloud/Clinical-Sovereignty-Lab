@@ -700,6 +700,81 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   var nateAudioUrl = '', pendingNate = '', pendingNateBlob = null, audioUnlocked = false;
   function speakerEl(){ return document.getElementById('nateSpeaker'); }
+  var tapeRec = null, tapeIndex = 0, tapeCtx = null, tapeDest = null, tapeHooked = false, tapeStarted = false;
+  function hookNateSpeaker(){
+    var a = speakerEl();
+    if (!a || tapeHooked) return;
+    if (!tapeCtx) tapeCtx = new AudioContext();
+    if (!tapeDest) tapeDest = tapeCtx.createMediaStreamDestination();
+    try {
+      var src = tapeCtx.createMediaElementSource(a);
+      src.connect(tapeDest);
+      src.connect(tapeCtx.destination);
+      tapeHooked = true;
+    } catch (e) {}
+  }
+  function uploadTapePart(blob){
+    if (guest || !blob || !blob.size || !cfg.session || !cfg.token) return;
+    var idx = tapeIndex++;
+    var fd = new FormData();
+    fd.append('index', String(idx));
+    fd.append('file', blob, 'part.webm');
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/tape-part', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      body: fd,
+      keepalive: blob.size < 60000
+    }).catch(function(){});
+  }
+  function finishShowTape(){
+    if (guest || !cfg.session || !cfg.token) return;
+    fetch(cfg.api + '/api/studio/sessions/' + encodeURIComponent(cfg.session) + '/tape-finish', {
+      method: 'POST',
+      headers: {'Authorization':'Bearer ' + cfg.token},
+      keepalive: true
+    }).catch(function(){});
+  }
+  function startShowTape(){
+    if (guest || tapeStarted || !room || !window.MediaRecorder) return;
+    hookNateSpeaker();
+    if (tapeCtx && tapeCtx.resume) tapeCtx.resume().catch(function(){});
+    var tracks = [];
+    var video = null;
+    if (programStream && programStream.getVideoTracks) video = programStream.getVideoTracks()[0];
+    if (!video && room.localParticipant && room.localParticipant.videoTrackPublications){
+      room.localParticipant.videoTrackPublications.forEach(function(pub){
+        var src = pub && pub.source;
+        var isCam = (typeof LK !== 'undefined' && LK && LK.Track && LK.Track.Source && src === LK.Track.Source.Camera) || src === 'camera';
+        if (isCam && pub.track && pub.track.mediaStreamTrack) video = pub.track.mediaStreamTrack;
+      });
+    }
+    if (video) tracks.push(video);
+    if (room.localParticipant && room.localParticipant.audioTrackPublications){
+      room.localParticipant.audioTrackPublications.forEach(function(pub){
+        if (pub.track && pub.track.mediaStreamTrack && tapeCtx && tapeDest){
+          try {
+            tapeCtx.createMediaStreamSource(new MediaStream([pub.track.mediaStreamTrack])).connect(tapeDest);
+          } catch (e) {}
+        }
+      });
+    }
+    if (tapeDest) tapeDest.stream.getAudioTracks().forEach(function(t){ tracks.push(t); });
+    if (!tracks.length) return;
+    var mime = '';
+    if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
+      mime = 'video/webm;codecs=vp8,opus';
+    else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm'))
+      mime = 'video/webm';
+    try {
+      tapeRec = mime ? new MediaRecorder(new MediaStream(tracks), {mimeType: mime}) : new MediaRecorder(new MediaStream(tracks));
+    } catch (e) { return; }
+    tapeStarted = true;
+    tapeRec.ondataavailable = function(ev){
+      if (ev.data && ev.data.size) uploadTapePart(ev.data);
+    };
+    tapeRec.onstop = function(){ finishShowTape(); };
+    tapeRec.start(4000);
+  }
   var programStream = null, programAsked = false, chosenMic = '', chosenCam = '', deviceFill = false;
   function micConstraints(){
     var c = {noiseSuppression:true, autoGainControl:true, echoCancellation:!programStream};
@@ -762,7 +837,20 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
         sel.appendChild(o);
       });
       if (cur) sel.value = cur;
+      var pinMic = false;
+      if (kind === 'audioinput' && !chosenMic){
+        var opts = sel.options;
+        for (var pi = 0; pi < opts.length; pi++){
+          var lab = opts[pi].textContent || '';
+          if (!opts[pi].value || /iphone|continuity/i.test(lab)) continue;
+          sel.value = opts[pi].value;
+          chosenMic = opts[pi].value;
+          pinMic = true;
+          break;
+        }
+      }
       deviceFill = false;
+      if (pinMic && room && room.localParticipant) restoreHostMic();
     }).catch(function(){ deviceFill = false; });
   }
   function refreshDevices(){
@@ -812,6 +900,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function unlockAudio(){
     askProgramCapture();
     audioUnlocked = true;
+    hookNateSpeaker();
+    if (tapeCtx && tapeCtx.resume) tapeCtx.resume().catch(function(){});
     var a = speakerEl();
     if (a){ a.muted = false; a.volume = 1; }
     if (pendingNateBlob){
@@ -910,9 +1000,14 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function applyHostFrame(){
     var box = document.getElementById('hostBox');
     if (!box) return;
+    box.style.overflow = 'hidden';
     var vids = box.querySelectorAll('video');
-    var t = hostMirror ? ('scaleX(' + (-hostZoom) + ')') : ('scale(' + hostZoom + ')');
+    var x = hostMirror ? -hostZoom : hostZoom;
+    var t = 'scale(' + x + ',' + hostZoom + ')';
     for (var i = 0; i < vids.length; i++) {
+      vids[i].style.width = '100%';
+      vids[i].style.height = '100%';
+      vids[i].style.objectFit = 'cover';
       vids[i].style.transform = t;
       vids[i].style.transformOrigin = 'center center';
     }
@@ -1848,6 +1943,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     attachLocalCam();
     if (pub && pub.track) rememberAudio(room.localParticipant, pub.track);
   });
+  room.on(LK.RoomEvent.Reconnected, function(){
+    if (!guest && chosenMic && room.localParticipant)
+      room.localParticipant.setMicrophoneEnabled(true, micConstraints()).catch(function(){});
+  });
   room.connect(cfg.url, cfg.token).then(function(){
     return room.localParticipant.setMicrophoneEnabled(true, micConstraints());
   }).then(function(){
@@ -1891,7 +1990,11 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     setStatus(guest ? 'Guest audio-only · you are on the line.' : 'Little Nate live — click once so the tape is this view.');
     publishProgram();
     greeted = true;
+    if (!guest) startShowTape();
     if (!guest) warmThinkClip();
+    window.addEventListener('pagehide', function(){
+      try { if (tapeRec && tapeRec.state === 'recording') tapeRec.stop(); else finishShowTape(); } catch (e) { finishShowTape(); }
+    });
     if (!guest) armHostSpace();
     if (!guest){
       loadBoothSounds();

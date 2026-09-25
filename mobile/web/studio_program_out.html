@@ -141,10 +141,18 @@ body.has-program #compose{visibility:hidden}
   });
   room.on(LK.RoomEvent.ParticipantConnected, paintCallers);
   room.on(LK.RoomEvent.ParticipantDisconnected, paintCallers);
-  room.connect(url, token).then(function(){
-    paintCallers();
-    setTimeout(armTape, 2500);
-  }).catch(function(){});
+  var tries = 0;
+  function joinProgram(){
+    tries += 1;
+    room.connect(url, token).then(function(){
+      paintCallers();
+      setTimeout(armTape, 800);
+    }).catch(function(err){
+      console.log('program connect failed', String(err || ''));
+      if (tries < 5) setTimeout(joinProgram, 1500);
+    });
+  }
+  joinProgram();
   window.addEventListener('pagehide', function(){ console.log('END_RECORDING'); });
 })();
 </script>

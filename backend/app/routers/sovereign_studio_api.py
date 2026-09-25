@@ -1100,6 +1100,38 @@ async def cohost_caption_public(
     )
 
 
+@public_router.post("/sessions/{session_id}/tape-part")
+async def show_tape_part(
+    session_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    index: int = Form(0),
+):
+    """One slice of the host-room recording. QUANTUM-CRYSTAL-ARCH"""
+    _flag()
+    _require_host_jwt(request, session_id)
+    raw = await file.read()
+    from app.services.studio_media_tape import save_tape_part
+
+    out = save_tape_part(str(session_id), int(index), raw)
+    if not out.get("ok"):
+        return _raise(out)
+    return out
+
+
+@public_router.post("/sessions/{session_id}/tape-finish")
+async def show_tape_finish(session_id: UUID, request: Request):
+    """Seal the host-room recording onto the session so Edit can open it."""
+    _flag()
+    _require_host_jwt(request, session_id)
+    from app.services.studio_media_tape import finish_show_tape
+
+    out = await finish_show_tape(_pool(request), str(session_id))
+    if not out.get("ok"):
+        return _raise(out)
+    return out
+
+
 @public_router.post("/sessions/{session_id}/cohost/share-frame")
 async def cohost_share_frame_public(
     session_id: UUID,

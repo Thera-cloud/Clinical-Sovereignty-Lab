@@ -112,6 +112,12 @@ async def end_session(db_pool, session_id: str, coach_id: str) -> Dict[str, Any]
         await stop_session_egress(session_id, egress_id)
     except Exception as exc:
         logger.warning("studio stop egress: %s", exc)
+    try:
+        from app.services.studio_media_tape import finish_show_tape
+
+        await finish_show_tape(db_pool, session_id)
+    except Exception as exc:
+        logger.warning("studio finish show tape: %s", exc)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """

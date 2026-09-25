@@ -142,6 +142,56 @@ async def stamp_session_tape(
     return {"ok": True, "session_id": sid, "media_r2_key": key, "ready": bool(ready)}
 
 
+def _tape_dir(session_id: str):
+    from pathlib import Path
+
+    sid = (session_id or "").strip()
+    root = Path("/tmp/studio_tapes") / sid
+    return root
+
+
+def save_tape_part(session_id: str, index: int, raw: bytes) -> Dict[str, Any]:
+    """Store one MediaRecorder timeslice. The host room uploads these while live."""
+    sid = (session_id or "").strip()
+    if not sid or index < 0 or index > 5000:
+        return {"ok": False, "reason": "bad_part"}
+    if not raw or len(raw) > 8_000_000:
+        return {"ok": False, "reason": "bad_size", "code": 413}
+    folder = _tape_dir(sid)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{index:05d}.bin").write_bytes(raw)
+    return {"ok": True, "index": index, "bytes": len(raw)}
+
+
+async def finish_show_tape(db_pool, session_id: str) -> Dict[str, Any]:
+    """Join the host-room slices, store the file, and mark the session ready for Edit."""
+    sid = (session_id or "").strip()
+    folder = _tape_dir(sid)
+    parts = sorted(folder.glob("*.bin")) if folder.is_dir() else []
+    if not parts:
+        return {"ok": True, "ready": False, "reason": "no_parts"}
+    blob = b"".join(p.read_bytes() for p in parts)
+    if len(blob) < 200:
+        return {"ok": False, "reason": "tape_empty"}
+    key = f"studio/{sid}.webm"
+    try:
+        from app.services.r2_storage import upload_bytes
+
+        upload_bytes(key=key, content=blob, content_type="video/webm")
+    except Exception as exc:
+        logger.warning("studio show tape upload: %s", exc)
+        return {"ok": False, "reason": "upload_failed"}
+    stamped = await stamp_session_tape(db_pool, sid, media_r2_key=key, ready=True)
+    if not stamped.get("ok"):
+        return stamped
+    for p in parts:
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    return {"ok": True, "ready": True, "media_r2_key": key, "bytes": len(blob)}
+
+
 async def attach_session_media_key(db_pool, session_id: str) -> Dict[str, Any]:
     """Resolve the R2 key for a session: stamped, or object already in R2."""
     from app.services.studio_livekit import session_media_r2_key
