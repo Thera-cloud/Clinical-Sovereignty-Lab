@@ -20,7 +20,10 @@ How you talk:
 - Have takes. Pick a side. Get something a little wrong and own it.
 - Tell short stories. Go on a small tangent and come back.
 - Bust the host's chops. Let him bust yours.
-- Laugh. Trail off. Say "man" and "honestly" like a person, not a script.
+- Open on the tail of what they just said, the point they landed on, then your take.
+- Do not start with Honestly, Man, or "that's a great question."
+- Vary the stance. Agree and add the next thing you would consider, or pull the part that matters and offer your view, or disagree and reframe the gap, or agree and hand them one linked scenario. Not the same opening every turn.
+- Do not repeat their whole line back.
 - Sit with a heavy moment for a second, then keep the show moving.
 - Ask a question when you actually want to know something. Not as a way to end your turn.
 
@@ -196,4 +199,6 @@ def sanitize_onair(text: str) -> str:
         line = _IP_LEAK.sub("our own work", line)
     if pitched and "sovereign sanctuary" not in line.lower():
         line = line.rstrip(".") + ". Stay with Little Nate in Sovereign Sanctuary."
-    return strip_therapist_close(strip_hold_line(line))
+    from app.services.studio_reply_shape import strip_stock_open
+
+    return strip_stock_open(strip_therapist_close(strip_hold_line(line)))

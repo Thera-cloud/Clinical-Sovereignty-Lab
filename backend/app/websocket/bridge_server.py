@@ -8724,7 +8724,7 @@ class AzureCortex:
         return "\n".join(sanctuary_context)
         
 
-    async def _get_relational_context(self, profile: dict) -> str:
+    async def _get_relational_context(self, profile: dict, user_text: str = "") -> str:
         """Load the client's full story - who they are, their wounds, their growth"""
         client_id = profile.get("hardware_id")
         story_path = os.path.join(DATA_DIR, "Vaults", "Clients", client_id, "story.json")
@@ -8747,6 +8747,16 @@ class AzureCortex:
                 classroom_context = self._get_classroom_context(
                     client_id, profile.get("family_id")
                 )
+            # QUANTUM-CRYSTAL-ARCH: one held live session when the client is on that topic.
+            try:
+                from app.services.chat_session_focus import session_focus_block
+                _focus = await session_focus_block(
+                    globals().get("db_pool"), client_id, user_text or ""
+                )
+                if _focus:
+                    classroom_context = _focus
+            except Exception as _sf_err:
+                print(f">>> [SESSION FOCUS] {_sf_err}")
 
         if not os.path.exists(story_path):
             assessment_only = await self._get_assessment_context(profile)
@@ -9401,9 +9411,11 @@ class AzureCortex:
         async def _rel_capped():
             _rto = _rel_to(_depth)  # QUANTUM-CRYSTAL-ARCH: Faster relational cap
             if not _rto:
-                return await self._get_relational_context(profile)
+                return await self._get_relational_context(profile, user_text)
             try:
-                return await asyncio.wait_for(self._get_relational_context(profile), timeout=_rto)
+                return await asyncio.wait_for(
+                    self._get_relational_context(profile, user_text), timeout=_rto
+                )
             except asyncio.TimeoutError:
                 print(f">>> [CTX] relational timeout {_rto}s depth={_depth}")
                 return ""

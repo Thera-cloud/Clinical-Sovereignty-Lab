@@ -497,6 +497,13 @@ async def cohost_turn(
             "Land on a statement.\n"
         )
     prefix = prior_block + prefix
+    from app.services.studio_reply_shape import (
+        LENGTH_ASK,
+        arm_lengths,
+        is_long_question,
+        take_length,
+    )
+
     reply = (
         "Hey — Little Nate with you. Let's see where this one goes."
         if kind == "open"
@@ -507,22 +514,53 @@ async def cohost_turn(
         else "Yeah, man — that tracks."
     )
     provider = "fallback"
-    try:
-        from app.services.nate_inference_router import NateInferenceRouter
+    ready = None if kind == "prime" else await take_length(sid, blob)
+    if ready:
+        reply = ready
+        provider = "length_ready"
+    elif kind != "prime" and is_long_question(blob):
+        async def _draft(cap: int, which: str) -> str:
+            from app.services.nate_inference_router import NateInferenceRouter
 
-        out = await NateInferenceRouter().generate(
-            prompt=prefix + blob,
-            system=system,
-            domain="culture",
-            max_tokens=live_reply_max_tokens(blob, howto),
-            images=images or None,
+            note = (
+                "SHORT version. A few sentences. Open on the point they landed on, then your take."
+                if which == "short"
+                else "DEFINED version. Finish the thought. Open on the point they landed on, then your take. Do not pad."
+            )
+            out = await NateInferenceRouter().generate(
+                prompt=prefix + blob,
+                system=system + "\n" + note,
+                domain="culture",
+                max_tokens=cap,
+                images=images or None,
+            )
+            return (out.get("text") or "").strip()
+
+        arm_lengths(
+            sid,
+            blob,
+            asyncio.create_task(_draft(210, "short")),
+            asyncio.create_task(_draft(630, "long")),
         )
-        gen = (out.get("text") or "").strip()
-        if gen:
-            reply = gen
-            provider = out.get("provider") or "router"
-    except Exception as exc:
-        logger.warning("studio cohost inference skipped: %s", exc)
+        reply = LENGTH_ASK
+        provider = "length_offer"
+    else:
+        try:
+            from app.services.nate_inference_router import NateInferenceRouter
+
+            out = await NateInferenceRouter().generate(
+                prompt=prefix + blob,
+                system=system,
+                domain="culture",
+                max_tokens=live_reply_max_tokens(blob, howto),
+                images=images or None,
+            )
+            gen = (out.get("text") or "").strip()
+            if gen:
+                reply = gen
+                provider = out.get("provider") or "router"
+        except Exception as exc:
+            logger.warning("studio cohost inference skipped: %s", exc)
     if inv6_blocks(reply):
         reply = "I'll keep this on the educational side and stay with the room."
         provider = "inv6_filter"
