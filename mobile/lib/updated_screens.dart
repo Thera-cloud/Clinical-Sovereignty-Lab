@@ -3011,6 +3011,23 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     } catch (_) {}
   }
 
+  Future<void> _refreshRecapQuiet() async {
+    try {
+      final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+      if (tok.isEmpty) return;
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/sse-client/recap'),
+        headers: {'Authorization': 'Bearer $tok'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        if (data is Map) {
+          setState(() => _recapData = Map<String, dynamic>.from(data));
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<void> _fetchRecap() async {
     try {
       final tok = widget.currentUserProfile?['token']?.toString() ?? '';
@@ -5857,6 +5874,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                     TheraRegionChoice(
                       token: (widget.currentUserProfile?['token'] ?? '').toString(),
                       initialRegion: (_recapData!['explore_region'] ?? 'wander').toString(),
+                      onApplied: _refreshRecapQuiet,
                     ),
                     const SizedBox(height: 8),
                     Wrap(spacing: 8, runSpacing: 4, children: [

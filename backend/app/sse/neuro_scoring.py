@@ -37,6 +37,7 @@ from app.sse.thera_world_regions import (
     REGION_NEURO,
     REGION_ORIGIN,
     STRUCTURE_TO_BIOME,
+    biome_display_name,
 )
 
 # ---------------------------------------------------------------------------
@@ -520,6 +521,79 @@ def resolve_panel_region(
     if last_region == REGION_NEURO and weakest > NEURO_DEEP_HD:
         return REGION_ORIGIN
     return REGION_NEURO
+
+
+EXPLORE_REGEN_CAP = 3
+
+
+def should_replace_today_panel(today_region: Optional[str], intended_region: str) -> bool:
+    """True when there is no still today, or today's still is the other stream."""
+    today = (today_region or "").strip().lower()
+    intended = (intended_region or REGION_ORIGIN).strip().lower()
+    if intended not in (REGION_ORIGIN, REGION_NEURO):
+        intended = REGION_ORIGIN
+    if not today:
+        return True
+    return today != intended
+
+
+def journey_image_r2_key(user_id: str, day: str, region: str, content_hash: str) -> str:
+    slug = region if region in (REGION_ORIGIN, REGION_NEURO) else REGION_ORIGIN
+    uid = (user_id or "unknown").strip() or "unknown"
+    return f"sse/journey/{uid}/{day}/{slug}/{content_hash}.png"
+
+
+def explore_pointer_key(user_id: str) -> str:
+    uid = (user_id or "unknown").strip() or "unknown"
+    return f"sse/journey/{uid}/explore_region.json"
+
+
+def merge_alias_ids(*parts: Optional[str]) -> List[str]:
+    """hardware_id first, then username, then extras — unique, stripped."""
+    out: List[str] = []
+    for p in parts:
+        s = str(p or "").strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def compose_walk_addendum(
+    pick: str,
+    last_region: str,
+    biome: str = "",
+    character: str = "",
+    narrative: str = "",
+) -> str:
+    """Main-chat block: which stream the client chose and what today's still is."""
+    pick_n = (pick or EXPLORE_WANDER).strip().lower()
+    if pick_n not in (EXPLORE_WANDER, REGION_ORIGIN, REGION_NEURO):
+        pick_n = EXPLORE_WANDER
+    region = (last_region or REGION_ORIGIN).strip().lower()
+    if region not in (REGION_ORIGIN, REGION_NEURO):
+        region = REGION_ORIGIN
+    if biome:
+        try:
+            place = biome_display_name(biome)
+        except Exception:
+            place = biome.replace("_", " ")
+    else:
+        place = "the places of change" if region == REGION_NEURO else "the path they already know"
+    who = (character or "").strip() or "their archetype"
+    pick_line = {
+        EXPLORE_WANDER: "The client asked the path to choose. Origin and Neuro take turns across days.",
+        REGION_ORIGIN: "The client asked to walk Origin today — the path they already know, same archetype.",
+        REGION_NEURO: "The client asked to walk Neuro today — the places of change, same archetype.",
+    }[pick_n]
+    still = f"Today's still is {region} at {place}, meeting {who}."
+    scene = (narrative or "").strip()
+    if scene:
+        still += f" Scene they can see: {scene[:240]}"
+    return (
+        "THERA WALK (internal). Speak from today's still and the client's chosen walk. "
+        "Do not lecture. Do not name scores. You may say Origin or Neuro only if they ask "
+        f"where they are walking.\n{pick_line} {still}"
+    )
 
 
 def scrub_client_copy(text: str) -> str:

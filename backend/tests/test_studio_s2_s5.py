@@ -289,6 +289,14 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert "paintTapeFrame" in html
     assert "Tape is recording this window, with the microphone and Little Nate." in html
     assert "micSel" in html
+    assert "spkSel" in html
+    assert "deviceId = {exact: chosenMic}" in html
+    assert "function pickBestDevice" in html
+    assert "function applySpeakerSink" in html
+    assert "function pinComputerDevices" in html
+    assert "iphone|ipad|ipod|continuity" in html
+    assert "Computer speakers" in html
+    assert "setSinkId" in html
     assert "echoCancellation:!programStream" in html
     assert "cdn.jsdelivr.net" not in html
     assert "btnMute" in html
@@ -380,7 +388,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260925f" in url
+    assert "v=20260926a" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]

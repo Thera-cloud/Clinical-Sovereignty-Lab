@@ -394,6 +394,42 @@ def test_enrich_panel_legend_neuro_bundle():
     assert not ns.client_safe_violations(aimed["journey_thread"])
 
 
+def test_should_replace_today_panel():
+    assert ns.should_replace_today_panel(None, "neuro") is True
+    assert ns.should_replace_today_panel("", "origin") is True
+    assert ns.should_replace_today_panel("origin", "neuro") is True
+    assert ns.should_replace_today_panel("neuro", "origin") is True
+    assert ns.should_replace_today_panel("origin", "origin") is False
+    assert ns.should_replace_today_panel("neuro", "neuro") is False
+
+
+def test_journey_image_r2_key_and_pointer():
+    k = ns.journey_image_r2_key("U1", "2026-09-26", "neuro", "abc123")
+    assert k == "sse/journey/U1/2026-09-26/neuro/abc123.png"
+    o = ns.journey_image_r2_key("U1", "2026-09-26", "origin", "abc123")
+    assert o == "sse/journey/U1/2026-09-26/origin/abc123.png"
+    junk = ns.journey_image_r2_key("U1", "2026-09-26", "wander", "abc123")
+    assert "/origin/" in junk
+    assert ns.explore_pointer_key("hw") == "sse/journey/hw/explore_region.json"
+
+
+def test_merge_alias_ids_unique_order():
+    assert ns.merge_alias_ids("HW", "user", "HW", "", None) == ["HW", "user"]
+
+
+def test_compose_walk_addendum_follows_pick_and_still():
+    t = ns.compose_walk_addendum("neuro", "origin", "coliseum_of_ascendance", "Warlord", "A hall.")
+    assert "THERA WALK" in t
+    assert "walk Neuro today" in t
+    assert "Today's still is origin" in t
+    t2 = ns.compose_walk_addendum("neuro", "neuro", "coliseum_of_ascendance", "Warlord", "")
+    assert "Today's still is neuro" in t2
+    assert "Coliseum of Ascendance" in t2
+    t3 = ns.compose_walk_addendum("wander", "neuro", "hearth_of_return", "River Daughter", "")
+    assert "path to choose" in t3
+    assert "Today's still is neuro" in t3
+
+
 def test_enrich_panel_legend_origin_unchanged():
     b = ss.enrich_panel_legend([], character_name="Mirror", narrative_text="Still water.", biome="mirror_lake")
     assert b["region"] == "origin" and b["biome_label"] == "mirror_lake"

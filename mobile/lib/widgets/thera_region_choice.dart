@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -6,17 +7,19 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
 /// Story-path chips. The list comes from the API so a new region appears
-/// without a new layout.
+/// without a new layout. A pick persists, then polls until today's still matches.
 class TheraRegionChoice extends StatefulWidget {
   final String token;
   final String? initialRegion;
   final List<Map<String, String>>? initialChoices;
+  final VoidCallback? onApplied;
 
   const TheraRegionChoice({
     super.key,
     required this.token,
     this.initialRegion,
     this.initialChoices,
+    this.onApplied,
   });
 
   @override
@@ -45,6 +48,8 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
   List<Map<String, String>> _regions = _fallback;
   String _selected = 'wander';
   bool _busy = false;
+  bool _generating = false;
+  Timer? _poll;
 
   String get _base =>
       AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
@@ -64,6 +69,36 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _applyStatus(Map data) {
+    final raw = data['regions'];
+    final next = <Map<String, String>>[];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is Map) {
+          next.add({
+            'id': (item['id'] ?? '').toString(),
+            'label': (item['label'] ?? '').toString(),
+            'detail': (item['detail'] ?? '').toString(),
+          });
+        }
+      }
+    }
+    final sel = (data['selected'] ?? data['explore_region'] ?? _selected).toString();
+    final gen = data['generating'] == true;
+    if (!mounted) return;
+    setState(() {
+      if (next.isNotEmpty) _regions = next;
+      if (sel.isNotEmpty) _selected = sel;
+      _generating = gen;
+    });
+  }
+
   Future<void> _load() async {
     if (widget.token.isEmpty) return;
     try {
@@ -73,27 +108,45 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
       );
       if (resp.statusCode != 200 || !mounted) return;
       final data = jsonDecode(resp.body);
-      if (data is! Map) return;
-      final raw = data['regions'];
-      final next = <Map<String, String>>[];
-      if (raw is List) {
-        for (final item in raw) {
-          if (item is Map) {
-            next.add({
-              'id': (item['id'] ?? '').toString(),
-              'label': (item['label'] ?? '').toString(),
-              'detail': (item['detail'] ?? '').toString(),
-            });
+      if (data is Map) {
+        _applyStatus(data);
+          if (data['generating'] == true) {
+            _beginPoll();
           }
-        }
       }
-      if (!mounted) return;
-      setState(() {
-        if (next.isNotEmpty) _regions = next;
-        final sel = (data['selected'] ?? _selected).toString();
-        if (sel.isNotEmpty) _selected = sel;
-      });
     } catch (_) {}
+  }
+
+  void _beginPoll() {
+    _poll?.cancel();
+    var ticks = 0;
+    _poll = Timer.periodic(const Duration(seconds: 2), (t) async {
+      ticks++;
+      if (!mounted || ticks > 45) {
+        t.cancel();
+        if (mounted) setState(() {
+          _generating = false;
+          _busy = false;
+        });
+        widget.onApplied?.call();
+        return;
+      }
+      try {
+        final resp = await http.get(
+          Uri.parse('$_base/api/sse-client/explore-regions'),
+          headers: _headers,
+        );
+        if (resp.statusCode != 200 || !mounted) return;
+        final data = jsonDecode(resp.body);
+        if (data is! Map) return;
+        _applyStatus(data);
+        if (data['generating'] != true) {
+          t.cancel();
+          if (mounted) setState(() => _busy = false);
+          widget.onApplied?.call();
+        }
+      } catch (_) {}
+    });
   }
 
   Future<void> _pick(String id) async {
@@ -103,18 +156,36 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
       _selected = id;
     });
     try {
-      await http.post(
+      final resp = await http.post(
         Uri.parse('$_base/api/sse-client/explore-region'),
         headers: _headers,
         body: jsonEncode({'region': id}),
       );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (data is Map) {
+          _applyStatus(data);
+          if (data['generating'] == true) {
+            _beginPoll();
+            return;
+          }
+        }
+      }
     } catch (_) {}
     if (mounted) setState(() => _busy = false);
+    widget.onApplied?.call();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_regions.isEmpty) return const SizedBox.shrink();
+    final detail = _generating
+        ? 'Walking your still now. It will land in Sovereign Journey when it is ready.'
+        : (_regions.firstWhere(
+              (r) => r['id'] == _selected,
+              orElse: () => const {'detail': ''},
+            )['detail'] ??
+            '');
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
@@ -133,7 +204,7 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
                 ChoiceChip(
                   label: Text(r['label'] ?? r['id'] ?? ''),
                   selected: _selected == r['id'],
-                  onSelected: _busy ? null : (_) => _pick(r['id'] ?? ''),
+                  onSelected: (_busy || _generating) ? null : (_) => _pick(r['id'] ?? ''),
                   selectedColor: const Color(0xFFC9A962),
                   backgroundColor: const Color(0xFF111111),
                   labelStyle: TextStyle(
@@ -143,15 +214,11 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
                 ),
             ],
           ),
-          if (_selected.isNotEmpty)
+          if (detail.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                _regions.firstWhere(
-                  (r) => r['id'] == _selected,
-                  orElse: () => const {'detail': ''},
-                )['detail'] ??
-                    '',
+                detail,
                 style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
               ),
             ),

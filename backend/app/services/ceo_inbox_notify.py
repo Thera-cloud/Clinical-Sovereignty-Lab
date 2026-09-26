@@ -1,7 +1,8 @@
 """CEO Inbox → email/SMS notify + reply execution.
 
 YELLOW: email to admin_nevedalnj@sovereignsanctuary.net
-RED:    email + SMS to ADMIN_ALERT_PHONE / CEO_NOTIFY_SMS (586-524-3969)
+RED:    email only (Twilio LN proposal SMS paused; decide in CEO Inbox)
+        Set LN_PROPOSAL_SMS=1 to restore SMS to CEO_NOTIFY_SMS.
 
 Replies via approve@reply.sovereignsanctuary.net (or SMS) use:
   ACK / DISMISS — remove from CEO inbox (no clinical apply)
@@ -648,8 +649,11 @@ async def _safe_notify(item: Dict[str, Any]) -> None:
 
 
 async def notify_ceo_inbox_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    """Create strategy_proposals row + email (+ SMS if RED)."""
-    from app.services.approval_protocol import ApprovalProtocolService
+    """Create strategy_proposals row + email. SMS paused (CEO Inbox)."""
+    from app.services.approval_protocol import (
+        ApprovalProtocolService,
+        ln_proposal_sms_paused,
+    )
 
     risk = str(item.get("risk") or "YELLOW").upper()
     if risk not in ("YELLOW", "RED"):
@@ -671,7 +675,7 @@ async def notify_ceo_inbox_item(item: Dict[str, Any]) -> Dict[str, Any]:
         email_id = await protocol.send_email_notification(
             proposal, to_email=CEO_NOTIFY_EMAIL
         )
-        if risk == "RED":
+        if risk == "RED" and not ln_proposal_sms_paused():
             sms_sid = await protocol.send_sms_notification(
                 proposal, to_number=CEO_NOTIFY_SMS
             )

@@ -1201,23 +1201,38 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     }
 
 
-async def generate_journey_panel(user_id: str, db_pool) -> dict:
+async def generate_journey_panel(user_id: str, db_pool, *, replace_today: bool = False) -> dict:
     """Full pipeline: profile → biome → character → narrative → image → R2 → log."""
     from app.sse.foundation.delivery_runtime import sse_imagery_generation_enabled
     if not sse_imagery_generation_enabled():
         return {"skipped": True, "reason": "sse_imagery_paused"}
     from app.sse.infrastructure.grok_imagine_client import generate_image
     from app.sse.infrastructure.r2_storage import store_image
+    from app.sse.neuro_scoring import journey_image_r2_key
 
-    # One panel per day maximum — quest/mission panels count too
+    aliases = [user_id] if user_id else []
     try:
-        async with db_pool.acquire() as conn:
-            today_exists = await conn.fetchval(
-                "SELECT panel_id FROM sse_panel_log WHERE user_id = $1 AND generated_at::date = CURRENT_DATE", user_id)
-            if today_exists:
-                return {"skipped": True, "reason": "panel_exists_today", "panel_id": str(today_exists)}
-    except Exception as _dup_err:
-        logger.warning("generate_journey_panel dedup check failed: %s", _dup_err)
+        from app.sse.neuro_region_engine import canonical_journey_user_id, resolve_journey_aliases
+        aliases = await resolve_journey_aliases(db_pool, user_id) or aliases
+        canon = await canonical_journey_user_id(db_pool, aliases)
+        if canon:
+            user_id = canon
+    except Exception as _id_err:
+        logger.warning("generate_journey_panel identity resolve skipped: %s", _id_err)
+
+    # One panel per day maximum unless the client asked to walk the other stream today.
+    if not replace_today:
+        try:
+            async with db_pool.acquire() as conn:
+                today_exists = await conn.fetchval(
+                    "SELECT panel_id FROM sse_panel_log WHERE user_id = ANY($1::text[]) "
+                    "AND panel_type = 'journey' AND generated_at::date = CURRENT_DATE "
+                    "ORDER BY generated_at DESC LIMIT 1",
+                    aliases or [user_id])
+                if today_exists:
+                    return {"skipped": True, "reason": "panel_exists_today", "panel_id": str(today_exists)}
+        except Exception as _dup_err:
+            logger.warning("generate_journey_panel dedup check failed: %s", _dup_err)
 
     journey = await get_or_create_journey(user_id, db_pool)
     profile = await get_therapeutic_profile(user_id, db_pool)
@@ -1300,7 +1315,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         from app.sse.neuro_region_engine import resolve_neuro_panel_context
         neuro_ctx = await resolve_neuro_panel_context(
             user_id, profile, journey, db_pool,
-            age_gated=bool((profile.get("_family_context") or {}).get("age_gated")))
+            age_gated=bool((profile.get("_family_context") or {}).get("age_gated")),
+            replace_today=replace_today)
     except Exception as _neuro_err:
         logger.warning("Neuro region resolve failed for %s (Origin fallback): %s", user_id, _neuro_err)
     if neuro_ctx:
@@ -1439,7 +1455,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 logger.warning("generate_journey_panel vision gate failed for %s: %s", user_id, _gate_err)
         content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        r2_key = f"sse/journey/{user_id}/{today}/{content_hash}.png"
+        _region_slug = "neuro" if neuro_ctx else "origin"
+        r2_key = journey_image_r2_key(user_id, today, _region_slug, content_hash)
         r2_url = await store_image(image_bytes, r2_key)
     except Exception as e:
         logger.warning("Journey image generation failed for %s: %s", user_id, e)
@@ -1456,7 +1473,10 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                     pass
                 ib = await generate_image(reserve_prompt, negative_prompt=reserve_neg)
                 ih = hashlib.md5(reserves[0].encode()).hexdigest()[:12]
-                r2_url = await store_image(ib, f"sse/journey/{user_id}/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/{ih}.png")
+                _region_slug = "neuro" if neuro_ctx else "origin"
+                _day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                r2_url = await store_image(
+                    ib, journey_image_r2_key(user_id, _day, _region_slug, ih))
             except Exception as _retry_err:
                 logger.warning("Journey image retry failed for %s: %s", user_id, _retry_err)
 
@@ -1519,6 +1539,19 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 await record_origin_panel_outcome(user_id, db_pool)
         except Exception as _neuro_log_err:
             logger.warning("Neuro region outcome record failed for %s: %s", user_id, _neuro_log_err)
+        try:
+            from app.sse.neuro_region_engine import after_panel_landed
+            await after_panel_landed(user_id, db_pool, {
+                "panel_id": panel_id,
+                "r2_url": r2_url,
+                "biome": current_biome_name,
+                "character": character[0],
+                "narrative": nar_text,
+                "region": "neuro" if neuro_ctx else "origin",
+                "panel_tone": narrative.get("panel_tone", "meditative"),
+            })
+        except Exception as _land_err:
+            logger.warning("after_panel_landed failed for %s: %s", user_id, _land_err)
 
     if _panel_saved and db_pool:
         try:

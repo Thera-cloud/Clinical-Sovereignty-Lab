@@ -34,6 +34,17 @@ from app.services.exceptions import (
 )
 
 
+def ln_proposal_sms_paused() -> bool:
+    """Twilio SMS for LN proposals is paused; CEO Inbox is the decision surface.
+
+    Set LN_PROPOSAL_SMS=1 to re-enable. Default is paused.
+    """
+    import os
+
+    raw = (os.getenv("LN_PROPOSAL_SMS") or "0").strip().lower()
+    return raw not in ("1", "true", "yes", "on")
+
+
 # ─── Category Classification Rules ───
 # Maps (risk, action_type_prefix) → ApprovalCategory
 # More specific rules checked first; fallback to risk-only mapping.
@@ -861,8 +872,15 @@ class ApprovalProtocolService:
     async def send_sms_notification(
         self, proposal: Dict[str, Any], to_number: Optional[str] = None
     ) -> Optional[str]:
-        """Send a self-contained approval SMS (≤2 segments / 320 chars) via Twilio."""
+        """Send a self-contained approval SMS (≤2 segments / 320 chars) via Twilio.
+
+        Paused by default (LN_PROPOSAL_SMS unset/0) — proposals stay in CEO Inbox.
+        """
         import os
+
+        if ln_proposal_sms_paused():
+            print(">>> [APPROVAL] LN proposal SMS paused — CEO Inbox only")
+            return None
 
         client = self._get_twilio_client()
         twilio_from = (
@@ -930,7 +948,7 @@ class ApprovalProtocolService:
     # ─── Notification Dispatch ───
 
     async def notify_proposal(self, proposal_id: UUID) -> Dict[str, Any]:
-        """Send both email and SMS notifications for a proposal."""
+        """Send email for a proposal. Twilio SMS paused unless LN_PROPOSAL_SMS=1."""
         async with self.db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM strategy_proposals WHERE proposal_id = $1",

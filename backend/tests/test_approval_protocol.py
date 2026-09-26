@@ -676,10 +676,24 @@ class TestSendSmsNotification:
 
         monkeypatch.setenv("TWILIO_MESSAGING_SERVICE_SID", "MGtestservice")
         monkeypatch.setenv("CEO_NOTIFY_SMS", "+15865243969")
+        monkeypatch.delenv("LN_PROPOSAL_SMS", raising=False)
 
         svc = ApprovalProtocolService(db_pool=fake_pool)
         monkeypatch.setattr(svc, "_get_twilio_client", lambda: _FakeClient())
 
+        paused = await svc.send_sms_notification(
+            {
+                "proposal_id": uuid4(),
+                "title": "Trust RED: test",
+                "risk": "high",
+                "metadata": {"ceo_inbox": True},
+            },
+            to_number="+15865243969",
+        )
+        assert paused is None
+        assert captured == {}
+
+        monkeypatch.setenv("LN_PROPOSAL_SMS", "1")
         sid = await svc.send_sms_notification(
             {
                 "proposal_id": uuid4(),

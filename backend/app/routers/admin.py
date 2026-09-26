@@ -6004,7 +6004,8 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
     async with pool.acquire() as conn:
         rows_j = await conn.fetch(
             "SELECT panel_id::text as id, panel_type, r2_url, narrative_text, biome, character_manifest, "
-            "panel_tone, generated_at, crystal_domains_used, viewed_at "
+            "panel_tone, generated_at, crystal_domains_used, viewed_at, "
+            "COALESCE(region, 'origin') AS region "
             "FROM sse_panel_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
         rows_w = await conn.fetch(
             "SELECT log_id::text as id, generation_type::text as panel_type, r2_url, "
@@ -6028,6 +6029,7 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
                      key=lambda x: x.get("generated_at") or "", reverse=True)[:50]
     for panel in merged:
         panel["r2_url"] = _refresh_presigned(panel.get("r2_url"))
+        panel.setdefault("region", "origin")
     archetype = dict(f) if f else {}
     if archetype.get("archetype_image_url"):
         archetype["archetype_image_url"] = _refresh_presigned(archetype["archetype_image_url"])
@@ -6169,8 +6171,10 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
                 result["crystal_insight"] = crystal[:200]
             lp_row = await conn.fetchrow(
                 "SELECT panel_id::text AS panel_id, r2_url, biome, generated_at, "
-                "narrative_text, character_manifest FROM sse_panel_log "
-                "WHERE user_id = ANY($1) AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1",
+                "narrative_text, character_manifest, COALESCE(region, 'origin') AS region "
+                "FROM sse_panel_log "
+                "WHERE user_id = ANY($1) AND r2_url IS NOT NULL AND panel_type = 'journey' "
+                "ORDER BY generated_at DESC LIMIT 1",
                 ids,
             )
             if lp_row:
@@ -6178,14 +6182,14 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
                 # Thera-World hot button → "[SSE Panel:<id>]" ask-Nate flow (growth-phase v1)
                 result["last_panel_id"] = lp_row["panel_id"]
                 result["last_panel_biome"] = lp_row["biome"]
-                # QUANTUM-CRYSTAL-ARCH — region label derived from biome id (no schema dependency)
+                # QUANTUM-CRYSTAL-ARCH — region column first, biome fallback
                 try:
                     from app.sse.thera_world_regions import NEURO_BIOMES, biome_display_name
-                    _is_neuro = (lp_row["biome"] or "") in NEURO_BIOMES
+                    _is_neuro = (lp_row["region"] == "neuro") or ((lp_row["biome"] or "") in NEURO_BIOMES)
                     result["last_panel_region"] = "neuro" if _is_neuro else "origin"
                     result["last_panel_biome_label"] = biome_display_name(lp_row["biome"] or "")
                 except Exception:
-                    result["last_panel_region"] = "origin"
+                    result["last_panel_region"] = lp_row["region"] or "origin"
                 result["last_panel_generated_at"] = lp_row["generated_at"].isoformat() if lp_row["generated_at"] else None
                 result["last_panel_narrative"] = (lp_row["narrative_text"] or "")[:240]
                 result["last_panel_character"] = lp_row["character_manifest"] or ""
@@ -6208,31 +6212,28 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
 @sse_client_router.get("/explore-regions")
 async def sse_explore_regions(request: Request, _user: dict = Depends(_sse_auth)):
     """Story paths the client can walk. New regions appear here without an app rebuild of the list shape."""
-    from app.sse.neuro_region_engine import read_explore_region
+    from app.sse.neuro_region_engine import explore_region_status
     from app.sse.thera_world_regions import explore_region_choices
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     uname = _user.get("username") or uid
     ids = [uid, uname] if uid != uname else [uid]
     pool = request.app.state.db_pool
-    selected = "wander"
     try:
-        selected = await read_explore_region(ids, pool)
+        return await explore_region_status(ids, pool)
     except Exception:
-        selected = "wander"
-    return {"selected": selected, "regions": explore_region_choices()}
+        return {"selected": "wander", "regions": explore_region_choices(), "generating": False}
 
 
 @sse_client_router.post("/explore-region")
 async def sse_set_explore_region(request: Request, _user: dict = Depends(_sse_auth)):
-    """Client chooses Origin, Neuro, or wander for the next story still."""
-    from app.sse.neuro_region_engine import set_explore_region
+    """Client chooses Origin, Neuro, or wander — persists and mints today's still if needed."""
+    from app.sse.neuro_region_engine import apply_explore_region_choice
     body = await request.json()
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     uname = _user.get("username") or uid
     ids = [uid, uname] if uid != uname else [uid]
     pool = request.app.state.db_pool
-    choice = await set_explore_region(ids, (body or {}).get("region") or "wander", pool)
-    return {"explore_region": choice}
+    return await apply_explore_region_choice(ids, (body or {}).get("region") or "wander", pool)
 
 
 # ── Phase 6: Family Constellation (client endpoints) ──────────────────

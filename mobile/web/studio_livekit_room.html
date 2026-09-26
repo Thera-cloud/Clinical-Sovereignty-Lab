@@ -75,7 +75,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 #dock button.warn{border-color:#EF4444;color:#EF4444}
 #dock .meta{color:#8B7355;font-size:11px;align-self:center}
 #sfxIn{display:none;width:110px;background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px}
-#styleSel,#micSel,#camSel{background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px;max-width:180px}
+#styleSel,#micSel,#spkSel,#camSel{background:#0A0A0A;color:#E8D5A3;border:1px solid #8B7355;border-radius:6px;padding:8px;font-size:12px;max-width:180px}
 @media (max-width:960px){
   #stage{grid-template-columns:1fr;grid-template-rows:auto auto auto}
   #hosts{grid-template-columns:1fr;min-height:280px}
@@ -125,7 +125,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
 <div id="holdMedia" aria-hidden="true"></div>
 <div id="dock">
   <button id="btnMute" type="button">Mute</button>
-  <select id="micSel" title="Microphone"><option value="">Default microphone</option></select>
+  <select id="micSel" title="Microphone"><option value="">Computer microphone</option></select>
+  <select id="spkSel" title="Speakers"><option value="">Computer speakers</option></select>
   <button id="btnCam" type="button">Camera</button>
   <select id="camSel" title="Camera"><option value="">Default camera</option></select>
   <button id="btnShare" type="button">Share</button>
@@ -712,6 +713,16 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var tapeCanvas = null, tapeDrawTimer = null, tapeSources = {}, unlockOnce = false;
   function hookShowAudio(el){
     if (!el || el._tapeHooked || !tapeCtx || !tapeDest) return;
+    applySpeakerSink();
+    if (!(tapeCtx.setSinkId) && el.captureStream){
+      try {
+        var cs = el.captureStream();
+        var at = cs.getAudioTracks && cs.getAudioTracks()[0];
+        if (at) mixTrack('el:' + (el.id || 'nate'), at);
+        el._tapeHooked = true;
+        return;
+      } catch (ce) {}
+    }
     try {
       var src = tapeCtx.createMediaElementSource(el);
       src.connect(tapeDest);
@@ -866,6 +877,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     tapeArming = true;
     if (!tapeCtx) tapeCtx = new AudioContext();
     if (!tapeDest) tapeDest = tapeCtx.createMediaStreamDestination();
+    applySpeakerSink();
     var resume = (tapeCtx.resume) ? tapeCtx.resume() : Promise.resolve();
     resume.then(function(){
       if (tapeStarted) { tapeArming = false; return; }
@@ -905,15 +917,78 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
       setStatus('Tape is recording this window, with the microphone and Little Nate.');
     }).catch(function(){ tapeArming = false; });
   }
-  var programStream = null, programAsked = false, chosenMic = '', chosenCam = '', deviceFill = false;
+  var programStream = null, programAsked = false, chosenMic = '', chosenCam = '', chosenSpk = '', deviceFill = false;
+  var micUserPicked = false, spkUserPicked = false;
+  var PHONE_DEV_RE = /iphone|ipad|ipod|continuity|handoff|sidecar|apple.?watch/i;
+  var COMP_MIC_RE = /macbook|imac|mac mini|mac studio|built-?in|internal microphone|macintosh|display audio|usb|yeti|snowball|rode |hyperx|fifine|samson|audio-technica|focusrite|scarlett/i;
+  var COMP_SPK_RE = /macbook|imac|mac mini|mac studio|built-?in|internal speakers|macintosh|mac speakers|display audio|hdmi|dell|lg |samsung|monitor|realtek|speakers/i;
+  function isPhoneDevice(label){ return PHONE_DEV_RE.test(label || ''); }
+  function isVirtualId(id){ return !id || id === 'default' || id === 'communications'; }
+  function pickBestDevice(list, kind){
+    var scored = [];
+    (list || []).forEach(function(d){
+      if (!d || d.kind !== kind || isVirtualId(d.deviceId)) return;
+      var lab = d.label || '';
+      var score = 40;
+      if (isPhoneDevice(lab)) score = 90;
+      else if (!lab) score = 50;
+      else if (kind === 'audiooutput' && COMP_SPK_RE.test(lab)) score = 0;
+      else if (kind === 'audioinput' && COMP_MIC_RE.test(lab)) score = 0;
+      else if (kind === 'videoinput' && /facetime|built-?in|macbook|imac/i.test(lab) && !isPhoneDevice(lab)) score = 0;
+      else if (kind === 'audiooutput' && /speaker/i.test(lab) && !isPhoneDevice(lab)) score = 5;
+      else if (kind === 'audioinput' && /mic/i.test(lab) && !isPhoneDevice(lab)) score = 10;
+      else if (kind === 'videoinput' && lab && !isPhoneDevice(lab)) score = 15;
+      scored.push({id: d.deviceId, score: score});
+    });
+    scored.sort(function(a, b){ return a.score - b.score; });
+    if (!scored.length) return '';
+    if (scored[0].score < 50) return scored[0].id;
+    if (scored[0].score < 80) return scored[0].id;
+    return scored[0].id;
+  }
+  function applySpeakerSink(){
+    var id = chosenSpk;
+    function sink(el){
+      if (!el || !id || !el.setSinkId) return;
+      try { el.setSinkId(id).catch(function(){}); } catch (e) {}
+    }
+    sink(speakerEl());
+    sink(document.getElementById('nateThinker'));
+    if (tapeCtx && tapeCtx.setSinkId && id){
+      try { tapeCtx.setSinkId(id).catch(function(){}); } catch (e2) {}
+    }
+  }
+  function pinComputerDevices(){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve();
+    var probe = Promise.resolve();
+    if (!guest && navigator.mediaDevices.getUserMedia)
+      probe = navigator.mediaDevices.getUserMedia({audio:true, video:false}).then(function(s){
+        (s.getTracks() || []).forEach(function(t){ try { t.stop(); } catch (e) {} });
+      }).catch(function(){});
+    return probe.then(function(){ return navigator.mediaDevices.enumerateDevices(); }).then(function(list){
+      if (!micUserPicked){
+        var m = pickBestDevice(list, 'audioinput');
+        if (m) chosenMic = m;
+      }
+      if (!spkUserPicked){
+        var s = pickBestDevice(list, 'audiooutput');
+        if (s) chosenSpk = s;
+      }
+      if (!chosenCam){
+        var c = pickBestDevice(list, 'videoinput');
+        if (c) chosenCam = c;
+      }
+      applySpeakerSink();
+    }).catch(function(){});
+  }
   function micConstraints(){
     var c = {noiseSuppression:true, autoGainControl:true, echoCancellation:!programStream};
-    if (chosenMic) c.deviceId = chosenMic;
+    if (chosenMic) c.deviceId = {exact: chosenMic};
     return c;
   }
   function camConstraints(){
     var c = {};
-    if (chosenCam) c.deviceId = chosenCam;
+    if (chosenCam) c.deviceId = {exact: chosenCam};
     return c;
   }
   function localId(){
@@ -939,52 +1014,58 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   function restoreHostMic(){
     if (guest || !room || !room.localParticipant || !micOn) return Promise.resolve();
     return room.localParticipant.setMicrophoneEnabled(true, micConstraints()).then(function(){
+      rememberLocalMic();
+      mixShowAudio();
       rebindHostHear();
       setStatus(programStream
         ? 'Tape is this view. Little Nate can hear this microphone.'
-        : 'Microphone is live for Little Nate.');
+        : 'Computer microphone is live for Little Nate.');
     }).catch(function(){
-      setStatus('Microphone dropped — pick it again under Mic.');
+      setStatus('Microphone dropped — pick the computer microphone under Mic.');
     });
   }
   function fillDeviceSelect(sel, kind, chosen){
     if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
     navigator.mediaDevices.enumerateDevices().then(function(list){
-      var cur = chosen || sel.value || '';
       deviceFill = true;
       sel.innerHTML = '';
       var blank = document.createElement('option');
       blank.value = '';
-      blank.textContent = kind === 'audioinput' ? 'Default microphone' : 'Default camera';
+      blank.textContent = kind === 'audioinput' ? 'Computer microphone' : (kind === 'audiooutput' ? 'Computer speakers' : 'Computer camera');
       sel.appendChild(blank);
       var n = 0;
       (list || []).forEach(function(d){
-        if (!d || d.kind !== kind) return;
+        if (!d || d.kind !== kind || isVirtualId(d.deviceId)) return;
         n += 1;
         var o = document.createElement('option');
-        o.value = d.deviceId || '';
-        o.textContent = d.label || ((kind === 'audioinput' ? 'Microphone ' : 'Camera ') + n);
+        o.value = d.deviceId;
+        var lab = d.label || ((kind === 'audiooutput' ? 'Speakers ' : (kind === 'audioinput' ? 'Microphone ' : 'Camera ')) + n);
+        if (isPhoneDevice(lab)) lab = lab + ' — skip unless you mean this phone';
+        o.textContent = lab;
         sel.appendChild(o);
       });
-      if (cur) sel.value = cur;
-      var pinMic = false;
-      if (kind === 'audioinput' && !chosenMic){
-        var opts = sel.options;
-        for (var pi = 0; pi < opts.length; pi++){
-          var lab = opts[pi].textContent || '';
-          if (!opts[pi].value || /iphone|continuity/i.test(lab)) continue;
-          sel.value = opts[pi].value;
-          chosenMic = opts[pi].value;
-          pinMic = true;
-          break;
-        }
-      }
+      var best = pickBestDevice(list, kind);
+      var stillThere = false;
+      var curLab = '';
+      (list || []).forEach(function(d){
+        if (d && d.kind === kind && d.deviceId === chosen){ stillThere = true; curLab = d.label || ''; }
+      });
+      var next = chosen;
+      var userLock = (kind === 'audioinput' && micUserPicked) || (kind === 'audiooutput' && spkUserPicked);
+      if (!userLock || !stillThere || isPhoneDevice(curLab)) next = best || (stillThere ? chosen : '');
+      if (next) sel.value = next;
+      var switched = false;
+      if (kind === 'audioinput' && next && next !== chosenMic){ chosenMic = next; switched = true; }
+      if (kind === 'audiooutput' && next && next !== chosenSpk){ chosenSpk = next; switched = true; }
+      if (kind === 'videoinput' && next) chosenCam = next;
       deviceFill = false;
-      if (pinMic && room && room.localParticipant) restoreHostMic();
+      if (kind === 'audiooutput') applySpeakerSink();
+      if (kind === 'audioinput' && switched && room && room.localParticipant) restoreHostMic();
     }).catch(function(){ deviceFill = false; });
   }
   function refreshDevices(){
     fillDeviceSelect(document.getElementById('micSel'), 'audioinput', chosenMic);
+    fillDeviceSelect(document.getElementById('spkSel'), 'audiooutput', chosenSpk);
     fillDeviceSelect(document.getElementById('camSel'), 'videoinput', chosenCam);
   }
   function publishProgram(){
@@ -1037,6 +1118,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     audioUnlocked = true;
     if (!tapeCtx) tapeCtx = new AudioContext();
     if (!tapeDest) tapeDest = tapeCtx.createMediaStreamDestination();
+    applySpeakerSink();
     var resume = tapeCtx.resume ? tapeCtx.resume() : Promise.resolve();
     resume.then(function(){
       hookNateSpeaker();
@@ -1167,7 +1249,8 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function previewCam(){
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-    navigator.mediaDevices.getUserMedia({video:true, audio:false}).then(function(ms){
+    var video = chosenCam ? {deviceId: {exact: chosenCam}} : true;
+    navigator.mediaDevices.getUserMedia({video: video, audio:false}).then(function(ms){
       var v = document.getElementById('hostVid');
       v.srcObject = ms;
       fitMedia(v);
@@ -1210,6 +1293,10 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     var id = (participant && participant.identity) || 'unknown';
     audioTracks[id] = track.mediaStreamTrack || track;
     if (tapeCtx && tapeDest) mixTrack('aud:' + id, audioTracks[id]);
+    if (room && room.localParticipant && id === room.localParticipant.identity && !guest){
+      stopCap(id);
+      startCap(id);
+    }
   }
   function rememberLocalMic(){
     try {
@@ -1992,7 +2079,7 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     setStatus('LiveKit client failed to load.');
     return;
   }
-  previewCam();
+  pinComputerDevices().then(function(){ previewCam(); });
   room = new LK.Room({
     adaptiveStream:true,
     dynacast:true,
@@ -2085,10 +2172,18 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     if (pub && pub.track) rememberAudio(room.localParticipant, pub.track);
   });
   room.on(LK.RoomEvent.Reconnected, function(){
-    if (!guest && chosenMic && room.localParticipant)
-      room.localParticipant.setMicrophoneEnabled(true, micConstraints()).catch(function(){});
+    if (guest || !room || !room.localParticipant) return;
+    room.localParticipant.setMicrophoneEnabled(true, micConstraints()).then(function(){
+      rememberLocalMic();
+      mixShowAudio();
+      rebindHostHear();
+      applySpeakerSink();
+    }).catch(function(){});
+    if (chosenCam) room.localParticipant.setCameraEnabled(true, camConstraints()).catch(function(){});
   });
   room.connect(cfg.url, cfg.token).then(function(){
+    return pinComputerDevices();
+  }).then(function(){
     return room.localParticipant.setMicrophoneEnabled(true, micConstraints());
   }).then(function(){
     micOn = !!(room.localParticipant && room.localParticipant.isMicrophoneEnabled);
@@ -2115,7 +2210,9 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
     });
   }).then(function(){
     rememberLocalMic();
+    mixShowAudio();
     refreshDevices();
+    applySpeakerSink();
     if (programStream) restoreHostMic();
     if (room && room.remoteParticipants){
       room.remoteParticipants.forEach(function(p){
@@ -2338,8 +2435,17 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   var micSel = document.getElementById('micSel');
   if (micSel) micSel.onchange = function(){
     if (deviceFill) return;
+    micUserPicked = true;
     chosenMic = this.value || '';
     restoreHostMic();
+  };
+  var spkSel = document.getElementById('spkSel');
+  if (spkSel) spkSel.onchange = function(){
+    if (deviceFill) return;
+    spkUserPicked = true;
+    chosenSpk = this.value || '';
+    applySpeakerSink();
+    setStatus('Computer speakers selected for Little Nate.');
   };
   var camSel = document.getElementById('camSel');
   if (camSel) camSel.onchange = function(){
@@ -2359,14 +2465,24 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   document.getElementById('btnMute').onclick = function(){
     if (!room) return;
     micOn = !micOn;
-    room.localParticipant.setMicrophoneEnabled(micOn);
+    var req = micOn
+      ? room.localParticipant.setMicrophoneEnabled(true, micConstraints())
+      : room.localParticipant.setMicrophoneEnabled(false);
+    req.then(function(){
+      if (micOn){ rememberLocalMic(); mixShowAudio(); rebindHostHear(); }
+    }).catch(function(){
+      if (micOn) setStatus('Unmute failed — pick the computer microphone.');
+    });
     this.textContent = micOn ? 'Mute' : 'Unmute';
     this.classList.toggle('on', !micOn);
   };
   document.getElementById('btnCam').onclick = function(){
     if (!room || guest) return;
     camOn = !camOn;
-    room.localParticipant.setCameraEnabled(camOn).then(attachLocalCam);
+    var camReq = camOn
+      ? room.localParticipant.setCameraEnabled(true, camConstraints())
+      : room.localParticipant.setCameraEnabled(false);
+    camReq.then(attachLocalCam);
     this.classList.toggle('on', camOn);
   };
   document.getElementById('btnShare').onclick = function(){ startScreenShare(); };

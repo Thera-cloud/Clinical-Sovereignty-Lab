@@ -40,7 +40,8 @@ async def ensure_journey_folder(user_id: str, db_pool) -> str:
 
 async def register_panel_in_vault(
     user_id: str, r2_url: str, phase_id: str, storyboard_id: str,
-    generation_type: str, panel_tone: str, db_pool
+    generation_type: str, panel_tone: str, db_pool,
+    extra: dict | None = None,
 ) -> str:
     """Register a delivered panel/clip/recap as a vault item."""
     folder_id = await ensure_journey_folder(user_id, db_pool)
@@ -55,7 +56,7 @@ async def register_panel_in_vault(
 
     item_id = str(uuid.uuid4())
     import json
-    meta = json.dumps({
+    meta = {
         "phase_id": phase_id,
         "storyboard_id": storyboard_id,
         "generation_type": generation_type,
@@ -63,7 +64,10 @@ async def register_panel_in_vault(
         "delivered_at": now.isoformat(),
         "expires_at": expires,
         "category": "SSE Panel",
-    })
+    }
+    if extra:
+        meta.update(extra)
+    meta_json = json.dumps(meta)
 
     async with db_pool.acquire() as c:
         await c.execute(
@@ -72,7 +76,7 @@ async def register_panel_in_vault(
             " blob_path, mime_type, dimensions) "
             "VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9::jsonb)",
             item_id, user_id, folder_id, "sse_panel", filename,
-            f"{generation_type}: {phase_id}", r2_url, mime, meta)
+            f"{generation_type}: {phase_id}", r2_url, mime, meta_json)
 
         await c.execute(
             "UPDATE vault_folders SET item_count = item_count + 1 WHERE id = $1::uuid",

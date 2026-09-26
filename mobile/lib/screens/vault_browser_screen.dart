@@ -198,6 +198,13 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     }
   }
 
+  Future<void> _reloadJourneyStill() async {
+    if (!mounted) return;
+    if (_isSovereignJourneySelected) {
+      await _loadSSEPanels();
+    }
+  }
+
   Future<void> _loadSSEPanels() async {
     try {
       final uri = Uri.parse('$_baseUrl/api/sse-client/journey/panels');
@@ -212,9 +219,11 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
           final panelType = (m['panel_type'] ?? 'panel').toString();
           final realType =
               panelTone.isNotEmpty && _kKnownSseDeliveryTypes.contains(panelTone) ? panelTone : panelType;
+          final region = (m['region'] ?? '').toString();
+          final regionPrefix = region == 'neuro' ? 'neuro · ' : '';
           return {
             'id': m['id'] ?? m['panel_id'] ?? '',
-            'display_name': '${realType.replaceAll('_', ' ')} — ${_fmtDate(m['generated_at'])}',
+            'display_name': '$regionPrefix${realType.replaceAll('_', ' ')} — ${_fmtDate(m['generated_at'])}',
             'content_type': 'sse_panel',
             'created_at': m['generated_at'],
             'thumbnail_url': m['r2_url'],
@@ -472,7 +481,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
             if (sjFolder)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: TheraRegionChoice(token: _token),
+                child: TheraRegionChoice(token: _token, onApplied: _reloadJourneyStill),
               ),
             if (!sjFolder) ...[
               const SizedBox(height: 8),
@@ -493,7 +502,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       return false;
     }).toList() : <Map<String, dynamic>>[];
     return Column(children: [
-      if (sjSelected) TheraRegionChoice(token: _token),
+      if (sjSelected) TheraRegionChoice(token: _token, onApplied: _reloadJourneyStill),
       if (pushItems.isNotEmpty)
         Container(
           margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
