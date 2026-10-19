@@ -1778,6 +1778,30 @@ def _direct_action_violations(violations: list) -> list:
     ]
 
 
+_SOFT_AUDIT_EXACT = frozenset({
+    "missing_somatic_invitation",
+    "clinical_shift_without_bridge",
+    "phrase_overlap_with_recent_narrative",
+})
+
+
+def _soft_keep_draft(text: str, violations: list) -> bool:
+    """Keep a real answer when the audit miss is style, not safety."""
+    body = (text or "").strip()
+    if len(body) < 240 or not violations:
+        return False
+    for raw in violations:
+        s = str(raw)
+        if s in _SOFT_AUDIT_EXACT:
+            continue
+        if s.startswith("protective_affect_"):
+            continue
+        if s.startswith("symbolic_") and "crisis" not in s:
+            continue
+        return False
+    return True
+
+
 async def _repair_direct_action_response(
     response_text: str,
     audit_metadata: dict,
@@ -1966,25 +1990,31 @@ async def audit_therapeutic_response(
             logger.warning("therapeutic_controller: regenerate failed: %s", e)
 
     if not audit_passed and not _direct_action_violations(violations):
-        from app.services.stall_suppression import resolve_audit_fallback
-
-        protective_kind = audit_metadata.get("protective_affect_kind")
-        if protective_kind and any(
-            str(v).startswith("protective_affect_") for v in violations
-        ):
-            from app.services.protective_affect_inquiry import compassionate_fallback
-
-            final_text = compassionate_fallback(protective_kind)
-        else:
-            final_text = resolve_audit_fallback(
-                user_text=audit_metadata.get("user_text_for_audit") or "",
-                bridge_event_severity=audit_metadata.get("bridge_event_severity") or "info",
-                default_fallback=TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
+        if _soft_keep_draft(final_text, violations):
+            print(
+                f">>> [THERAPEUTIC-CTRL] kept_draft user={user_id} "
+                f"chars={len(final_text.strip())} violations={len(violations)}"
             )
-        print(
-            f">>> [THERAPEUTIC-CTRL] audit_failed_transparent_fallback user={user_id} "
-            f"violations={len(violations)}"
-        )
+        else:
+            from app.services.stall_suppression import resolve_audit_fallback
+
+            protective_kind = audit_metadata.get("protective_affect_kind")
+            if protective_kind and any(
+                str(v).startswith("protective_affect_") for v in violations
+            ):
+                from app.services.protective_affect_inquiry import compassionate_fallback
+
+                final_text = compassionate_fallback(protective_kind)
+            else:
+                final_text = resolve_audit_fallback(
+                    user_text=audit_metadata.get("user_text_for_audit") or "",
+                    bridge_event_severity=audit_metadata.get("bridge_event_severity") or "info",
+                    default_fallback=TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
+                )
+            print(
+                f">>> [THERAPEUTIC-CTRL] audit_failed_transparent_fallback user={user_id} "
+                f"violations={len(violations)}"
+            )
 
     # QUANTUM-CRYSTAL-ARCH — Gate 2 structural floor staged wiring (2026-08-03,
     # docs/ln7/GATE2_VERIFIER_CALIBRATION.md). Runs LAST, independent of

@@ -11044,7 +11044,11 @@ class AzureCortex:
                         _st_strip_menu = bool(_st_had_menu and not _stance_mod._has_framing_menu(full_response))
                         _st_strip_opener = bool(_st_opener_stale)
                         _st_removed = 1.0 - (len(full_response.strip()) / _st_pre_len)
-                        _st_gutted = (_st_removed > 0.30) or (full_response.strip() == _stance_mod._WITNESS_FALLBACK)
+                        # QUANTUM-CRYSTAL-ARCH — do not regen a long reply down to one stock line
+                        _st_gutted = (
+                            full_response.strip() == _stance_mod._WITNESS_FALLBACK
+                            or (len(full_response.strip()) < 140 and _st_removed > 0.30)
+                        )
                         full_response = await _stance_maybe_regen(
                             _st_gutted, system_prompt, user_text, full_response,
                             _st_dec2, _st_state2, _t_inf_start,

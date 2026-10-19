@@ -6,7 +6,10 @@ CEO: Nathaniel James Nevedal. Risk: RED.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from app.services.attunement import flags
 from app.services.attunement.agency import (
@@ -71,6 +74,14 @@ def format_critical_recall(
     recon = reconnect_directive(uid)
     if recon:
         parts.append(recon)
+    try:
+        from app.services.attunement.thread_directory import block_for_turn
+
+        directory = block_for_turn(uid, user_text)
+        if directory:
+            parts.append(directory)
+    except Exception as exc:
+        logger.warning("thread directory prompt skipped: %s", exc)
     deferred = consume_deferred(uid)
     if deferred:
         parts.append(deferred)
@@ -147,6 +158,14 @@ def apply_postflight(
     out = strip_spoken_quotients(out)
     if is_reconnect(uid):
         out = strip_greeting(out)
+    if is_meta_repair(user_text) and (
+        ev["collapsed"]
+        or out.strip().startswith("What you're carrying is heavy")
+        or out.strip().startswith("I want to think about that more carefully")
+    ):
+        from app.services.attunement.thread_directory import cut_repair_line
+
+        out = cut_repair_line(uid)
     if ev["collapsed"] and not already_streamed:
         out = ev["reply"]
     if last_u and not should_bind_stale_unacked(user_text):
@@ -189,6 +208,12 @@ def apply_surface_postflight(uid: str, user_text: str, reply: str) -> str:
 
 def on_turn_committed(uid: str, user_text: str, ai_text: str, meta: Optional[dict] = None) -> None:
     ring_append(uid, user_text, ai_text)
+    try:
+        from app.services.attunement.thread_directory import commit_turn
+
+        commit_turn(uid, user_text)
+    except Exception as exc:
+        logger.warning("thread directory commit skipped: %s", exc)
 
 
 def on_last_socket(uid: str, live_turns: Optional[List[dict]] = None) -> None:

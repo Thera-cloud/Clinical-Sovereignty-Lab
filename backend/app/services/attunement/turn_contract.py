@@ -29,6 +29,9 @@ _STAY = re.compile(
 # clause onto a new share or a "you're not working" repair turn.
 _META_REPAIR = re.compile(
     r"(something is off|how you are functioning|incongruent|"
+    r"\bglitch(?:ing|ed)?\b|\beras(?:e|ing|ed)\b|\bdisconnect(?:ed|ing|ion)?\b|"
+    r"\bnot working\b|\bdidn'?t respond\b|\bloop(?:ing|ed)\b|"
+    r"\bmental spasms?\b|"
     r"can you please review|review (all )?(of )?(our |the )?"
     r"(interactions|session|paragraphs|conversation)|"
     r"from the beginning|rewrite it again|start over)",
@@ -174,7 +177,12 @@ def evaluate(
     miss_ack: bool = False,
 ) -> Dict[str, Any]:
     cleaned, hold_only = strip_hold_only(reply)
-    collapsed = is_collapse(user_text, cleaned, hold_only=hold_only)
+    # A cut-repair turn keeps the model's answer. Do not swap in a stock hold.
+    if is_meta_repair(user_text):
+        hold_only = False
+        collapsed = False
+    else:
+        collapsed = is_collapse(user_text, cleaned, hold_only=hold_only)
     if collapsed:
         cleaned = witnessing_fallback(user_text)
     hc = hold_cover(user_text, cleaned, last_unacked)

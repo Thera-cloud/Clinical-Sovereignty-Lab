@@ -1811,6 +1811,11 @@ def _strip_non_crisis_handoff_closings(text: str, move: StanceMove) -> str:
     return text
 
 
+def _keep_opening(text: str, n: int = 4) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return " ".join(s.strip() for s in sentences[:n] if s.strip()).strip()
+
+
 def guard_framing_menu(text: str, move: StanceMove) -> str:
     """
     Post-generation pass: strip framing menus / action plans for witness moves.
@@ -1826,6 +1831,9 @@ def guard_framing_menu(text: str, move: StanceMove) -> str:
         return _PRESCRIPTION_REFUSAL_FALLBACK
 
     if not cleaned.strip() or len(cleaned.strip()) < original_len * 0.35:
+        opening = _keep_opening(text)
+        if len(opening) >= 160 and not _output_looks_like_prescription(opening):
+            return opening
         return _WITNESS_FALLBACK
     return cleaned.strip()
 
@@ -1838,6 +1846,8 @@ def guard_stale_opener(text: str, state: StanceState) -> str:
         return text
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     if len(sentences) <= 1:
+        if len(text.strip()) >= 160:
+            return text.strip()
         return _WITNESS_FALLBACK
     remainder = " ".join(sentences[1:]).strip()
     return remainder if remainder else _WITNESS_FALLBACK
