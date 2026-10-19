@@ -118,23 +118,20 @@ def host_space_seen(session_id: str) -> Dict[str, Any]:
 
 def host_space_block(seen: Optional[Dict[str, Any]]) -> str:
     row = seen or {}
-    note = (row.get("note") or "").strip()
     look = row.get("look") if isinstance(row.get("look"), dict) else {}
-    if not note and not look:
+    if not look.get("notable"):
         return ""
+    note = (row.get("note") or "").strip()
     emotion = str(look.get("emotion") or "").strip()[:40]
     energy = str(look.get("energy") or "").strip()[:40]
     gaze = str(look.get("gaze") or "").strip()[:40]
     bits = [p for p in (energy, emotion, gaze) if p]
     head = ", ".join(bits) if bits else "live"
-    extra = " This look is worth a beat if it fits." if look.get("notable") else ""
     return (
         "\n\nHOST CAMERA (Big Nate): "
         f"{head}. Last look: {note or 'in frame'}."
-        " Mention face, energy, or space only when it serves the bit — a laugh, "
-        "a tightness, a lean. Never read vitals. Never diagnose. Never say "
-        "biometric or valence. You are sitting across from him."
-        + extra
+        " Private glance. Do not open on face, room, or backdrop unless they asked what you see. "
+        "Never read vitals. Never diagnose. Never say biometric or valence."
     )
 
 
@@ -142,8 +139,6 @@ def want_host_jpeg(kind: str, blob: str, notable: bool, share_jpeg: str) -> bool
     if (share_jpeg or "").strip():
         return False
     if notable:
-        return True
-    if (kind or "").strip().lower() in {"toss", "open"}:
         return True
     return bool(_LOOK_ME.search(blob or ""))
 
@@ -197,7 +192,9 @@ async def describe_host_space(image_bytes: bytes) -> Dict[str, Any]:
                 "JSON only: {\"seen\":true,\"emotion\":\"amused|warm|tight|tired|"
                 "fired|neutral\",\"energy\":\"calm|warm|fired|tired|tense|playful\","
                 "\"gaze\":\"camera|away|down\",\"posture\":\"short\",\"notable\":false,"
-                "\"line\":\"one short visible observation\"}. "
+                "\"line\":\"one short visible observation of face or posture only\"}. "
+                "Do not mention the room, furniture, or backdrop. notable=true only "
+                "for a striking facial beat, never for scenery. "
                 "No diagnosis. If empty or dark, {\"seen\":false,\"line\":\"unread\"}."
             ),
             system="Host-camera look only. Visible facts. JSON only.",

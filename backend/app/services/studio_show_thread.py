@@ -169,7 +169,10 @@ def turn_block(
     )
     if host_seen:
         note = _clip(host_note, 240) or "still attached"
-        lines.append(f"HOST FRAME (real still): {note}. Say only what is in that frame.")
+        lines.append(
+            f"HOST FRAME (private glance): {note}. "
+            "Do not open on this. Do not mention backdrop or background unless they asked what you see."
+        )
     else:
         lines.append("HOST FRAME: no still this turn. If they ask what you see, say you do not have the picture.")
     if share_seen:

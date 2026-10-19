@@ -45,7 +45,7 @@ def test_booth_routes_and_cache_bump():
     assert '/sessions/{session_id}/booth/legs' in api
     assert '/sessions/{session_id}/lookup' in api
     live = (ROOT / "backend/app/services/studio_livekit.py").read_text()
-    assert "v=20260926a" in live
+    assert "v=20260926b" in live
     assert "studio_program_out.html" in live
     assert "custom_base_url" in live
     assert 'with_name("studio_nate_room.html")' in live
@@ -92,6 +92,7 @@ def test_six_room_copies_match():
     assert "deviceId = {exact: chosenMic}" in src
     assert "booth/egress" in src
     assert "Safari captions the host mic" in src
+    assert "blob.length >= 80" in src
     assert "32 * 1024 * 1024" in src
     assert "intent.kind === 'search') doLookup" not in src
     assert "createElement('iframe')" in src

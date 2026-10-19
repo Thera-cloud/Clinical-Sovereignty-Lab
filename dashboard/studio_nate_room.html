@@ -1320,7 +1320,12 @@ body{display:flex;flex-direction:column;min-height:100vh;background:#050505;colo
   }
   function shouldAskCaps(blob){
     if (!blob || blob.length < 12) return false;
-    return hostAimed(blob);
+    var low = blob.toLowerCase();
+    if (low.indexOf('caller:') >= 0) return true;
+    if (hostAimed(blob)) return true;
+    if (blob.indexOf('?') >= 0) return true;
+    if (blob.length < 24) return false;
+    return blob.length >= 80;
   }
   function freshCaps(){
     var cutoff = Date.now() - CAP_FRESH_MS;

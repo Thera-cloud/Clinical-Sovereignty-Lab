@@ -388,7 +388,7 @@ def test_s4_apply_probe_egress_billing_autoscale():
     assert v["session_id"] == "sid-1"
     url = _lk.room_embed_url("wss://x", tok, "host", "sid-1")
     assert "session=sid-1" in url
-    assert "v=20260926a" in url
+    assert "v=20260926b" in url
     turn = asyncio.run(_sess.cohost_turn(None, "sid-1", "hello from the host"))
     assert turn["ok"] is True
     assert turn["text"]
@@ -653,6 +653,7 @@ def test_studio_realm_rotation():
         assert "booth/dump" in room, rel
         assert "booth/end" in room, rel
         assert "function hostAimed" in room, rel
+        assert "blob.length >= 80" in room, rel
         assert "pendingCaps.slice(-24)" not in room, rel
         assert "studio_portrait.html?v=20260909b" in room, rel
         assert "function hasSpeechRec" in room, rel
@@ -718,7 +719,11 @@ def test_studio_share_host_only():
     assert "HOST CAMERA" in block and "smiling" in block
     assert share.want_host_jpeg("line", "look at me", False, "") is True
     assert share.want_host_jpeg("line", "hello", False, "sharejpg") is False
-    assert share.want_host_jpeg("toss", "hello", False, "") is True
+    assert share.want_host_jpeg("toss", "hello", False, "") is False
+    assert share.want_host_jpeg("toss", "look at me", False, "") is True
+    assert share.want_host_jpeg("toss", "hello", True, "") is True
+    quiet = {"look": {"emotion": "neutral", "notable": False, "line": "bookshelves behind him"}}
+    assert share.host_space_block(quiet) == ""
     share.forget_host_space("sess-host")
     assert share.host_space_seen("sess-host") == {}
 
@@ -734,7 +739,7 @@ def test_studio_share_host_only():
     assert "_require_host_jwt" in api_src
 
     sess_src = (ROOT / "backend/app/services/studio_session_service.py").read_text()
-    assert "ON SCREEN" in sess_src
+    assert "spoken line is the topic" in sess_src
     assert "host_space_block" in sess_src
     share_src = (ROOT / "backend/app/services/studio_cohost_share.py").read_text()
     assert "HOST CAMERA" in share_src

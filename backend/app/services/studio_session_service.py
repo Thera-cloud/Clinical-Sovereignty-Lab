@@ -342,12 +342,13 @@ async def cohost_turn(
     can_see = note_has_seen_content(share_n) or bool(jpeg)
     host = host_space_seen(sid)
     host_jpeg = (host.get("jpeg") or "").strip()
-    if want_host_jpeg(kind, blob, bool(host.get("notable")), jpeg):
+    attach_host = want_host_jpeg(kind, blob, bool(host.get("notable")), jpeg)
+    if attach_host:
         jpeg = jpeg or host_jpeg
     images = []
     if jpeg:
         images.append(jpeg)
-    if host_jpeg and host_jpeg not in images:
+    if attach_host and host_jpeg and host_jpeg not in images:
         images.append(host_jpeg)
     if kind in ("toss", "open", "caller_join"):
         prime_clear(sid)
@@ -412,8 +413,12 @@ async def cohost_turn(
     host_block = host_space_block(host)
     if host_block:
         system += host_block
-    if host_jpeg:
-        system += " A still of the host camera is attached. Use only what is actually in that frame — face, posture, and what sits behind him."
+    if attach_host and host_jpeg:
+        system += (
+            " A still of the host camera is attached for you only. "
+            "The spoken line is the topic. Do not describe the room, backdrop, "
+            "or what sits behind him unless they asked what you see."
+        )
     room = f"Room: {live} live caller(s), {hold} waiting."
     if realm_name and realm_shift:
         room += " Do not say aloud: The realm just shifted in behind you this second."
@@ -464,7 +469,7 @@ async def cohost_turn(
     system += "\n\n" + turn_block(
         sid,
         move,
-        host_seen=bool(host_jpeg),
+        host_seen=bool(attach_host and host_jpeg),
         host_note=str((host or {}).get("note") or ""),
         share_seen=bool(can_see and jpeg),
         share_note=share_n,
@@ -472,15 +477,16 @@ async def cohost_turn(
     )
     if kind == "open":
         prefix = (
-            f"{room} Show just went live. Warm hello, then a small joke or take of your own. "
-            "Land it on a statement. No app pitch.\n"
+            f"{room} Show just went live. Warm hello on whatever they just said. "
+            "Do not describe the room or backdrop. Land it on a statement. No app pitch.\n"
         )
     elif kind == "caller_join":
         prefix = f"{room} A caller just joined. Welcome them like a person, once. No product pitch.\n"
     elif kind == "toss":
         prefix = (
-            f"{room} TOSS — host handed you the floor. Follow THIS_SHOW. "
-            "React, then say what you actually think. Do not default to the app.\n"
+            f"{room} TOSS — host handed you the floor. Answer the latest spoken line. "
+            "Do not open on the camera, room, or backdrop. React, then say what you think. "
+            "Do not default to the app.\n"
         )
     elif kind == "caption" or (
         kind == "prime"
