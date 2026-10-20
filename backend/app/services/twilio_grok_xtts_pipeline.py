@@ -2085,6 +2085,14 @@ async def run_twilio_grok_xtts_bridge(
                                     )
                                 except Exception:
                                     pass
+                                try:
+                                    from app.services.attunement.thread_directory import (
+                                        commit_turn as _td_commit,
+                                    )
+                                    if not _u.startswith("[voice audio"):
+                                        _td_commit(session_username, _u, _a)
+                                except Exception as _td_exc:
+                                    logger.warning("voice thread directory skipped: %s", _td_exc)
                                 await _crystal_forge(
                                     db_pool, session_username, _u, _a,
                                     user_name=session_username,

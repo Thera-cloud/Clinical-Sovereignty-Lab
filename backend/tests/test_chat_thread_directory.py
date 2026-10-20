@@ -108,3 +108,110 @@ async def test_long_draft_survives_somatic_miss():
     )
     assert draft in out["response_text"]
     assert "which part of what you shared" not in out["response_text"]
+
+
+def test_exact_stall_is_repaired_when_she_does_not_name_the_cut():
+    from app.services.attunement import store
+    from app.services.attunement.hooks import apply_postflight
+    from app.services.therapeutic_controller import TRANSPARENT_AUDIT_FALLBACK_MESSAGE
+
+    uid = "VERIFY_POSTFLIGHT_STALL"
+    user = (
+        "Saturday morning leadership left a weight on my chest "
+        "and I stayed with that feeling for a long time afterward."
+    )
+    assert not is_meta_repair(user)
+    out, _ = apply_postflight(uid, user, TRANSPARENT_AUDIT_FALLBACK_MESSAGE)
+    assert not out.startswith("I want to think about that more carefully")
+    assert "which part of what you shared" not in out
+    store.delete(store.key("threads", uid))
+
+
+def test_stall_opener_keeps_a_long_continuation():
+    from app.services.attunement import store
+    from app.services.attunement.hooks import apply_postflight
+    from app.services.therapeutic_controller import TRANSPARENT_AUDIT_FALLBACK_MESSAGE
+
+    uid = "VERIFY_POSTFLIGHT_TAIL"
+    tail = (
+        "The leadership morning is the piece to stay with. "
+        "The blessing was spoken in the room and it landed as both "
+        "encouragement and weight, and that is the answer I am keeping "
+        "instead of asking you to pick a part. " * 3
+    )
+    reply = TRANSPARENT_AUDIT_FALLBACK_MESSAGE + " " + tail
+    out, _ = apply_postflight(uid, "The leadership meeting stayed with me.", reply)
+    assert not out.startswith("I want to think about that more carefully")
+    assert "leadership morning" in out
+    assert len(out) >= 240
+    store.delete(store.key("threads", uid))
+
+
+def test_heavy_line_is_repaired_without_a_cut_word():
+    from app.services.attunement import store
+    from app.services.attunement.hooks import apply_postflight
+
+    uid = "VERIFY_POSTFLIGHT_HEAVY"
+    out, _ = apply_postflight(
+        uid,
+        "The leadership meeting stayed on my chest all afternoon.",
+        _WITNESS_FALLBACK,
+    )
+    assert not out.startswith("What you're carrying is heavy")
+    store.delete(store.key("threads", uid))
+
+
+@pytest.mark.asyncio
+async def test_long_banned_draft_is_still_replaced():
+    from app.services.therapeutic_controller import (
+        TRANSPARENT_AUDIT_FALLBACK_MESSAGE,
+        audit_therapeutic_response,
+    )
+
+    draft = (
+        "You'll get over this — many people feel that way. "
+        + ("I am padding this reply so it crosses the long-draft keep. " * 8)
+    )
+    assert len(draft) >= 240
+    out = await audit_therapeutic_response(
+        response_text=draft,
+        audit_metadata={
+            "locale": "en-US",
+            "autonomic_state": "regulated",
+            "max_tokens": 600,
+            "mismatch_available": False,
+        },
+        user_id="thread_banned_long",
+        db_pool=None,
+    )
+    assert out["response_text"] == TRANSPARENT_AUDIT_FALLBACK_MESSAGE
+
+
+def test_shorter_rewrite_is_rejected():
+    from app.services.therapeutic_controller import _retry_keeps_length
+
+    assert _retry_keeps_length("a" * 300, "short") is False
+    assert _retry_keeps_length("a" * 300, "b" * 300) is True
+
+
+def test_surface_postflight_stores_turns_for_a_second_directory():
+    from app.services.attunement import store
+    from app.services.attunement.hooks import apply_surface_postflight
+
+    uid = "VERIFY_SURFACE_THREADS"
+    store.delete(store.key("threads", uid))
+    apply_surface_postflight(
+        uid,
+        "Bill listened today and I want to stay with our relationship.",
+        "Staying with Bill and the marriage you just named, in this room.",
+    )
+    apply_surface_postflight(
+        uid,
+        "The story panel with Dawnsinger needs a name for the figure.",
+        "The panel figure can wait until you name what the panel is holding.",
+    )
+    block = block_for_turn(uid, "Back to Bill and our marriage.")
+    assert "Active: marriage" in block
+    assert "Recent turns in marriage" in block
+    assert "panel:" in block
+    store.delete(store.key("threads", uid))

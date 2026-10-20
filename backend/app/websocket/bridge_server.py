@@ -10636,7 +10636,7 @@ class AzureCortex:
                 _len_cap = max(int(_len_cap or 0), 1500)  # QUANTUM-CRYSTAL-ARCH — protocol E room
             # QUANTUM-CRYSTAL-ARCH: buffer until audit unless stream-before-audit (Faster default).
             _stream_before_audit = bool(_stream_before_audit_fn(_depth))
-            _buffer_for_therapeutic_audit = bool(_ttc_audit_meta) and not _stream_before_audit
+            _buffer_for_therapeutic_audit = bool(_ttc_audit_meta)  # QUANTUM-CRYSTAL-ARCH
             # QUANTUM-CRYSTAL-ARCH — native iOS must never stream before final safety guard.
             if _ios_wellness_mode:
                 _buffer_for_therapeutic_audit = True
@@ -10645,6 +10645,7 @@ class AzureCortex:
             full_response = ""
             _provider_used = ""
             _already_streamed = False
+            _attune_meta = {}
             _t_inf_start = _time_inf.monotonic()
 
             # QUANTUM-CRYSTAL-ARCH — Coaching Scope Gate bypass (Phase 1)
@@ -11092,10 +11093,16 @@ class AzureCortex:
                     )
                     _already_streamed = False
 
-            # SOVEREIGN-VOICE — emit completed provider text; C1 defers until after audit when buffering (any provider).
-            _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
-            if _emit_after_inference and (_provider_used != "azure" or _buffer_for_therapeutic_audit or _audit_rewrite_pending):
-                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+            try:  # QUANTUM-CRYSTAL-ARCH
+                from app.services.attunement.hooks import apply_postflight as _attune_pf
+                _attune_fn = ((profile.get("name") or "").strip().split() or [""])[0]
+                full_response, _attune_meta = _attune_pf(
+                    uid, user_text, full_response, live_turns=_chat_live_turns.get(uid) or [],
+                    first_name=_attune_fn, crystal_ids=_crystal_ids_for_turn,
+                    pg_context=pg_history_context, depth=_depth, turn_id=_turn_id,
+                    already_streamed=bool(_already_streamed))
+            except Exception as _attune_early_err:
+                print(f">>> [ATTUNE] pre-emit error (non-fatal): {_attune_early_err}")
 
             # SOVEREIGN-VOICE — zero-cost token refund
             if not is_dojo_simulation and _provider_used in _ZERO_COST_PROVIDERS:
@@ -11164,14 +11171,10 @@ class AzureCortex:
                     full_response = _sse_sift(full_response, _sse_panel_ctx, _sse_src)
                     if full_response != _sse_before:
                         print(f">>> [SSE PANEL] Doorways completed for {uid}")
-                        await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
                 except Exception as _sse_e_err:
                     print(f">>> [SSE PANEL] Focus-topic complete skipped: {_sse_e_err}")
             _final_response = full_response
-            if not full_response.strip():
-                await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.", client_context=_ctx, turn_id=_turn_id)
-                print(f">>> [AI] Empty response for {uid} - sent fallback message")
-            else:
+            if full_response.strip():
                 _sanitized = sanitize_ai_response(full_response, _role)
                 try:
                     from app.services.response_sanitizer import sanitize_response as _scrub
@@ -11197,25 +11200,7 @@ class AzureCortex:
                         print(f">>> [ENRICH GUARD] error (non-fatal): {_lg_err}")
                 if _sanitized != full_response:
                     print(f">>> [IP BOUNDARY] Sanitized AI response for {_role} user {profile.get('name')}")
-                    await self._send(uid, _sanitized, client_context=_ctx, turn_id=_turn_id)
                     _final_response = _sanitized
-            _attune_meta = {}
-            try:  # QUANTUM-CRYSTAL-ARCH
-                from app.services.attunement.hooks import apply_postflight
-                _fn = ((profile.get("name") or "").strip().split() or [""])[0]
-                _pre_attune = _final_response
-                _final_response, _attune_meta = apply_postflight(
-                    uid, user_text, _final_response,
-                    live_turns=_chat_live_turns.get(uid) or [],
-                    first_name=_fn, crystal_ids=_crystal_ids_for_turn,
-                    pg_context=pg_history_context, depth=_depth, turn_id=_turn_id,
-                    already_streamed=bool(_already_streamed),
-                )
-                if _final_response != _pre_attune and _final_response.strip():
-                    await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
-            except Exception as _attune_err:
-                print(f">>> [ATTUNE] postflight error (non-fatal): {_attune_err}")
-
             # QUANTUM-CRYSTAL-ARCH — Layer 8 factual grounding post-check
             if _validate_factual and _role == "CLIENT" and _final_response.strip():
                 try:
@@ -11227,7 +11212,6 @@ class AzureCortex:
                         user_id=uid,
                     )
                     if not _v8.get("safe"):
-                        await self._send(uid, _v8["redirect"], client_context=_ctx, turn_id=_turn_id)
                         _final_response = _v8["redirect"]
                         print(f">>> [LAYER 8] Factual grounding redirect for {uid}: {_v8.get('reason')}")
                 except Exception as _v8e:
@@ -11240,7 +11224,6 @@ class AzureCortex:
                     _qg_uid = _UUID(int=0)
                     _safe, _blocked = await _queens_guard.verify_output(_qg_uid, _final_response)
                     if _blocked:
-                        await self._send(uid, _safe, client_context=_ctx, turn_id=_turn_id)
                         _final_response = _safe
                         print(f">>> [LAYER 9] Queens Guard L3 blocked output for {uid}")
                 except Exception as _qg_err:
@@ -11253,7 +11236,6 @@ class AzureCortex:
                     _fixed_988 = _ens_988(_final_response, _ttc_audit_meta)
                     if _fixed_988 != _final_response:
                         _final_response = _fixed_988
-                        await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
                 except Exception:
                     pass
 
@@ -11270,9 +11252,13 @@ class AzureCortex:
                         )
                         if _sk_fixed != _final_response:
                             _final_response = _sk_fixed
-                            await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
                 except Exception as _sk_err:
                     print(f">>> [CYCLE-SKILL] fidelity guard error (non-fatal): {_sk_err}")
+
+            _emit_after_inference = (not _already_streamed) or _buffer_for_therapeutic_audit
+            if _emit_after_inference and (_provider_used != "azure" or _buffer_for_therapeutic_audit or _audit_rewrite_pending):
+                _final_response = _final_response if (_final_response or "").strip() else "I'm having trouble connecting right now. Please try again in a moment."
+                await self._send(uid, _final_response, client_context=_ctx, turn_id=_turn_id)
 
             # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE post-response
             if _lr_engine and lr_context and _final_response.strip():

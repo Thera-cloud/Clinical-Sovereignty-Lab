@@ -1785,21 +1785,28 @@ _SOFT_AUDIT_EXACT = frozenset({
 })
 
 
+def _hard_must_replace(violations: list) -> bool:
+    """Crisis and banned harmful phrases may replace a draft. Style misses may not."""
+    for raw in violations:
+        s = str(raw)
+        if s.startswith("banned_phrase:"):
+            return True
+        if "crisis" in s or s == "symbolic_scope_isolation":
+            return True
+    return False
+
+
+def _retry_keeps_length(previous: str, retry: str) -> bool:
+    """A second model rewrite must not shrink a longer draft."""
+    return len((retry or "").strip()) >= len((previous or "").strip())
+
+
 def _soft_keep_draft(text: str, violations: list) -> bool:
-    """Keep a real answer when the audit miss is style, not safety."""
+    """Keep a real answer of 240+ characters unless the miss is safety."""
     body = (text or "").strip()
     if len(body) < 240 or not violations:
         return False
-    for raw in violations:
-        s = str(raw)
-        if s in _SOFT_AUDIT_EXACT:
-            continue
-        if s.startswith("protective_affect_"):
-            continue
-        if s.startswith("symbolic_") and "crisis" not in s:
-            continue
-        return False
-    return True
+    return not _hard_must_replace(violations)
 
 
 async def _repair_direct_action_response(
@@ -1845,7 +1852,9 @@ async def _repair_direct_action_response(
         )
         if retry and retry.strip():
             retry_violations = _audit_violations(retry.strip(), audit_metadata, [])
-            if len(retry_violations) < len(violations):
+            if len(retry_violations) < len(violations) and _retry_keeps_length(
+                response_text, retry
+            ):
                 return retry.strip(), retry_violations, len(retry_violations) == 0
     except Exception as e:
         logger.warning("therapeutic_controller: direct-action repair failed: %s", e)
@@ -1925,7 +1934,9 @@ async def audit_therapeutic_response(
                         retry_violations = _audit_violations(
                             retry.strip(), audit_metadata, recent_narratives,
                         )
-                        if len(retry_violations) < len(violations):
+                        if len(retry_violations) < len(violations) and (
+                            _needs_law_regen or _retry_keeps_length(final_text, retry)
+                        ):
                             final_text = retry.strip()
                             violations = retry_violations
                             audit_passed = len(retry_violations) == 0
@@ -1981,7 +1992,9 @@ async def audit_therapeutic_response(
             )
             if retry and retry.strip():
                 retry_violations = _audit_violations(retry, audit_metadata, recent_narratives)
-                if len(retry_violations) < len(violations):
+                if len(retry_violations) < len(violations) and _retry_keeps_length(
+                    final_text, retry
+                ):
                     final_text = retry.strip()
                     violations = retry_violations
                     audit_passed = len(retry_violations) == 0

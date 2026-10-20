@@ -127,6 +127,31 @@ def tempo_max_tokens(uid: str, user_text: str, current_cap: int, depth: str, liv
     return current_cap
 
 
+_STOCK_STEMS = (
+    "I want to think about that more carefully",
+    "What you're carrying is heavy",
+)
+
+
+def _opens_stock(text: str) -> bool:
+    body = (text or "").strip()
+    return any(body.startswith(stem) for stem in _STOCK_STEMS)
+
+
+def _drop_stock_opener(text: str) -> str:
+    """Drop a leading stall or heavy sentence. Keep any real reply after it."""
+    body = (text or "").strip()
+    for stem in _STOCK_STEMS:
+        if not body.startswith(stem):
+            continue
+        rest = body[len(stem):].lstrip(" —-")
+        for i, ch in enumerate(rest):
+            if ch in ".!?":
+                return rest[i + 1 :].strip()
+        return ""
+    return body
+
+
 def apply_postflight(
     uid: str,
     user_text: str,
@@ -140,6 +165,8 @@ def apply_postflight(
     turn_id: str = "",
     already_streamed: bool = False,
 ) -> Tuple[str, Dict[str, Any]]:
+    if not (reply or "").strip():
+        return reply or "", {}
     live = live_turns or []
     unacked = peek(uid)
     last_u = (unacked[-1].get("user_text") if unacked else "") or ""
@@ -158,15 +185,23 @@ def apply_postflight(
     out = strip_spoken_quotients(out)
     if is_reconnect(uid):
         out = strip_greeting(out)
-    if is_meta_repair(user_text) and (
-        ev["collapsed"]
-        or out.strip().startswith("What you're carrying is heavy")
-        or out.strip().startswith("I want to think about that more carefully")
-    ):
+    stock_fixed = False
+    opened = reply if _opens_stock(reply) else out
+    if is_meta_repair(user_text) and (ev["collapsed"] or _opens_stock(opened)):
         from app.services.attunement.thread_directory import cut_repair_line
 
         out = cut_repair_line(uid)
-    if ev["collapsed"] and not already_streamed:
+        stock_fixed = True
+    elif _opens_stock(opened):
+        rest = _drop_stock_opener(opened)
+        if len(rest) >= 240:
+            out = rest
+        else:
+            from app.services.attunement.thread_directory import cut_repair_line
+
+            out = cut_repair_line(uid)
+        stock_fixed = True
+    if ev["collapsed"] and not already_streamed and not stock_fixed:
         out = ev["reply"]
     if last_u and not should_bind_stale_unacked(user_text):
         note_skipped(uid)
@@ -203,6 +238,12 @@ def apply_surface_postflight(uid: str, user_text: str, reply: str) -> str:
     if not uid or not (reply or "").strip():
         return reply
     out, _ = apply_postflight(uid, user_text, reply)
+    try:
+        from app.services.attunement.thread_directory import commit_turn
+
+        commit_turn(uid, user_text, out)
+    except Exception as exc:
+        logger.warning("surface thread directory commit skipped: %s", exc)
     return out
 
 
@@ -211,7 +252,7 @@ def on_turn_committed(uid: str, user_text: str, ai_text: str, meta: Optional[dic
     try:
         from app.services.attunement.thread_directory import commit_turn
 
-        commit_turn(uid, user_text)
+        commit_turn(uid, user_text, ai_text)
     except Exception as exc:
         logger.warning("thread directory commit skipped: %s", exc)
 

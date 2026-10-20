@@ -97,7 +97,7 @@ def is_presence(text: str) -> bool:
     return bool(_PRESENCE.match(text or ""))
 
 
-def commit_turn(uid: str, user_text: str) -> None:
+def commit_turn(uid: str, user_text: str, ai_text: str = "") -> None:
     if not uid or not (user_text or "").strip():
         return
     state = load(uid)
@@ -108,10 +108,13 @@ def commit_turn(uid: str, user_text: str) -> None:
     tid = classify(user_text) or state.get("active") or "general"
     threads = dict(state.get("threads") or {})
     prev = threads.get(tid) if isinstance(threads.get(tid), dict) else {}
+    turns = [t for t in (prev.get("turns") or []) if isinstance(t, dict)]
+    turns.append({"u": _clip(user_text, 280), "a": _clip(ai_text, 280)})
     threads[tid] = {
         "beat": _clip(user_text),
         "n": int(prev.get("n") or 0) + 1,
         "at": int(time.time()),
+        "turns": turns[-6:],
     }
     state["active"] = tid
     state["threads"] = threads
@@ -151,6 +154,17 @@ def block_for_turn(uid: str, user_text: str) -> str:
         "THREAD DIRECTORY — separate conversations. Answer only the active one.",
         f"Active: {tid}.",
     ]
+    active_row = threads.get(tid) if isinstance(threads.get(tid), dict) else {}
+    history = [t for t in (active_row.get("turns") or []) if isinstance(t, dict)]
+    if history:
+        lines.append(f"Recent turns in {tid}:")
+        for turn in history[-4:]:
+            said = _clip(str(turn.get("u") or ""), 140)
+            answered = _clip(str(turn.get("a") or ""), 140)
+            if said:
+                lines.append(f"- She: {said}")
+            if answered:
+                lines.append(f"- Nate: {answered}")
     parked = []
     for name, row in threads.items():
         if name == tid or not isinstance(row, dict):
