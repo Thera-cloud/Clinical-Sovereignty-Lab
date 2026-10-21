@@ -11885,7 +11885,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
         for (final s in daySessions) {
           final coach = (s['coach_name'] ?? 'Coach').toString();
           final tm = (s['time'] ?? '').toString();
-          final zone = (widget.currentUserProfile['timezone'] ?? '').toString();
+          final zone = (widget.currentUserProfile?['timezone'] ?? '').toString();
           final clock = formatProfileClock((s['scheduled_start'] ?? '').toString(), zone);
           String pretty = clock.isNotEmpty ? clock : tm;
           final st = (s['status'] ?? '').toString();
