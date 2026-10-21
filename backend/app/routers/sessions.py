@@ -847,9 +847,25 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
             _logger.warning("schedule_session: quote_session_price_cents failed: %s", e)
             _price_cents = 0
 
+    _client_tz = "UTC"
+    try:
+        from app.utils.timezone_resolver import canonical_timezone
+        _tzrow = await db.fetchrow(
+            """SELECT timezone, profile_data->>'timezone' AS ptz
+                 FROM users
+                WHERE hardware_id = $1 OR username = $1
+                LIMIT 1""",
+            req.client_id,
+        )
+        if _tzrow:
+            _client_tz = canonical_timezone((_tzrow["timezone"] or _tzrow["ptz"] or "")) or "UTC"
+    except Exception:
+        _client_tz = "UTC"
+
     session = {
         "session_id": session_id,
         "client_id": req.client_id,
+        "client_timezone": _client_tz,
         "coach_id": req.coach_id,
         "family_id": req.family_id or "",
         "client_name": req.client_name or "",

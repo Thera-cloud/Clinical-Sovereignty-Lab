@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.services.promo_redemption import record_promo_redemption
+from app.services.promo_redemption import apply_catalog_discount, record_promo_redemption
+
+
+def test_clergy_99y_is_33_percent_off_sovereign_circle():
+    assert apply_catalog_discount(14900, "percent", 33) == 9983
 
 
 @pytest.mark.asyncio

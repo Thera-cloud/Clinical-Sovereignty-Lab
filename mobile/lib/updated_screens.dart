@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' show File;
 import 'metrics_widgets.dart';
+import 'utils/profile_clock.dart';
 
 // Conditional import for web iframe support
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
@@ -15109,10 +15110,24 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     });
   }
 
-  /// Prefer UTC ISO scheduled_start converted to device-local HH:mm; else wire `time`. // COACH-SCHEDULE-LOCAL
+  /// Profile zone, not the device or VPN clock. Coach time, then the client's time.
   String _formatScheduledTime(Map session) {
     final ss = (session['scheduled_start'] ?? '').toString().trim();
+    final coachTz = (widget.currentUserProfile['timezone'] ?? '').toString();
     if (ss.isNotEmpty) {
+      final primary = formatProfileClock(ss, coachTz);
+      if (primary.isNotEmpty) {
+        final clientTz = (session['client_timezone'] ?? '').toString();
+        final client = formatProfileClock(ss, clientTz);
+        final clientName = (session['client_name'] ?? '').toString().trim();
+        if (client.isNotEmpty &&
+            canonicalProfileZone(clientTz).isNotEmpty &&
+            canonicalProfileZone(clientTz) != canonicalProfileZone(coachTz) &&
+            clientName.isNotEmpty) {
+          return '$primary · $clientName $client';
+        }
+        return primary;
+      }
       try {
         final dt = DateTime.parse(ss).toLocal();
         return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';

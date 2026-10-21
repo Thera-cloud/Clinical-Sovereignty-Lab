@@ -14,6 +14,20 @@ def _normalize_code(promo_code: str) -> str:
     return (promo_code or "").strip().upper()[:40]
 
 
+def apply_catalog_discount(catalog_cents: int, discount_type: str, discount_value: int) -> int:
+    """Price after a promotional_specials row. Percent uses integer cents, matching Stripe."""
+    catalog = int(catalog_cents or 0)
+    kind = (discount_type or "").strip().lower()
+    value = int(discount_value or 0)
+    if kind == "percent":
+        pct = max(0, min(100, value))
+        return max(0, catalog - (catalog * pct // 100))
+    if kind == "amount":
+        off = value if value >= 100 else value * 100
+        return max(0, catalog - off)
+    return catalog
+
+
 async def record_promo_redemption(
     db: Any,
     *,

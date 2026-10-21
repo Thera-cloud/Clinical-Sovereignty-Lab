@@ -2,7 +2,8 @@
 
 Spouse / partner usage draws from the head-of-household balance.
 Daily Reconnect must treat FAM_ codes and families.id UUIDs as one household.
-Family HoH Sovereign Circle is billed at $30/mo (not catalog $149).
+The $30 family-circle price applies only when family_circle_billing is set
+or subscription_plan is FAMILY_HOH_CIRCLE. Catalog Sovereign Circle stays $149.
 """
 
 from __future__ import annotations
@@ -144,6 +145,17 @@ def resolve_token_payer_hardware_id(
     return own_hw or _norm(user_id)
 
 
+def _family_circle_priced(profile: Optional[Dict[str, Any]]) -> bool:
+    """True only for the $30 family-circle product, not catalog Sovereign Circle."""
+    if not profile:
+        return False
+    flag = profile.get("family_circle_billing")
+    if flag is True or str(flag).strip().lower() in ("true", "1", "yes"):
+        return True
+    plan = _norm(profile.get("subscription_plan")).upper()
+    return plan in ("FAMILY_HOH_CIRCLE", "FAMILY_CIRCLE")
+
+
 def overlay_family_token_balance(
     profile: Dict[str, Any], registry: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -166,15 +178,17 @@ def overlay_family_token_balance(
         profile["family_token_balance"] = total
         profile["token_payer"] = payer_profile.get("username") or payer_hw
         profile["token_pool"] = "household"
-    if _role(profile) in HOH_ROLES or _role(profile) in SPOUSE_ROLES:
+    if _role(profile) in HOH_ROLES and _family_circle_priced(profile):
         profile["monthly_price_cents"] = FAMILY_HOH_CIRCLE_MONTHLY_CENTS
         profile["family_circle_monthly"] = 30
+    elif _role(profile) in SPOUSE_ROLES:
+        profile["monthly_price_cents"] = 0
     return profile
 
 
 def family_hoh_circle_cents(profile: Optional[Dict[str, Any]]) -> int:
     if not profile:
         return 14900
-    if _role(profile) in HOH_ROLES:
+    if _role(profile) in HOH_ROLES and _family_circle_priced(profile):
         return FAMILY_HOH_CIRCLE_MONTHLY_CENTS
     return 14900

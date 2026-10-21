@@ -195,3 +195,77 @@ async def enrich_family_profile_if_needed(
         parent_username=pu or None,
         family_role=role or None,
     )
+
+
+async def ensure_household_for_code(
+    conn,
+    username: str,
+    family_code: str,
+    display_name: str = "",
+) -> None:
+    """Create the families row a signup FAM_ code points at, and attach that user as head.
+
+    Does not attach anyone else. A spouse is linked only by the invite path.
+    """
+    code = str(family_code or "").strip()
+    if not code.startswith("FAM_"):
+        return
+    user = await conn.fetchrow(
+        """
+        SELECT id, name, family_id
+          FROM users
+         WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        username,
+    )
+    if not user:
+        return
+    existing = await conn.fetchrow(
+        "SELECT id, head_of_household_id FROM families WHERE family_code = $1",
+        code,
+    )
+    if not existing:
+        label = (display_name or user["name"] or username or "Sovereign").strip()
+        try:
+            existing = await conn.fetchrow(
+                """
+                INSERT INTO families (family_code, head_of_household_id, name)
+                VALUES ($1, $2, $3)
+                RETURNING id, head_of_household_id
+                """,
+                code,
+                user["id"],
+                f"{label} family"[:120],
+            )
+        except Exception:
+            existing = await conn.fetchrow(
+                "SELECT id, head_of_household_id FROM families WHERE family_code = $1",
+                code,
+            )
+    if not existing or existing["head_of_household_id"] != user["id"]:
+        return
+    await conn.execute(
+        """
+        UPDATE users SET
+          family_id = COALESCE(family_id, $1),
+          family_role = COALESCE(NULLIF(family_role, ''), 'head'),
+          profile_data = jsonb_set(
+            jsonb_set(
+              COALESCE(profile_data, '{}'::jsonb),
+              '{family_id}', to_jsonb($2::text), true
+            ),
+            '{family_role}',
+            CASE
+              WHEN COALESCE(profile_data->>'family_role', '') = '' THEN '"HEAD"'::jsonb
+              ELSE profile_data->'family_role'
+            END,
+            true
+          )
+        WHERE id = $3
+          AND (family_id IS NULL OR family_id = $1)
+        """,
+        existing["id"],
+        code,
+        user["id"],
+    )

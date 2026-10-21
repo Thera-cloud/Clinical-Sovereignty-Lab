@@ -49,14 +49,15 @@ def test_coachn_inner_chamber_every_session_is_125():
     assert billed_session_cents(listed, disc2) == 12500
 
 
-def test_coachn_sovereign_circle_first_125_then_90():
+def test_coachn_sovereign_circle_every_session_is_90():
     listed = 175
-    first = session_discount_cents("TOP_TIER", 0)
-    assert billed_session_cents(listed, first) == 12500
-    extra = session_discount_cents("TOP_TIER", 1)
-    assert billed_session_cents(listed, extra) == 9000
-    extra2 = session_discount_cents("DEPENDENT_UNDER_SOVEREIGN_CIRCLE", 2)
-    assert billed_session_cents(listed, extra2) == 9000
+    for prior in (0, 1, 4):
+        disc = session_discount_cents("TOP_TIER", prior)
+        assert billed_session_cents(listed, disc) == 9000
+    dep = session_discount_cents("DEPENDENT_UNDER_SOVEREIGN_CIRCLE", 0)
+    assert billed_session_cents(listed, dep) == 9000
+    spouse = session_discount_cents("SPOUSE_UNDER_SOVEREIGN_CIRCLE", 2)
+    assert billed_session_cents(listed, spouse) == 9000
 
 
 def test_coach_only_pays_full_coach_rate():

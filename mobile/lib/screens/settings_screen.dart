@@ -2879,9 +2879,15 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           _sectionHeader('SUBSCRIPTION', Icons.workspace_premium),
           _settingsCard([
             _infoRow('Current Plan', _tierDisplayName(plan.toString())),
+            if ((_profile['discount_code'] ?? '').toString().isNotEmpty)
+              _infoRow('Discount code', (_profile['discount_code'] ?? '').toString()),
+            if (_profile['monthly_price_cents'] is num && (_profile['monthly_price_cents'] as num) > 0)
+              _infoRow('Monthly charge', _centsLabel((_profile['monthly_price_cents'] as num).toInt())),
+            _infoRow('Session rate', _sessionRateLabel(plan.toString())),
             if (isNativeIOS) ..._iosSubscriptionFacts(),
             _infoRow('Token Balance', '$tokenBalance tokens'),
             _infoRow('Usage This Month', '$tokenUsage tokens'),
+            _infoRow('Monthly Token Cap', _monthlyTokenCap(plan.toString(), _profile)),
             // Show pending downgrade if one is scheduled
             if ((_profile['pending_plan'] ?? '').toString().isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -2930,7 +2936,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                   border: Border.all(color: _Design.cyan.withOpacity(0.3)),
                 ),
                 child: const Text(
-                  'Upgrade to Inner Chamber to unlock Little Nate, 50,000 tokens, and \$50 off every coaching session.',
+                  'Upgrade to Inner Chamber to unlock Little Nate, 50,000 tokens, and \$125/session coaching.',
                   style: TextStyle(color: _Design.cyan, fontSize: 11, height: 1.4),
                 ),
               ),
@@ -4020,7 +4026,7 @@ class _ChangePlanSheet extends StatelessWidget {
               features: [
                 'Full AI companion — voice & text',
                 '50,000 tokens/month',
-                '\$50 off every coaching session',
+                'Coaching sessions \$125',
                 if (!isNativeIOS) 'Voice tone insights & check-in trends',
                 if (!isNativeIOS) 'Session history & wellness trends',
                 'Push notifications & reminders',
@@ -4043,7 +4049,7 @@ class _ChangePlanSheet extends StatelessWidget {
               features: [
                 'Everything in Inner Chamber',
                 '200,000 tokens/month',
-                '\$50 off first family session each month, then \$85 off',
+                'Coaching sessions \$90',
                 'Avatar Mode (3D companion)',
                 'Family Sanctuary (up to 5 members)',
                 '50 GB Legacy Vault storage',
@@ -7107,6 +7113,33 @@ class _WeeklyBriefDialogState extends State<_WeeklyBriefDialog> {
   }
 }
 
+String _centsLabel(int cents) {
+  final dollars = cents / 100.0;
+  if (cents % 100 == 0) return '\$${dollars.toStringAsFixed(0)}/mo';
+  return '\$${dollars.toStringAsFixed(2)}/mo';
+}
+
+String _sessionRateLabel(String plan) {
+  final p = plan.toUpperCase();
+  if (p.contains('TOP') || p.contains('SOVEREIGN')) return '\$90/session';
+  if (p.contains('STANDARD') || p.contains('INNER') || p.contains('CHAMBER')) {
+    return '\$125/session';
+  }
+  if (p.contains('COACH_ONLY')) return 'Coach listed fee';
+  return '—';
+}
+
+String _monthlyTokenCap(String plan, Map profile) {
+  if ((profile['token_pool'] ?? '').toString() == 'household') {
+    return 'Household pool (head of household)';
+  }
+  final p = plan.toUpperCase();
+  if (p.contains('TOP') || p.contains('SOVEREIGN')) return '200,000';
+  if (p.contains('TRIAL')) return '10,000 welcome, no monthly reload';
+  if (p.contains('COACH')) return '0';
+  return '50,000';
+}
+
 class _PaymentHistoryWidget extends StatefulWidget {
   final Map<String, dynamic> profile;
   const _PaymentHistoryWidget({required this.profile});
@@ -7159,17 +7192,28 @@ class _PaymentHistoryWidgetState extends State<_PaymentHistoryWidget> {
           const Text('No payment history yet.', style: TextStyle(color: Color(0xFF666666), fontSize: 12)),
         if (_invoices != null && _invoices!.isNotEmpty)
           ...(_invoices!.take(10).map((inv) {
-            final date = inv['date'] ?? inv['created_at'] ?? '';
-            final amount = inv['amount_due'] ?? inv['amount'] ?? 0;
+            final rawDate = (inv['created'] ?? inv['date'] ?? inv['created_at'] ?? '').toString();
+            final date = rawDate.length >= 10 ? rawDate.substring(0, 10) : rawDate;
+            final paidAmt = inv['amount_paid'];
+            final dueAmt = inv['amount_due'] ?? inv['amount'] ?? 0;
+            final amount = (paidAmt is num && paidAmt > 0) ? paidAmt : dueAmt;
             final status = (inv['status'] ?? '').toString();
+            final desc = (inv['description'] ?? inv['kind'] ?? 'Charge').toString();
             return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(children: [
-                Expanded(child: Text(date.toString().substring(0, 10), style: const TextStyle(color: Color(0xFF888888), fontSize: 12))),
-                Text('\$${(amount is num ? amount : 0).toStringAsFixed(2)}', style: const TextStyle(color: _Design.goldBright, fontSize: 12)),
-                const SizedBox(width: 8),
-                Text(status, style: TextStyle(color: status == 'paid' ? const Color(0xFF4ECDC4) : const Color(0xFF888888), fontSize: 11)),
-              ]),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(desc, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 12)),
+                  Row(children: [
+                    Text(date, style: const TextStyle(color: Color(0xFF888888), fontSize: 11)),
+                    const Spacer(),
+                    Text('\$${(amount is num ? amount : 0).toStringAsFixed(2)}', style: const TextStyle(color: _Design.goldBright, fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Text(status, style: TextStyle(color: status == 'paid' ? const Color(0xFF4ECDC4) : const Color(0xFF888888), fontSize: 11)),
+                  ]),
+                ],
+              ),
             );
           })),
       ],

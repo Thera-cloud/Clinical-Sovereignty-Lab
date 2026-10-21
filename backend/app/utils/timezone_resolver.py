@@ -18,6 +18,38 @@ SESSION_DISPLAY_FMT = "%A, %B %d at %I:%M %p %Z"
 SESSION_DATE_FMT = "%B %d, %Y"
 SESSION_TIME_FMT = "%I:%M %p %Z"
 
+# Abbreviations are not IANA. A VPN or a browser often reports these, and
+# ZoneInfo rejects them, which made every session fall back to UTC or New York.
+_ZONE_ABBREV = {
+    "ET": "America/New_York",
+    "EST": "America/New_York",
+    "EDT": "America/New_York",
+    "CT": "America/Chicago",
+    "CST": "America/Chicago",
+    "CDT": "America/Chicago",
+    "MT": "America/Denver",
+    "MST": "America/Denver",
+    "MDT": "America/Denver",
+    "PT": "America/Los_Angeles",
+    "PST": "America/Los_Angeles",
+    "PDT": "America/Los_Angeles",
+    "UTC": "UTC",
+    "GMT": "UTC",
+}
+
+
+def canonical_timezone(tz_string: str) -> str:
+    """Return an IANA name. Accepts America/Denver and MDT/EDT-style abbreviations."""
+    raw = str(tz_string or "").strip()
+    if not raw:
+        return ""
+    candidate = _ZONE_ABBREV.get(raw.upper(), raw)
+    try:
+        ZoneInfo(candidate)
+        return candidate
+    except Exception:
+        return ""
+
 
 def normalize_phone_e164(phone_raw: str, default_region: str = "US") -> Optional[str]:
     """Return E.164 phone or None if empty/invalid."""
@@ -90,9 +122,7 @@ def format_session_start_for_profile(
     fmt: str = SESSION_DISPLAY_FMT,
 ) -> Tuple[str, str]:
     """Format a UTC session start in the recipient's profile timezone."""
-    tz_name = ((profile or {}).get("timezone") or "").strip() or DEFAULT_SESSION_TZ
-    if not _is_valid_iana(tz_name):
-        tz_name = DEFAULT_SESSION_TZ
+    tz_name = canonical_timezone(((profile or {}).get("timezone") or "")) or DEFAULT_SESSION_TZ
     if scheduled_start.tzinfo is None:
         scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
     return render_user_time(scheduled_start, tz_name, fmt), tz_name
@@ -103,9 +133,7 @@ def split_session_start_for_profile(
     profile: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str, str]:
     """Return (date_str, time_str, tz_name) in the recipient's profile timezone."""
-    tz_name = ((profile or {}).get("timezone") or "").strip() or DEFAULT_SESSION_TZ
-    if not _is_valid_iana(tz_name):
-        tz_name = DEFAULT_SESSION_TZ
+    tz_name = canonical_timezone(((profile or {}).get("timezone") or "")) or DEFAULT_SESSION_TZ
     if scheduled_start.tzinfo is None:
         scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
     date_str = render_user_time(scheduled_start, tz_name, SESSION_DATE_FMT)
@@ -122,7 +150,7 @@ def render_user_time(
     if utc_dt.tzinfo is None:
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
     try:
-        tz = ZoneInfo((user_timezone or "UTC").strip())
+        tz = ZoneInfo(canonical_timezone(user_timezone) or "UTC")
     except Exception:
         tz = ZoneInfo("UTC")
     local_dt = utc_dt.astimezone(tz)
@@ -132,7 +160,7 @@ def render_user_time(
 def build_llm_time_context(profile: Dict[str, Any]) -> str:
     """Block injected at top of therapy / chat system prompts when profile is available."""
     now_utc = datetime.now(timezone.utc)
-    user_tz = (profile.get("timezone") or "UTC").strip()
+    user_tz = canonical_timezone(profile.get("timezone") or "") or "UTC"
     try:
         local_date = render_user_time(now_utc, user_tz, "%A, %B %d, %Y")
         local_time = render_user_time(now_utc, user_tz, "%I:%M %p %Z")
@@ -153,8 +181,8 @@ def build_llm_time_context(profile: Dict[str, Any]) -> str:
 
 
 def is_valid_iana_timezone(tz_string: str) -> bool:
-    """True if tz_string is a valid IANA zone name."""
-    return _is_valid_iana(tz_string)
+    """True if tz_string is IANA or a known abbreviation (MDT, EDT, …)."""
+    return bool(canonical_timezone(tz_string))
 
 
 def _is_valid_iana(tz_string: str) -> bool:

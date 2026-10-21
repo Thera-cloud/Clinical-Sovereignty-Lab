@@ -955,6 +955,23 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
           .toString()
           .toUpperCase();
 
+  int _chargedBaseCents() {
+    final raw = widget.currentUserProfile['monthly_price_cents'];
+    if (raw is num) return raw.toInt();
+    if (_userPlan == 'TOP_TIER' || _userPlan == 'SOVEREIGN_CIRCLE') return 14900;
+    return 4900;
+  }
+
+  String _chargedLabel() => _money(_chargedBaseCents());
+
+  String _money(int cents) {
+    final dollars = cents / 100.0;
+    final text = cents % 100 == 0
+        ? '\$${dollars.toStringAsFixed(0)}'
+        : '\$${dollars.toStringAsFixed(2)}';
+    return '$text/mo';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1309,8 +1326,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold)),
                           const SizedBox(height: 10),
-                          _summaryRow('Base Subscription',
-                              _userPlan == 'TOP_TIER' || _userPlan == 'SOVEREIGN_CIRCLE' ? '\$149/mo' : '\$49/mo'),
+                          _summaryRow('Base Subscription', _chargedLabel()),
                           _summaryRow('Family Members',
                               '${_members.where((m) => (m['family_role'] ?? m['role'] ?? '').toString().toUpperCase() != 'HEAD').length} member(s)'),
                           _summaryRow('Spouse/Partner', 'Free'),
@@ -1318,7 +1334,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                           _summaryRow('Additional members', 'from \$75/mo'),
                           const Divider(color: _D.border),
                           Builder(builder: (_) {
-                            final baseCents = (_userPlan == 'TOP_TIER' || _userPlan == 'SOVEREIGN_CIRCLE') ? 14900 : 4900;
+                            final baseCents = _chargedBaseCents();
                             int addonCents = 0;
                             for (final m in _members) {
                               final r = (m['family_role'] ?? m['role'] ?? '').toString().toUpperCase();
@@ -1326,7 +1342,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                               addonCents += (m['family_billing_price_cents'] as int?) ?? 0;
                             }
                             final totalCents = baseCents + addonCents;
-                            return _summaryRow('Total', '\$${(totalCents / 100).toStringAsFixed(0)}/mo', bold: true);
+                            return _summaryRow('Total', _money(totalCents), bold: true);
                           }),
                         ],
                       ),
@@ -2429,7 +2445,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                           ),
                           const SizedBox(height: 10),
                           const Text(
-                            'Your default card is charged automatically in the 72 hours before each session with your assigned coach — not after. Coach-only pays the listed coach fee; Inner Chamber is \$50 off; Sovereign Circle is \$50 off the first household session each month, then \$85 off.',
+                            'Your default card is charged automatically in the 72 hours before each session with your assigned coach — not after. Coach-only pays the listed coach fee; Inner Chamber is \$125/session; Sovereign Circle is \$90/session.',
                             style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.35),
                           ),
                         ],

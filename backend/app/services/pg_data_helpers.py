@@ -277,7 +277,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
             "zoom_meeting_id", "zoom_host_url", "notes", "coach_notes",
             "topics_covered", "homework_assigned", "mood_at_start", "mood_at_end",
             "nate_summary", "recording_url", "payment_status", "created_at",
-            "intake_note",
+            "intake_note", "client_timezone",
         }
         extra = {k: v for k, v in session.items() if k not in known_keys and k != "updated_at"}
         for _consult_key in ("consultation_email", "consultation_name", "consultation_subject"):
@@ -367,6 +367,21 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 json.dumps(extra),
                 _parse_ts(session.get("created_at")) or datetime.now(timezone.utc),
             )
+            _ctz = ""
+            try:
+                from app.utils.timezone_resolver import canonical_timezone
+                _ctz = canonical_timezone(session.get("client_timezone") or "")
+            except Exception:
+                _ctz = ""
+            if _ctz and _ctz != "UTC":
+                await conn.execute(
+                    """UPDATE coaching_sessions
+                          SET client_timezone = $2
+                        WHERE session_id = $1
+                          AND COALESCE(client_timezone, 'UTC') IN ('', 'UTC')""",
+                    str(session.get("session_id") or ""),
+                    _ctz,
+                )
         return True
     except Exception as e:
         logger.warning("upsert_session_pg(%s) failed: %s", session.get("session_id"), e)

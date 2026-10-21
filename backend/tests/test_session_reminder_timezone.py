@@ -36,6 +36,16 @@ def test_naive_datetime_treated_as_utc():
     assert "8:00 AM" in text
 
 
+def test_blake_mdt_is_nine_am_and_edt_is_eleven_am():
+    scheduled = datetime(2026, 10, 26, 15, 0, tzinfo=timezone.utc)
+    mountain, mt = format_session_start_for_profile(scheduled, {"timezone": "MDT"})
+    eastern, et = format_session_start_for_profile(scheduled, {"timezone": "EDT"})
+    assert mt == "America/Denver"
+    assert et == "America/New_York"
+    assert "9:00 AM" in mountain
+    assert "11:00 AM" in eastern
+
+
 def test_invalid_timezone_falls_back_to_default():
     scheduled = datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc)
     _text, tz_name = format_session_start_for_profile(

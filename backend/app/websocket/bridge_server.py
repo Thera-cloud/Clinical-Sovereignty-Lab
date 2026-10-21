@@ -91,11 +91,15 @@ except Exception:
 
 try:  # QUANTUM-CRYSTAL-ARCH: timezone resolver imports
     from app.utils.timezone_resolver import build_llm_time_context
+    from app.utils.timezone_resolver import canonical_timezone as _tz_canon
     from app.utils.timezone_resolver import is_valid_iana_timezone as _tz_valid
     from app.utils.timezone_resolver import normalize_phone_e164 as _normalize_phone_e164
 except Exception:
     def build_llm_time_context(profile):  # type: ignore
         return ""
+
+    def _tz_canon(tz_string):  # type: ignore
+        return str(tz_string or "").strip()
 
     def _tz_valid(tz_string):  # type: ignore
         return bool(tz_string and str(tz_string).strip())
@@ -4037,10 +4041,10 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
     final_tz = None
     tz_source = "default_utc"
     if user_typed_tz and _tz_valid(user_typed_tz):
-        final_tz = user_typed_tz
+        final_tz = _tz_canon(user_typed_tz) or user_typed_tz  # QUANTUM-CRYSTAL-ARCH
         tz_source = "user_explicit"
     elif browser_tz and _tz_valid(browser_tz):
-        final_tz = browser_tz
+        final_tz = _tz_canon(browser_tz) or browser_tz  # QUANTUM-CRYSTAL-ARCH
         tz_source = "browser"
     if not final_tz:
         return False, "TIMEZONE_REQUIRED"
@@ -15348,7 +15352,7 @@ async def handle_client(websocket, path=None):
                                         coach_profile = rv.get("profile", {})
                                         break
                                 coach_fee = float((coach_profile or {}).get("coaching_fee", 0))
-                                # QUANTUM-CRYSTAL-ARCH: membership session discount (IC $50 / SC $50 then $85)
+                                # QUANTUM-CRYSTAL-ARCH: membership session discount (IC $125 / SC $90)
                                 _price_cents = 0
                                 try:
                                     from app.services.session_booking_billing import quote_session_price_cents
@@ -15410,6 +15414,7 @@ async def handle_client(websocket, path=None):
                                     "coach_id": coach_id,
                                     "family_id": family_id,
                                     "client_name": client_name,
+                                    "client_timezone": _tz_canon((current_profile or {}).get("timezone") or "") or "UTC",  # QUANTUM-CRYSTAL-ARCH
                                     "session_type": "COACH",
                                     "status": "pending_approval",
                                     "scheduled_start": scheduled_start,

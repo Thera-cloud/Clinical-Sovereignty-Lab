@@ -1475,12 +1475,33 @@ class StripeService:
         base_price = 14900 if sub['tier'] == 'TOP_TIER' else 4900
         try:
             from app.services.family_token_payer import FAMILY_HOH_CIRCLE_MONTHLY_CENTS, HOH_ROLES
-            _fam_role = await self.db.fetchval(
-                "SELECT UPPER(COALESCE(profile_data->>'family_role', '')) FROM users WHERE id = $1",
+            _circle = await self.db.fetchrow(
+                """SELECT UPPER(COALESCE(profile_data->>'family_role', '')) AS role,
+                          UPPER(COALESCE(profile_data->>'subscription_plan', '')) AS plan,
+                          LOWER(COALESCE(profile_data->>'family_circle_billing', '')) AS flag,
+                          UPPER(COALESCE(profile_data->>'discount_code', '')) AS discount_code
+                     FROM users WHERE id = $1""",
                 db_uid,
             )
-            if sub['tier'] == 'TOP_TIER' and str(_fam_role or "") in HOH_ROLES:
+            _priced = bool(_circle) and (
+                str(_circle["flag"] or "") in ("true", "1", "yes")
+                or str(_circle["plan"] or "") in ("FAMILY_HOH_CIRCLE", "FAMILY_CIRCLE")
+            )
+            if sub['tier'] == 'TOP_TIER' and str((_circle or {}).get("role") or "") in HOH_ROLES and _priced:
                 base_price = FAMILY_HOH_CIRCLE_MONTHLY_CENTS
+            elif _circle and _circle["discount_code"]:
+                from app.constants.tiers import promo_applies_to_plan
+                from app.services.promo_redemption import apply_catalog_discount
+                _promo = await self.db.fetchrow(
+                    """SELECT discount_type, discount_value, applicable_tiers
+                         FROM promotional_specials
+                        WHERE promo_code = $1 AND active = TRUE AND ends_at > NOW()""",
+                    _circle["discount_code"],
+                )
+                if _promo and promo_applies_to_plan(_promo["applicable_tiers"], sub["tier"]):
+                    base_price = apply_catalog_discount(
+                        base_price, _promo["discount_type"], int(_promo["discount_value"] or 0)
+                    )
         except Exception:
             pass
         family_total = sum(m['price_cents'] or 0 for m in members)

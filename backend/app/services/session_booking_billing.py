@@ -1,10 +1,10 @@
 """Session booking billing — card gate, membership session discounts, cancel refunds.
 
 Policy (client-facing): charge membership session rate after coach accepts,
-via SessionPaymentAgent in the 72h pre-session window. Inner Chamber: $50 off
-every session. Sovereign Circle: $50 off the household's first session each
-month, then $85 off each additional (family-scoped). Cancel ≥24h before
-start → full Stripe refund if already paid. Cancel inside 24h → no refund.
+via SessionPaymentAgent in the 72h pre-session window. Inner Chamber is
+listed at $125/session ($50 off CoachN $175). Sovereign Circle is listed at
+$90/session ($85 off). Cancel ≥24h before start → full Stripe refund if already
+paid. Cancel inside 24h → no refund.
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ logger = logging.getLogger("nate.session_booking_billing")
 # Shown in client schedule UI and emails — keep in sync with Flutter copy.
 SESSION_PAYMENT_POLICY = (
     "By booking, you agree to pay your session rate with your assigned coach. "
-    "Inner Chamber: $50 off every session. Sovereign Circle: $50 off the "
-    "household's first session each month, then $85 off each additional. "
+    "Inner Chamber: $125/session. Sovereign Circle: $90/session. "
     "Coach-only: the coach's listed session fee (no membership discount). "
     "Your default card is charged automatically in the 72-hour window BEFORE "
     "the session — not after. Open invoices live under Billing → Invoices; "
@@ -46,10 +45,9 @@ UPDATE coaching_sessions
 """
 
 # Membership discounts off the coach's listed rate (cents). CoachN $175 →
-# Inner Chamber $125 every session; Sovereign Circle $125 first / $90 after.
+# Inner Chamber $125 every session; Sovereign Circle $90 every session.
 INNER_CHAMBER_SESSION_DISCOUNT_CENTS = 5000
-SOVEREIGN_CIRCLE_FIRST_SESSION_DISCOUNT_CENTS = 5000
-SOVEREIGN_CIRCLE_ADDITIONAL_SESSION_DISCOUNT_CENTS = 8500
+SOVEREIGN_CIRCLE_SESSION_DISCOUNT_CENTS = 8500
 
 _COUNT_STATUSES_EXCLUDED = (
     "cancelled",
@@ -168,18 +166,16 @@ def fee_cents_from_coach_fee(coach_fee: Any) -> int:
     return int(round(dollars * 100))
 
 
-def session_discount_cents(plan: str | None, prior_family_sessions_this_month: int) -> int:
-    """Membership discount off listed coach rate. Family-scoped for Sovereign Circle."""
+def session_discount_cents(plan: str | None, prior_family_sessions_this_month: int = 0) -> int:
+    """Membership discount off listed coach rate. Inner Chamber $125; Sovereign Circle $90."""
     from app.constants.tiers import session_plan_bucket
 
     bucket = session_plan_bucket(plan)
-    prior = max(0, int(prior_family_sessions_this_month or 0))
+    _ = prior_family_sessions_this_month
     if bucket == "IC":
         return INNER_CHAMBER_SESSION_DISCOUNT_CENTS
     if bucket == "SC":
-        if prior <= 0:
-            return SOVEREIGN_CIRCLE_FIRST_SESSION_DISCOUNT_CENTS
-        return SOVEREIGN_CIRCLE_ADDITIONAL_SESSION_DISCOUNT_CENTS
+        return SOVEREIGN_CIRCLE_SESSION_DISCOUNT_CENTS
     return 0
 
 

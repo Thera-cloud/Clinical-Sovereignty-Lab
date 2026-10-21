@@ -23,6 +23,7 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 
 import 'metrics_widgets.dart';
 import 'updated_screens.dart';
+import 'utils/profile_clock.dart';
 import 'avatar.dart';
 import 'screens/onboarding_threshold_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
@@ -11278,8 +11279,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   double? _coachFee;
   String _paymentPolicy =
       'By booking, you agree to pay your membership session rate '
-      '(Inner Chamber: \$50 off every session; Sovereign Circle: \$50 off the '
-      'household\'s first session each month, then \$85 off each additional). '
+      '(Inner Chamber: \$125/session; Sovereign Circle: \$90/session). '
       'After your coach accepts, your default card is charged automatically '
       'in the 72-hour window BEFORE the session — not after. Open invoices '
       'are under Billing → Invoices; unpaid Stripe invoices are emailed '
@@ -11885,13 +11885,9 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
         for (final s in daySessions) {
           final coach = (s['coach_name'] ?? 'Coach').toString();
           final tm = (s['time'] ?? '').toString();
-          String pretty = tm;
-          try {
-            final dtFull = DateTime.parse((s['scheduled_start'] ?? '').toString()).toLocal();
-            final h12 = dtFull.hour == 0 ? 12 : (dtFull.hour > 12 ? dtFull.hour - 12 : dtFull.hour);
-            final ap = dtFull.hour >= 12 ? 'PM' : 'AM';
-            pretty = '$h12:${dtFull.minute.toString().padLeft(2, '0')} $ap';
-          } catch (_) {}
+          final zone = (widget.currentUserProfile['timezone'] ?? '').toString();
+          final clock = formatProfileClock((s['scheduled_start'] ?? '').toString(), zone);
+          String pretty = clock.isNotEmpty ? clock : tm;
           final st = (s['status'] ?? '').toString();
           final tag = st == 'pending_approval' ? ' (pending)' : '';
           lines.add('$coach • $pretty$tag');

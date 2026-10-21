@@ -277,6 +277,14 @@ class UserStore:
                 except (ValueError, TypeError):
                     login_count = None
 
+            try:
+                from app.utils.timezone_resolver import canonical_timezone as _canon_tz
+                _tz_now = _canon_tz(profile.get("timezone") or "")
+                if _tz_now:
+                    profile["timezone"] = _tz_now
+            except Exception:
+                pass
+
             # Store the full profile as JSONB for all the extra fields
             profile_data = json.dumps(profile, default=str)
 
@@ -417,6 +425,11 @@ class UserStore:
                                                 'head_of_household_id',
                                                 'guardian_id',
                                                 'linked_by',
+                                                'family_id',
+                                                'family_role',
+                                                'family_circle_billing',
+                                                'discount_code',
+                                                'monthly_price_cents',
                                                 'program_id',
                                                 'custom_session_rate_cents',
                                                 'custom_session_rate_set_by',
@@ -482,6 +495,25 @@ class UserStore:
                     token_balance, sub_bal, purch_bal, login_count,
                     phone_col, tz_col, tz_src_col,
                     guardian_col, linked_col, family_role_col, is_minor_col)
+                if (
+                    str(profile.get("family_id") or "").startswith("FAM_")
+                    and family_uuid is None
+                    and str(role or "").upper() == "CLIENT"
+                ):
+                    try:
+                        from app.services.family_linkage import ensure_household_for_code
+                        await ensure_household_for_code(
+                            conn,
+                            username,
+                            str(profile.get("family_id") or ""),
+                            str(profile.get("name") or name or username),
+                        )
+                    except Exception as hh_err:
+                        logger.warning(
+                            "family household ensure failed for %s: %s",
+                            username,
+                            hh_err,
+                        )
             return True
         except Exception as e:
             logger.warning(f"[UserStore] upsert_user failed for {registry_key}: {e}")
@@ -649,6 +681,9 @@ class UserStore:
             profile["id"] = str(row["id"])
         if row.get("family_id"):
             profile["family_uuid"] = str(row["family_id"])
+        _fr = row.get("family_role")
+        if _fr and not (profile.get("family_role") or "").strip():
+            profile["family_role"] = str(_fr).upper()
 
         # Overlay additional indexed columns when present in the row
         if row.get("tier"):

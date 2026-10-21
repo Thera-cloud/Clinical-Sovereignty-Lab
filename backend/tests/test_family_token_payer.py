@@ -84,5 +84,13 @@ def test_family_id_aliases_merge_code_and_uuid():
 
 def test_family_hoh_circle_is_30():
     assert FAMILY_HOH_CIRCLE_MONTHLY_CENTS == 3000
-    assert family_hoh_circle_cents({"family_role": "HEAD"}) == 3000
+    assert family_hoh_circle_cents({"family_role": "HEAD"}) == 14900
+    assert family_hoh_circle_cents({
+        "family_role": "HEAD",
+        "family_circle_billing": True,
+    }) == 3000
+    assert family_hoh_circle_cents({
+        "family_role": "HEAD",
+        "subscription_plan": "FAMILY_HOH_CIRCLE",
+    }) == 3000
     assert family_hoh_circle_cents({"family_role": ""}) == 14900
