@@ -1822,6 +1822,11 @@ async def lifespan(app: FastAPI):
                                     _del_type = row["data_type"]
 
                                     if _del_type == "account":
+                                        try:
+                                            from app.services.account_lifecycle import cancel_leftover_stripe
+                                            await cancel_leftover_stripe(_pc, _del_uid)
+                                        except Exception as _purge_stripe_err:
+                                            print(f">>> [PURGE] leftover Stripe cancel failed: {_purge_stripe_err}")
                                         # Hard purge: remove user data from DB
                                         try:
                                             await _pc.execute(
@@ -1898,46 +1903,16 @@ async def lifespan(app: FastAPI):
                                 if expired:
                                     print(f">>> [PURGE] Purged {len(expired)} expired staged deletion(s)")
 
-                            # Also send cooling check-in reminders
-                            async with db_pool.acquire() as _cc:
-                                # 24h check-in (requested_at ~ 24h ago, not yet checked in)
-                                _24h_due = await _cc.fetch(
-                                    """SELECT sd.id, sd.user_id FROM staged_deletions sd
-                                    WHERE NOT sd.executed AND NOT sd.cancelled
-                                      AND NOT sd.checkin_24h
-                                      AND sd.requested_at <= NOW() - INTERVAL '24 hours'"""
+                            try:
+                                from app.services.account_lifecycle import send_due_cooling_checkins
+                                from app.websocket.notification_system import NotificationSystem as _NSCheckin
+                                _ns_checkin = _NSCheckin(
+                                    os.getenv("DATA_DIR", "/app/data"),
+                                    os.getenv("SENDGRID_API_KEY"),
                                 )
-                                for _ci in _24h_due:
-                                    await _cc.execute(
-                                        "UPDATE staged_deletions SET checkin_24h = TRUE WHERE id = $1",
-                                        _ci["id"],
-                                    )
-
-                                # Midpoint check-in (15 days)
-                                _mid_due = await _cc.fetch(
-                                    """SELECT sd.id, sd.user_id FROM staged_deletions sd
-                                    WHERE NOT sd.executed AND NOT sd.cancelled
-                                      AND NOT sd.checkin_midpoint
-                                      AND sd.requested_at <= NOW() - INTERVAL '15 days'"""
-                                )
-                                for _ci in _mid_due:
-                                    await _cc.execute(
-                                        "UPDATE staged_deletions SET checkin_midpoint = TRUE WHERE id = $1",
-                                        _ci["id"],
-                                    )
-
-                                # Final check-in (27 days = 3 days before purge)
-                                _final_due = await _cc.fetch(
-                                    """SELECT sd.id, sd.user_id FROM staged_deletions sd
-                                    WHERE NOT sd.executed AND NOT sd.cancelled
-                                      AND NOT sd.checkin_final
-                                      AND sd.requested_at <= NOW() - INTERVAL '27 days'"""
-                                )
-                                for _ci in _final_due:
-                                    await _cc.execute(
-                                        "UPDATE staged_deletions SET checkin_final = TRUE WHERE id = $1",
-                                        _ci["id"],
-                                    )
+                                await send_due_cooling_checkins(db_pool, _ns_checkin)
+                            except Exception as _ci_err:
+                                print(f">>> [PURGE] cooling check-in email failed: {_ci_err}")
 
                     except Exception as _purge_err:
                         print(f">>> [PURGE] Background purge check failed: {_purge_err}")

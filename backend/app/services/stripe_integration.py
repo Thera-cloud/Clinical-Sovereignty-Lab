@@ -1524,59 +1524,30 @@ class StripeService:
             monthly_total_cents=base_price + family_total
         )
     
-    async def cancel_subscription(self, user_id: str, at_period_end: bool = True) -> bool:
-        """Cancel subscription.
-        
-        HIVE DEFENSE v4.3: Routes through SovereignStripeProxy.
+    async def cancel_subscription(self, user_id: str, at_period_end: bool = False) -> bool:
+        """Cancel subscription immediately by default so Stripe stops invoicing.
+
+        HIVE DEFENSE v4.3: Routes through account_lifecycle (PG ids + customer list).
         """
-        db_uid = await self._resolve_user_id(user_id)
+        from app.services.account_lifecycle import stop_charges_for_user
+        from app.websocket.notification_system import NotificationSystem
 
-        sub = await self.db.fetchrow(
-            "SELECT stripe_subscription_id FROM subscriptions WHERE user_id = $1 AND status = 'ACTIVE'",
-            db_uid
+        result = await stop_charges_for_user(
+            self.db,
+            user_id,
+            source="rest_cancel",
+            reason="api_cancel",
+            immediate=not at_period_end,
+            schedule_purge=False,
+            emails=True,
+            notifier=NotificationSystem(
+                os.getenv("DATA_DIR", "/app/data"),
+                os.getenv("SENDGRID_API_KEY"),
+            ),
         )
-        
-        if not sub or not sub['stripe_subscription_id']:
-            raise HTTPException(404, "No active subscription")
-        
-        # ── HIVE DEFENSE v4.3: Use SovereignStripeProxy ──
-        proxy = self._get_proxy()
-        if proxy:
-            result = await proxy.cancel_subscription(
-                sub['stripe_subscription_id'], user_id, at_period_end
-            )
-            if result.get("success"):
-                if at_period_end:
-                    await self.db.execute(
-                        "UPDATE subscriptions SET cancel_at_period_end = TRUE WHERE user_id = $1",
-                        db_uid
-                    )
-                else:
-                    await self.db.execute(
-                        "UPDATE subscriptions SET status = 'CANCELLED', canceled_at = NOW() WHERE user_id = $1",
-                        db_uid
-                    )
-                return True
-            _logger.warning("SovereignStripeProxy cancel failed, using direct API")
-
-        # Fallback: direct Stripe call
-        if at_period_end:
-            stripe.Subscription.modify(
-                sub['stripe_subscription_id'],
-                cancel_at_period_end=True
-            )
-            await self.db.execute(
-                "UPDATE subscriptions SET cancel_at_period_end = TRUE WHERE user_id = $1",
-                db_uid
-            )
-        else:
-            stripe.Subscription.delete(sub['stripe_subscription_id'])
-            await self.db.execute(
-                "UPDATE subscriptions SET status = 'CANCELLED', canceled_at = NOW() WHERE user_id = $1",
-                db_uid
-            )
-        
-        return True
+        if result.get("ok") or result.get("already_cancelled"):
+            return True
+        raise HTTPException(404, result.get("message") or "No active subscription")
 
 
 # =============================================================================
@@ -3362,7 +3333,7 @@ def create_billing_router(db_pool: asyncpg.Pool) -> APIRouter:
         return await service.get_subscription_status(user_id)
     
     @router.post("/subscription/cancel")
-    async def cancel_subscription(user_id: str = Depends(get_current_user_id), at_period_end: bool = True):
+    async def cancel_subscription(user_id: str = Depends(get_current_user_id), at_period_end: bool = False):
         return await service.cancel_subscription(user_id, at_period_end)
     
     @router.post("/family/add")

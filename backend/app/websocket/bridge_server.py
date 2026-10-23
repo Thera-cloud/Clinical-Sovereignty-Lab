@@ -26860,38 +26860,23 @@ Coach Reflection on Session {session_id}:
                                     break
                             v["profile"]["account_status"] = "PENDING_DELETION"
                             v["profile"]["deletion_requested_at"] = str(datetime.datetime.now())
+                            v["profile"]["subscription_status"] = "CANCELLED"
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
                             save_registry(registry)
 
-                            # Write to PostgreSQL staged_deletions for proper tracking
+                            # QUANTUM-CRYSTAL-ARCH — stop Stripe now; 30-day hold; client+coach email
+                            _billing_stopped = False
                             try:
-                                if db_pool:
-                                    _cooling_hours = 30 * 24  # 30 days
-                                    async with db_pool.acquire() as _del_conn:
-                                        await _del_conn.execute(
-                                            """INSERT INTO staged_deletions
-                                                (user_id, data_type, data_id, cooling_period_hours, executes_at)
-                                            VALUES ($1, 'account', $1, $2, NOW() + INTERVAL '1 hour' * $2)""",
-                                            uid, _cooling_hours,
-                                        )
-                            except Exception as _sd_err:
-                                print(f">>> [DELETION] staged_deletions write failed: {_sd_err}")
-
-                            # Send email + SMS notification
-                            try:
-                                _del_email = v["profile"].get("email", "")
-                                _del_phone = v["profile"].get("phone", "")
-                                _del_name = v["profile"].get("name", "")
-                                if _del_email:
-                                    await notification_system.send_account_deletion_scheduled(
-                                        _del_email, _del_name, _del_phone or None
-                                    )
-                            except Exception as _notify_err:
-                                print(f">>> [DELETION] Notification send failed: {_notify_err}")
+                                from app.services.account_lifecycle import stop_charges_for_user as _stop_fn
+                                _del_stop = await _stop_fn(db_pool, uid, source="account_deletion", reason="client_deletion", immediate=True, schedule_purge=True, notifier=notification_system)
+                                _billing_stopped = bool(_del_stop.get("ok") or _del_stop.get("already_cancelled"))
+                            except Exception as _sc_err:
+                                print(f">>> [DELETION] Stripe stop / hold failed: {_sc_err}")
 
                             await websocket.send(json.dumps({
                                 "type": "account_deletion_confirmed",
-                                "message": "Account scheduled for deletion in 30 days. Sign back in to restore."
+                                "billing_stopped": _billing_stopped,
+                                "message": "Account scheduled for deletion in 30 days. Billing stopped. Sign back in to restore."
                             }))
                             # Force disconnect
                             await websocket.close()
@@ -27991,10 +27976,18 @@ Coach Reflection on Session {session_id}:
             elif t == "cancel_subscription":
                 if current_profile:
                     reason = d.get("reason", "")
-                    success = billing_system.cancel_subscription(uid, reason)
+                    _stop = {"ok": False, "already_cancelled": False, "message": "Cancel failed"}
+                    try:
+                        from app.services.account_lifecycle import stop_charges_for_user as _stop_fn
+                        # QUANTUM-CRYSTAL-ARCH — cancel Stripe even if billing.json has no sub
+                        _stop = await _stop_fn(db_pool, uid, source="stop_payment", reason=reason, immediate=True, notifier=notification_system)
+                    except Exception as _cxl_err:
+                        print(f">>> [BILLING] stop_charges failed: {_cxl_err}")
                     await websocket.send(json.dumps({
                         "type": "subscription_cancelled",
-                        "success": success
+                        "success": bool(_stop.get("ok")),
+                        "already_cancelled": bool(_stop.get("already_cancelled")),
+                        "message": _stop.get("message") or "",
                     }))
 
             # === CHANGE SUBSCRIPTION (Upgrade or Downgrade) ===

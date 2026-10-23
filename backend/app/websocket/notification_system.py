@@ -932,8 +932,16 @@ class NotificationSystem:
     # =========================================================================
 
     async def send_account_deletion_scheduled(self, to_email: str, name: str,
-                                               phone: str = None) -> bool:
+                                               phone: str = None,
+                                               charges_stopped: bool = True) -> bool:
         """Notify user their account is scheduled for deletion in 30 days."""
+        billing_line = (
+            "<p><strong>Billing:</strong> Stripe has been notified. "
+            "No further charges will apply to this account.</p>"
+            if charges_stopped else
+            "<p><strong>Billing:</strong> Your deletion is recorded. "
+            "If a charge appears, contact support@sovereignsanctuary.net immediately.</p>"
+        )
         content = f"""
         <h2 style="color: #f59e0b;">Account Deletion Scheduled</h2>
         
@@ -941,6 +949,7 @@ class NotificationSystem:
         
         <p>Your Sovereign Sanctuary account has been scheduled for deletion.
         Your data will be permanently removed in <strong>30 days</strong>.</p>
+        {billing_line}
         
         <div style="background-color: #0f172a; padding: 20px; border-radius: 8px; 
                     margin: 20px 0; border-left: 4px solid #f59e0b;">
@@ -1270,6 +1279,54 @@ class NotificationSystem:
             )
             await self.send_sms(to_phone, sms_body)
         return email_sent
+
+    async def send_stop_payment_confirmation(self, to_email: str, name: str,
+                                              phone: str = None) -> bool:
+        """Client confirmation that membership billing has stopped."""
+        content = f"""
+        <h2 style="color: #C9A962;">Payments Stopped</h2>
+        <p>Hi {name},</p>
+        <p>Your Sovereign Sanctuary membership has been cancelled.
+        Stripe has been notified and <strong>no further charges will apply</strong>
+        to this account.</p>
+        <p style="color: #94a3b8;">Your login remains available. If you also requested
+        account deletion, your data is held for 30 days and then permanently removed.</p>
+        """
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Sovereign Sanctuary: no further charges will apply",
+            content=content,
+            notification_type="info",
+        )
+        if phone:
+            await self.send_sms(
+                phone,
+                "Sovereign Sanctuary: your membership is cancelled. "
+                "No further charges will apply to this account.",
+            )
+        return email_sent
+
+    async def send_coach_client_charges_stopped(self, to_email: str, coach_name: str,
+                                                 client_name: str, client_username: str,
+                                                 source: str = "stop_payment") -> bool:
+        """Assigned coach copy of client cancel / deletion billing stop."""
+        kind = "account deletion" if source == "account_deletion" else "membership cancellation"
+        content = f"""
+        <h2 style="color: #C9A962;">Client {kind.title()}</h2>
+        <p>Hi {coach_name},</p>
+        <p>Your client <strong>{client_name}</strong> ({client_username}) completed
+        a {kind}. Stripe has been notified. <strong>No further charges will apply</strong>
+        to that client's membership.</p>
+        <p style="color: #94a3b8;">If this was account deletion, their profile is held
+        for 30 days and then purged. Do not schedule new paid sessions against this
+        membership.</p>
+        """
+        return await self._send_email(
+            to_email=to_email,
+            subject=f"Client {client_name}: {kind} — no further charges",
+            content=content,
+            notification_type="info",
+        )
 
     def _log_sms(self, to_phone: str, body_preview: str, status: str,
                  details: Any = None):

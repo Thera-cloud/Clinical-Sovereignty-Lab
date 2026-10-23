@@ -1205,6 +1205,105 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     }
   }
 
+  void _requestStopPayments() {
+    if (isNativeIOS) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: _Design.bgCard,
+          title: const Text('Stop Payments', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+          content: const Text(
+            'Apple handles this membership. Open Settings > Apple ID > Subscriptions '
+            'and cancel Sovereign Sanctuary there so no further charges apply.',
+            style: TextStyle(color: _Design.textSecondary, fontSize: 12, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close', style: TextStyle(color: _Design.textSecondary)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+              onPressed: () {
+                Navigator.pop(ctx);
+                launchUrl(
+                  Uri.parse('https://apps.apple.com/account/subscriptions'),
+                  mode: LaunchMode.externalApplication,
+                );
+              },
+              child: const Text('Open Apple Subscriptions', style: TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Stop Payments', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+        content: const Text(
+          'This cancels your membership with Stripe immediately. '
+          'No further charges will apply. Your account stays open. '
+          'Use Delete My Account if you also want a 30-day data hold and purge.',
+          style: TextStyle(color: _Design.textSecondary, fontSize: 12, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Keep Membership', style: TextStyle(color: _Design.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _performStopPayments();
+            },
+            child: const Text('Stop Payments', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performStopPayments() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: _Design.gold)),
+    );
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {'type': 'cancel_subscription', 'reason': 'client_stop_payment'},
+        expectedTypes: {'subscription_cancelled', 'error'},
+      );
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      final ok = resp['success'] == true || resp['already_cancelled'] == true;
+      final msg = (resp['message'] ?? (ok
+              ? 'Stripe cancelled. No further charges will apply.'
+              : 'Could not stop payments. Contact support.'))
+          .toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: ok ? Colors.green : _Design.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not stop payments: ${e.toString().replaceAll('Exception: ', '')}'),
+          backgroundColor: _Design.red,
+        ),
+      );
+    }
+  }
+
   // ---- Change Plan (Upgrade or Downgrade) ----
   void _showChangePlanSheet() {
     showModalBottomSheet(
@@ -2339,9 +2438,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Your data will be held for 30 days. If you sign back in within '
-                'that window, your account will be restored. After 30 days, all '
-                'data is permanently purged.',
+                'Stripe is notified immediately so no further charges apply. '
+                'Your data is held for 30 days. Sign back in within that window '
+                'to restore. After 30 days, data is permanently purged.',
                 style: TextStyle(color: _Design.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
@@ -2411,7 +2510,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       if (type == 'account_deletion_confirmed') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Account scheduled for deletion. Sign back in within 30 days to restore.'),
+            content: Text('Account scheduled for deletion. Billing stopped. Sign back in within 30 days to restore.'),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 4),
           ),
@@ -2956,6 +3055,22 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 onPressed: _openBillingPortal,
               ),
             ),
+            if (!_isCoachOnly) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: _Design.red),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: const Icon(Icons.cancel_outlined, color: _Design.red, size: 16),
+                  label: const Text('Stop Payments', style: TextStyle(color: _Design.red, fontSize: 12)),
+                  onPressed: _requestStopPayments,
+                ),
+              ),
+            ],
             if (isNativeIOS) ...[
               const SizedBox(height: 8),
               RestorePurchasesButton(
@@ -3576,7 +3691,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           // --- Account ---
           _sectionHeader('ACCOUNT', Icons.manage_accounts),
           _settingsCard([
-            _actionRow(Icons.delete_forever, 'Delete My Account', '30-day recovery window', _requestAccountDeletion, danger: true),
+            _actionRow(Icons.money_off, 'Stop Payments', 'Cancel membership — no further charges', _requestStopPayments, danger: true),
+            _actionRow(Icons.delete_forever, 'Delete My Account', 'Stops billing now · 30-day data hold', _requestAccountDeletion, danger: true),
             _actionRow(Icons.logout, 'Logout', null, () {
               _bioIdentity.clearCredentials(role: 'CLIENT');
               widget.onLogout?.call();
@@ -5107,9 +5223,9 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Your data will be held for 30 days. If you sign back in within '
-                'that window, your account will be restored. After 30 days, all '
-                'data is permanently purged.',
+                'Stripe is notified immediately so no further charges apply. '
+                'Your data is held for 30 days. Sign back in within that window '
+                'to restore. After 30 days, data is permanently purged.',
                 style: TextStyle(color: _Design.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
@@ -5179,7 +5295,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
       if (type == 'account_deletion_confirmed') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Account scheduled for deletion. Sign back in within 30 days to restore.'),
+            content: Text('Account scheduled for deletion. Billing stopped. Sign back in within 30 days to restore.'),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 4),
           ),
@@ -5937,7 +6053,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           // --- Account ---
           _sectionHeader('ACCOUNT', Icons.manage_accounts),
           _settingsCard([
-            _actionRow(Icons.delete_forever, 'Delete My Account', '30-day recovery window', _requestAccountDeletion, danger: true),
+            _actionRow(Icons.delete_forever, 'Delete My Account', 'Stops billing now · 30-day data hold', _requestAccountDeletion, danger: true),
             _actionRow(Icons.logout, 'Logout', null, () {
               _bioIdentity.clearCredentials(role: 'COACH');
               widget.onLogout?.call();
@@ -6333,7 +6449,7 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         {
           'q': 'How do I delete my account?',
           'a':
-              'Go to Settings > Account > "Delete My Account." Type DELETE to confirm. Your data is held for 30 days — if you sign back in during that window, your account is restored. After 30 days, all data is permanently purged.',
+              'Go to Settings > Account > Stop Payments to cancel membership immediately (Stripe is notified; no further charges). Or Delete My Account: billing stops now, data is held 30 days, then purged. Sign back in within 30 days to restore.',
         },
         {
           'q': 'How do I update my profile or preferences?',
