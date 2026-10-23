@@ -147,7 +147,9 @@ def test_calendar_pg_status_filter_is_case_insensitive():
     src = Path(__file__).resolve().parents[1] / "app" / "websocket" / "bridge_handlers_v2.py"
     text = src.read_text(encoding="utf-8")
     assert "LOWER(status) IN ('scheduled', 'active', 'pending_approval')" in text
-    assert '.lower() not in ["scheduled", "active", "pending_approval"]' in text
+    assert "LOWER(status) IN ('cancelled', 'canceled', 'rescheduled', 'cancelled_by_google')" in text
+    assert '_st_raw not in ("scheduled", "active", "pending_approval",' in text
+    assert '"cancelled", "canceled", "rescheduled"' in text
 
 
 @pytest.mark.asyncio
