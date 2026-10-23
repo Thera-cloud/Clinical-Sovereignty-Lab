@@ -355,11 +355,23 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
             if not event_id:
                 return {"status": "skipped", "reason": "no event_id"}
             ok = await gcc.delete_event(access_token, calendar_id, event_id)
-            await _persist_sync_result(pool, session_id,
-                                        google_event_id=event_id,
-                                        google_etag=None,
-                                        calendar_id=calendar_id,
-                                        state="synced" if ok else "error")
+            if ok:
+                try:
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE coaching_sessions SET google_event_id = NULL, "
+                            "google_etag = NULL, google_last_synced = NOW(), "
+                            "sync_state = 'deleted' WHERE session_id = $1",
+                            session_id,
+                        )
+                except Exception as e:
+                    logger.warning("persist delete sync failed for %s: %s", session_id, e)
+            else:
+                await _persist_sync_result(pool, session_id,
+                                            google_event_id=event_id,
+                                            google_etag=None,
+                                            calendar_id=calendar_id,
+                                            state="error")
             await _log(pool, user_id, "push", "delete", session_id, event_id,
                        status="ok" if ok else "error")
             return {"status": "ok" if ok else "error"}
@@ -387,7 +399,10 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
             if not event_id:
                 action = "create"  # fall through
             else:
-                ev = await gcc.update_event(access_token, calendar_id, event_id, payload, etag=etag)
+                ev = await gcc.update_event(
+                    access_token, calendar_id, event_id, payload, etag=etag,
+                    send_updates="all",
+                )
                 if ev is None:
                     # etag stale or other failure — re-create
                     ev = await gcc.create_event(

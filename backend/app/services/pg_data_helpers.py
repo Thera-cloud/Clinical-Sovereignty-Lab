@@ -193,6 +193,10 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                 conditions.append(f"LOWER(status) = ANY(${idx}::text[])")
                 params.append(_st)
                 idx += 1
+        if filters.get("family_id"):
+            conditions.append(f"family_id = ${idx}")
+            params.append(filters["family_id"])
+            idx += 1
 
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         query = f"""SELECT session_id, client_id, coach_id, family_id, client_name,

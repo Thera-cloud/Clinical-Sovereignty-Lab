@@ -61,6 +61,39 @@ def test_google_and_outlook_hosts():
     assert "zoom.us/s/" not in invite.google_url
 
 
+def test_ics_cancel_uses_same_uid_and_method():
+    start = datetime(2026, 10, 30, 14, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, 14, 50, tzinfo=timezone.utc)
+    raw = build_ics(
+        session_id="SES_20260918_B9A88C",
+        summary="Sanctuary session with CoachN",
+        start=start,
+        end=end,
+        description="cancelled",
+        method="CANCEL",
+        sequence=1,
+    ).decode()
+    assert "METHOD:CANCEL" in raw
+    assert "STATUS:CANCELLED" in raw
+    assert "SEQUENCE:1" in raw
+    assert "UID:sanctuary-SES_20260918_B9A88C@sovereignsanctuary.net" in raw
+
+
+def test_invite_from_cancelled_session_is_cancel():
+    invite = build_invite(
+        session_id="SES_OLD",
+        coach_name="CoachN",
+        scheduled_start="2026-10-30T14:00:00+00:00",
+        scheduled_end="2026-10-30T14:50:00+00:00",
+        method="CANCEL",
+        sequence=1,
+    )
+    assert invite is not None
+    body = invite.ics_bytes.decode()
+    assert "METHOD:CANCEL" in body
+    assert "SEQUENCE:1" in body
+
+
 def test_ics_token_round_trip():
     token = sign_ics_token(session_id="SES_20260902_350590BF0CA5", client_id="CLIENT_X")
     parsed = verify_ics_token(token)

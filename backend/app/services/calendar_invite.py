@@ -152,6 +152,26 @@ def verify_ics_token(token: str) -> Optional[Dict[str, str]]:
     return {"session_id": sid, "client_id": str(payload.get("cid") or "")}
 
 
+ORGANIZER_MAILTO = "MAILTO:support@sovereignsanctuary.net"
+_ICS_METHODS = frozenset({"PUBLISH", "REQUEST", "CANCEL"})
+
+
+def ics_uid(session_id: str) -> str:
+    return f"sanctuary-{session_id}@sovereignsanctuary.net"
+
+
+def ics_sequence_from_session(session: Optional[Dict[str, Any]]) -> int:
+    if not session:
+        return 0
+    sd = session.get("session_data")
+    if not isinstance(sd, dict):
+        sd = session
+    try:
+        return max(0, int(sd.get("ics_sequence") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_ics(
     *,
     session_id: str,
@@ -160,25 +180,43 @@ def build_ics(
     end: datetime,
     description: str,
     join_url: str = "",
+    method: str = "PUBLISH",
+    sequence: int = 0,
+    status: str = "CONFIRMED",
 ) -> bytes:
-    uid = f"sanctuary-{session_id}@sovereignsanctuary.net"
+    uid = ics_uid(session_id)
     stamp = _fmt_ics(datetime.now(timezone.utc))
+    method_u = (method or "PUBLISH").strip().upper()
+    if method_u not in _ICS_METHODS:
+        method_u = "PUBLISH"
+    try:
+        seq = max(0, int(sequence))
+    except (TypeError, ValueError):
+        seq = 0
+    if method_u == "CANCEL":
+        seq = max(seq, 1)
+        status_u = "CANCELLED"
+    else:
+        status_u = (status or "CONFIRMED").strip().upper() or "CONFIRMED"
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//Sovereign Sanctuary//Session Invite//EN",
         "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
+        f"METHOD:{method_u}",
         "BEGIN:VEVENT",
         f"UID:{uid}",
         f"DTSTAMP:{stamp}",
+        f"SEQUENCE:{seq}",
+        f"STATUS:{status_u}",
+        f"ORGANIZER;CN=Sovereign Sanctuary:{ORGANIZER_MAILTO}",
         f"DTSTART:{_fmt_ics(start)}",
         f"DTEND:{_fmt_ics(end)}",
         _fold(f"SUMMARY:{_esc_ics(summary)}"),
         _fold(f"DESCRIPTION:{_esc_ics(description)}"),
         "LOCATION:Sovereign Sanctuary session",
     ]
-    if join_url:
+    if join_url and method_u != "CANCEL":
         lines.append(_fold(f"URL:{join_url}"))
     lines.extend(["END:VEVENT", "END:VCALENDAR", ""])
     return "\r\n".join(lines).encode("utf-8")
@@ -224,6 +262,8 @@ def build_invite(
     zoom_host_url: str = "",
     client_id: str = "",
     duration_minutes: int = 50,
+    method: str = "PUBLISH",
+    sequence: int = 0,
 ) -> Optional[CalendarInvite]:
     start = _as_utc(scheduled_start)
     if not start:
@@ -252,6 +292,8 @@ def build_invite(
         end=end,
         description=details,
         join_url=join,
+        method=method,
+        sequence=sequence,
     )
     token = sign_ics_token(session_id=session_id or "", client_id=client_id)
     ics_url = f"{public_api_base()}/api/sessions-public/calendar.ics?t={quote(token)}" if token else ""
@@ -308,9 +350,23 @@ def html_cta_fragment(invite: Optional[CalendarInvite], *, include_join: bool = 
     return "\n".join(parts)
 
 
-def invite_from_session(session: Dict[str, Any], *, coach_name: str = "") -> Optional[CalendarInvite]:
+def invite_from_session(
+    session: Dict[str, Any],
+    *,
+    coach_name: str = "",
+    method: Optional[str] = None,
+    sequence: Optional[int] = None,
+) -> Optional[CalendarInvite]:
     if not session:
         return None
+    st = str(session.get("status") or "").lower()
+    gone = st in ("cancelled", "canceled", "cancelled_by_google", "rescheduled")
+    method_u = (method or ("CANCEL" if gone else "PUBLISH")).upper()
+    seq = ics_sequence_from_session(session) if sequence is None else sequence
+    if method_u == "CANCEL":
+        seq = max(int(seq or 0), 1)
+    elif method_u == "REQUEST":
+        seq = max(int(seq or 0), 1)
     return build_invite(
         session_id=str(session.get("session_id") or session.get("id") or ""),
         coach_name=coach_name or str(session.get("coach_name") or "your coach"),
@@ -321,4 +377,6 @@ def invite_from_session(session: Dict[str, Any], *, coach_name: str = "") -> Opt
         zoom_host_url=str(session.get("zoom_host_url") or ""),
         client_id=str(session.get("client_id") or ""),
         duration_minutes=int(session.get("duration_minutes") or 50) if str(session.get("duration_minutes") or "").strip() else 50,
+        method=method_u,
+        sequence=seq,
     )

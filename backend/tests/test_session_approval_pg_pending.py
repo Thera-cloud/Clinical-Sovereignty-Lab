@@ -209,8 +209,9 @@ async def test_notify_coach_of_client_cancel_email_and_sms():
             "timezone": "UTC",
         }
 
-    async def fake_email(to_email, template_name, context):
+    async def fake_email(to_email, template_name, context, **kwargs):
         sent["email"] = (to_email, template_name, context)
+        sent["ics"] = kwargs.get("ics_bytes")
         return True
 
     ns = AsyncMock()
@@ -247,8 +248,9 @@ async def test_notify_client_of_coach_cancel_email_and_sms():
             }
         return {"email": "", "phone": "", "name": "Audit Coach", "timezone": "UTC"}
 
-    async def fake_email(to_email, template_name, context):
+    async def fake_email(to_email, template_name, context, **kwargs):
         sent["email"] = (to_email, template_name, context)
+        sent["ics"] = kwargs.get("ics_bytes")
         return True
 
     ns = AsyncMock()
@@ -284,8 +286,9 @@ async def test_notify_client_of_unpaid_cancel_uses_unpaid_template():
             "timezone": "UTC",
         }
 
-    async def fake_email(to_email, template_name, context):
+    async def fake_email(to_email, template_name, context, **kwargs):
         sent["email"] = (to_email, template_name, context)
+        sent["ics"] = kwargs.get("ics_bytes")
         return True
 
     ns = AsyncMock()

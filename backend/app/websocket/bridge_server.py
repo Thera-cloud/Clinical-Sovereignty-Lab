@@ -16180,9 +16180,15 @@ async def handle_client(websocket, path=None):
                                     )
                         upcoming = []
                         _seen_ids = set()
+                        _fam = str(current_profile.get("family_id") or "").strip()
+                        _pd = current_profile.get("profile_data")
+                        if not _fam and isinstance(_pd, dict):
+                            _fam = str(_pd.get("family_id") or "").strip()
                         for s in sessions:
+                            # QUANTUM-CRYSTAL-ARCH: family_id bookings (spouse) belong on both calendars
                             if s.get("client_id") != client_id:
-                                continue
+                                if not _fam or str(s.get("family_id") or "") != _fam:
+                                    continue
                             if str(s.get("status") or "").lower() not in (
                                 "scheduled", "active", "pending_approval", "confirmed",
                             ):

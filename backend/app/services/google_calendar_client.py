@@ -234,11 +234,13 @@ async def create_event(access_token: str, calendar_id: str,
 
 
 async def update_event(access_token: str, calendar_id: str, event_id: str,
-                        payload: Dict[str, Any], etag: Optional[str] = None
+                        payload: Dict[str, Any], etag: Optional[str] = None,
+                        send_updates: Optional[str] = "all",
                         ) -> Optional[Dict[str, Any]]:
     url = _event_url(
         calendar_id,
         event_id,
+        send_updates=send_updates,
         conference_data=bool(payload.get("conferenceData")),
     )
     headers = {
@@ -259,9 +261,9 @@ async def update_event(access_token: str, calendar_id: str, event_id: str,
             return json.loads(body)
 
 
-async def delete_event(access_token: str, calendar_id: str, event_id: str) -> bool:
-    url = (f"{GOOGLE_API_BASE}/calendars/{urllib.parse.quote(calendar_id)}"
-           f"/events/{urllib.parse.quote(event_id)}")
+async def delete_event(access_token: str, calendar_id: str, event_id: str,
+                       send_updates: str = "all") -> bool:
+    url = _event_url(calendar_id, event_id, send_updates=send_updates)
     async with aiohttp.ClientSession() as session:
         async with session.delete(
             url, headers={"Authorization": f"Bearer {access_token}"}

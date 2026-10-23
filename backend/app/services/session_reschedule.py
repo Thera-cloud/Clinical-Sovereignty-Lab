@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
-RESCHEDULE_ELIGIBLE = frozenset({"scheduled", "active"})
+RESCHEDULE_ELIGIBLE = frozenset({"scheduled", "active", "cancelled", "canceled"})
 PAST_LOCKED_STATUSES = frozenset({
     "scheduled", "active", "pending_approval", "completed", "no_show",
     "rescheduled", "cancelled", "cancelled_by_google",
@@ -141,7 +141,7 @@ def reschedule_guard(
     now_utc = as_utc(now) or datetime.now(timezone.utc)
     status = str(session.get("status") or "").lower()
     if status not in RESCHEDULE_ELIGIBLE:
-        return "not_reschedulable", "Only scheduled live sessions can be rescheduled."
+        return "not_reschedulable", "Only future sessions can be rescheduled."
     if is_past_locked(session.get("scheduled_start"), now_utc):
         return "past_locked", "Past sessions stay on the calendar for records and billing."
     if new_start <= now_utc:

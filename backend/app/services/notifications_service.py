@@ -824,6 +824,7 @@ class EmailService:
         from_name: str = FROM_NAME,
         transit_guardian=None,
         ics_bytes: Optional[bytes] = None,
+        extra_ics: Optional[list] = None,
     ) -> bool:
         """Send email using template. Optionally inspects for PII via Transit Guardian."""
         
@@ -859,14 +860,34 @@ class EmailService:
             "subject": subject,
             "content": [{"type": "text/html", "value": html_content}],
         }
+        ics_parts = []
         if ics_bytes:
+            ics_parts.append(("sanctuary-session.ics", ics_bytes, "REQUEST"))
+        for extra in extra_ics or []:
+            if not extra:
+                continue
+            if isinstance(extra, dict):
+                raw = extra.get("bytes") or extra.get("ics_bytes")
+                if not raw:
+                    continue
+                ics_parts.append((
+                    extra.get("filename") or "sanctuary-session-cancel.ics",
+                    raw,
+                    extra.get("method") or "CANCEL",
+                ))
+            elif isinstance(extra, (bytes, bytearray)):
+                ics_parts.append(("sanctuary-session-cancel.ics", bytes(extra), "CANCEL"))
+        if ics_parts:
             import base64
-            payload["attachments"] = [{
-                "content": base64.b64encode(ics_bytes).decode("ascii"),
-                "filename": "sanctuary-session.ics",
-                "type": "text/calendar",
-                "disposition": "attachment",
-            }]
+            payload["attachments"] = [
+                {
+                    "content": base64.b64encode(raw).decode("ascii"),
+                    "filename": name,
+                    "type": f"text/calendar; method={method}",
+                    "disposition": "attachment",
+                }
+                for name, raw, method in ics_parts
+            ]
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -1035,6 +1056,8 @@ class EmailService:
         client_id: str = "",
         coach_name: str = "",
         include_calendar: bool = True,
+        method: str = "PUBLISH",
+        sequence: int = 0,
     ) -> tuple:
         from app.services.calendar_invite import (
             build_invite,
@@ -1058,6 +1081,8 @@ class EmailService:
                 scheduled_end=scheduled_end,
                 join_url=safe_join,
                 client_id=client_id or "",
+                method=method,
+                sequence=sequence,
             )
             extra.update(email_context(invite))
             extra["join_url"] = safe_join or (invite.join_url if invite else "")
@@ -1101,6 +1126,7 @@ class EmailService:
         scheduled_start=None,
         scheduled_end=None,
         client_id: str = "",
+        extra_ics: Optional[list] = None,
     ) -> bool:
         extra, ics = self._calendar_fields(
             join_url=join_url,
@@ -1109,6 +1135,8 @@ class EmailService:
             scheduled_end=scheduled_end,
             client_id=client_id,
             coach_name=coach_name,
+            method="REQUEST",
+            sequence=1,
         )
         return await self.send_email(to_email, "coaching_rescheduled", {
             "old_when": old_when,
@@ -1117,7 +1145,7 @@ class EmailService:
             "timezone": timezone,
             "coach_name": coach_name,
             **extra,
-        }, ics_bytes=ics)
+        }, ics_bytes=ics, extra_ics=extra_ics)
     
     async def send_coaching_reminder(
         self, to_email: str, time: str, coach_name: str,

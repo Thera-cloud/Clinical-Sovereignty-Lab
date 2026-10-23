@@ -28,6 +28,16 @@ def test_guard_blocks_past_session():
     assert code == "past_locked"
 
 
+def test_guard_allows_cancelled_future_session():
+    code, msg = reschedule_guard(
+        {"status": "cancelled", "scheduled_start": "2026-10-30T14:00:00+00:00"},
+        NOW + timedelta(days=20),
+        now=NOW,
+    )
+    assert code is None
+    assert msg is None
+
+
 def test_guard_allows_future_session():
     code, msg = reschedule_guard(
         {"status": "scheduled", "scheduled_start": "2026-09-21T14:00:00+00:00"},
@@ -81,6 +91,13 @@ def test_duration_from_window():
         "scheduled_start": "2026-09-21T14:00:00+00:00",
         "scheduled_end": "2026-09-21T14:50:00+00:00",
     }) == 50
+
+
+def test_reschedule_email_sends_cancel_ics_kwarg():
+    from inspect import signature
+    from app.services.notifications_service import EmailService
+    sig = signature(EmailService.send_coaching_rescheduled)
+    assert "extra_ics" in sig.parameters
 
 
 def test_reschedule_email_template_exists():

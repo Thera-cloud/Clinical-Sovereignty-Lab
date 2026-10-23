@@ -172,14 +172,16 @@ class CoachNexusV2:
             except:
                 pass
         
-        # Filter by month/year — cancelled / rescheduled vault rows stay off the grid
+        # Filter by month/year — past cancelled stay off; future cancelled stay visible
         filtered = []
         _gone = {"cancelled", "canceled", "rescheduled", "cancelled_by_google"}
+        _today = datetime.datetime.now(datetime.timezone.utc).date()
         for s in schedule:
             try:
-                if str((s or {}).get("status") or "").lower() in _gone:
-                    continue
+                st = str((s or {}).get("status") or "").lower()
                 dt = _parse_date_any(s.get("date", ""))
+                if st in _gone and (not dt or dt.date() < _today):
+                    continue
                 if dt and dt.month == month and dt.year == year:
                     filtered.append(s)
             except:
@@ -212,7 +214,9 @@ class CoachNexusV2:
                 try:
                     if (ses.get("coach_id") or "") != hid:
                         continue
-                    if (ses.get("status") or "").lower() not in ["scheduled", "active", "pending_approval"]:
+                    _st_raw = (ses.get("status") or "").lower()
+                    if _st_raw not in ("scheduled", "active", "pending_approval",
+                                       "cancelled", "canceled", "rescheduled"):
                         continue
 
                     st = (ses.get("scheduled_start") or "").replace("Z", "+00:00")
@@ -229,6 +233,14 @@ class CoachNexusV2:
                     # Month/year filter
                     if st_dt.month != month or st_dt.year != year:
                         continue
+                    if _st_raw in ("cancelled", "canceled", "rescheduled"):
+                        _now_utc = datetime.datetime.now(datetime.timezone.utc)
+                        if st_dt.tzinfo is None:
+                            st_cmp = st_dt.replace(tzinfo=datetime.timezone.utc)
+                        else:
+                            st_cmp = st_dt
+                        if st_cmp <= _now_utc:
+                            continue
 
                     filtered.append({
                         "id": ses.get("session_id") or ses.get("id") or "",
@@ -338,7 +350,13 @@ class CoachNexusV2:
                     WHERE coach_id = $1
                       AND scheduled_start >= $2
                       AND scheduled_start <  $3
-                      AND LOWER(status) IN ('scheduled', 'active', 'pending_approval')
+                      AND (
+                        LOWER(status) IN ('scheduled', 'active', 'pending_approval')
+                        OR (
+                          LOWER(status) IN ('cancelled', 'canceled', 'rescheduled', 'cancelled_by_google')
+                          AND scheduled_start > NOW()
+                        )
+                      )
                       AND COALESCE(session_data->>'schedule_link_hidden', 'false')
                           NOT IN ('true', '1', 'yes')
                     ORDER BY scheduled_start ASC

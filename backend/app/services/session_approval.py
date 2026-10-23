@@ -126,6 +126,105 @@ async def lookup_user_contact(db_pool, hw_or_username: str) -> Dict[str, str]:
     return {}
 
 
+async def lookup_family_id(db_pool, hw_or_username: str) -> str:
+    if not db_pool or not hw_or_username:
+        return ""
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT COALESCE(NULLIF(profile_data->>'family_id', ''), '') AS fam
+                   FROM users
+                   WHERE hardware_id = $1 OR username = $1
+                   LIMIT 1""",
+                hw_or_username,
+            )
+            return str((row["fam"] if row else "") or "").strip()
+    except Exception as e:
+        logger.warning("session_approval: family_id lookup failed for %s: %s", hw_or_username, e)
+        return ""
+
+
+async def lookup_family_contacts(db_pool, family_id: str) -> List[Dict[str, str]]:
+    """Spouse / family Sanctuary accounts sharing family_id (profile_data)."""
+    fam = (family_id or "").strip()
+    if not db_pool or not fam:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT username,
+                          COALESCE(hardware_id, '') AS hardware_id,
+                          COALESCE(profile_data->>'email', '') AS email,
+                          COALESCE(profile_data->>'phone', '') AS phone,
+                          COALESCE(profile_data->>'name', username) AS name,
+                          COALESCE(profile_data->>'timezone', '') AS timezone
+                   FROM users
+                   WHERE profile_data->>'family_id' = $1
+                     AND UPPER(role) IN ('CLIENT', 'COACH')""",
+                fam,
+            )
+        out = []
+        for row in rows or []:
+            out.append({
+                "username": row["username"],
+                "hardware_id": row["hardware_id"],
+                "email": row["email"],
+                "phone": row["phone"],
+                "name": row["name"],
+                "timezone": row["timezone"],
+            })
+        return out
+    except Exception as e:
+        logger.warning("session_approval: family contact lookup failed: %s", e)
+        return []
+
+
+def cancel_ics_bytes(session: Dict, *, coach_name: str = "") -> Optional[bytes]:
+    try:
+        from app.services.calendar_invite import invite_from_session
+        payload = dict(session or {})
+        payload["status"] = "cancelled"
+        invite = invite_from_session(payload, coach_name=coach_name or "your coach", method="CANCEL")
+        return invite.ics_bytes if invite else None
+    except Exception as e:
+        logger.warning("session_approval: cancel ICS build failed: %s", e)
+        return None
+
+
+async def _send_template_email(sender, dest: str, template: str, ctx: Dict, ics=None) -> bool:
+    if not sender or not dest:
+        return False
+    try:
+        return bool(await sender(dest, template, ctx, ics_bytes=ics))
+    except TypeError:
+        return bool(await sender(dest, template, ctx))
+
+
+async def _fanout_family_cancel_email(
+    db_pool,
+    session: Dict,
+    *,
+    sender,
+    template: str,
+    ctx: Dict,
+    ics,
+    already: Optional[set] = None,
+) -> int:
+    sent_n = 0
+    seen = set(already or ())
+    fam = str(session.get("family_id") or "").strip()
+    if not fam and db_pool:
+        fam = await lookup_family_id(db_pool, session.get("client_id") or "")
+    for contact in await lookup_family_contacts(db_pool, fam):
+        dest = (contact.get("email") or "").strip().lower()
+        if not dest or dest in seen:
+            continue
+        seen.add(dest)
+        if await _send_template_email(sender, dest, template, ctx, ics):
+            sent_n += 1
+    return sent_n
+
+
 # =============================================================================
 # EMAILS
 # =============================================================================
@@ -403,6 +502,25 @@ async def merge_pg_upcoming_for_client(
             client_id=cid,
             statuses=list(_CLIENT_UPCOMING_STATUSES | _CLIENT_GONE_STATUSES),
         )
+        fam = ""
+        for r in rows:
+            fam = str(r.get("family_id") or "").strip()
+            if fam:
+                break
+        if not fam:
+            fam = await lookup_family_id(db_pool, cid)
+        if fam:
+            fam_rows = await loader(
+                db_pool,
+                family_id=fam,
+                statuses=list(_CLIENT_UPCOMING_STATUSES | _CLIENT_GONE_STATUSES),
+            )
+            have = {(r.get("session_id") or "") for r in rows}
+            for r in fam_rows:
+                sid = r.get("session_id") or ""
+                if sid and sid not in have:
+                    rows.append(r)
+                    have.add(sid)
     except Exception as e:
         logger.warning("session_approval: merge_pg_upcoming_for_client failed: %s", e)
         return False
@@ -476,17 +594,23 @@ async def notify_coach_of_client_cancel(
             sender = EmailService().send_email
         except Exception as e:
             logger.warning("session_approval: EmailService unavailable: %s", e)
+    ctx = {
+        "client_name": client_name,
+        "session_time": when,
+        "session_id": session.get("session_id") or "",
+    }
+    ics = cancel_ics_bytes(session, coach_name=(coach or {}).get("name") or "")
     if dest and sender:
         try:
-            result["email"] = bool(await sender(
-                dest,
-                "session_cancelled_coach",
-                {
-                    "client_name": client_name,
-                    "session_time": when,
-                    "session_id": session.get("session_id") or "",
-                },
-            ))
+            result["email"] = await _send_template_email(
+                sender, dest, "session_cancelled_coach", ctx, ics,
+            )
+            if result["email"]:
+                await _fanout_family_cancel_email(
+                    db_pool, session, sender=sender,
+                    template="session_cancelled_coach", ctx=ctx, ics=ics,
+                    already={dest.strip().lower()},
+                )
         except Exception as e:
             logger.warning("session_approval: cancel email failed: %s", e)
     phone = ((coach or {}).get("phone") or "").strip()
@@ -537,17 +661,23 @@ async def notify_client_of_coach_cancel(
             sender = EmailService().send_email
         except Exception as e:
             logger.warning("session_approval: EmailService unavailable: %s", e)
+    ctx = {
+        "coach_name": coach_name,
+        "session_time": when,
+        "session_id": session.get("session_id") or "",
+    }
+    ics = cancel_ics_bytes(session, coach_name=coach_name)
     if dest and sender:
         try:
-            result["email"] = bool(await sender(
-                dest,
-                template,
-                {
-                    "coach_name": coach_name,
-                    "session_time": when,
-                    "session_id": session.get("session_id") or "",
-                },
-            ))
+            result["email"] = await _send_template_email(
+                sender, dest, template, ctx, ics,
+            )
+            if result["email"]:
+                await _fanout_family_cancel_email(
+                    db_pool, session, sender=sender,
+                    template=template, ctx=ctx, ics=ics,
+                    already={dest.strip().lower()},
+                )
         except Exception as e:
             logger.warning("session_approval: client-cancel email failed: %s", e)
     phone = ((client or {}).get("phone") or "").strip()

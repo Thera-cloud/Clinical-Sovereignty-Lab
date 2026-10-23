@@ -598,9 +598,44 @@ async def _send_reschedule_notice(request: Request, old: dict, new: dict) -> dic
         join_url = safe_join_url(new.get("zoom_link")) or join_from_host_path(
             new.get("zoom_host_url") or ""
         )
+        extra_ics = []
+        try:
+            from app.services.session_approval import cancel_ics_bytes
+            cancel_raw = cancel_ics_bytes(old, coach_name=coach.get("name") or "Your coach")
+            if cancel_raw:
+                extra_ics.append({
+                    "filename": "sanctuary-session-cancel.ics",
+                    "bytes": cancel_raw,
+                    "method": "CANCEL",
+                })
+        except Exception:
+            extra_ics = []
+        recipients = []
         if email_addr and "@" in email_addr:
-            ok = await EmailService().send_coaching_rescheduled(
-                to_email=email_addr,
+            recipients.append(email_addr.strip().lower())
+        try:
+            from app.services.session_approval import (
+                lookup_user_contact,
+                lookup_family_contacts,
+                lookup_family_id,
+            )
+            coach_contact = await lookup_user_contact(db, (new.get("coach_id") or "").strip())
+            cmail = (coach_contact.get("email") or "").strip().lower()
+            if cmail and cmail not in recipients:
+                recipients.append(cmail)
+            fam = str(new.get("family_id") or old.get("family_id") or "").strip()
+            if not fam:
+                fam = await lookup_family_id(db, (new.get("client_id") or "").strip())
+            for contact in await lookup_family_contacts(db, fam):
+                fmail = (contact.get("email") or "").strip().lower()
+                if fmail and fmail not in recipients:
+                    recipients.append(fmail)
+        except Exception:
+            pass
+        mailer = EmailService()
+        for dest in recipients:
+            ok = await mailer.send_coaching_rescheduled(
+                to_email=dest,
                 old_when=old_when,
                 new_date=new_date,
                 new_time=new_time or new_iso,
@@ -611,10 +646,12 @@ async def _send_reschedule_notice(request: Request, old: dict, new: dict) -> dic
                 scheduled_start=new.get("scheduled_start"),
                 scheduled_end=new.get("scheduled_end"),
                 client_id=str(new.get("client_id") or ""),
+                extra_ics=extra_ics or None,
             )
-            result["email"] = bool(ok)
             if ok:
-                result["channels"].append("email")
+                result["email"] = True
+                if "email" not in result["channels"]:
+                    result["channels"].append("email")
     except Exception as e:
         _logger.warning("_send_reschedule_notice email failed: %s", e)
     if result["email"]:
