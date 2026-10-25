@@ -108,14 +108,14 @@ async def _read_image_data_url(row: Any) -> str | None:
         for path in (blob_path, thumb):
             if not path:
                 continue
-            data_url = await url_to_vision_data_url(str(path))
-            if data_url:
-                return data_url
             blob = VaultBlobManager().read_blob(str(path))
             if blob:
                 data_url = bytes_to_vision_data_url(blob)
                 if data_url:
                     return data_url
+            data_url = await url_to_vision_data_url(str(path))
+            if data_url:
+                return data_url
     except Exception as exc:
         print(f">>> [VAULT] Image bytes skipped: {type(exc).__name__}: {exc}")
     return None
@@ -170,6 +170,16 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
                     ),
                 )
                 rows = ranked[:5]
+            elif upload_ref and rows:
+                def _upload_rank(r: Any) -> tuple[int, int]:
+                    ct = (r["content_type"] or "").lower()
+                    mime = (r["mime_type"] or "").lower()
+                    upload = 0 if ct.startswith("upload_") else 1
+                    panel = 2 if ct == "sse_panel" else 0
+                    photo = 0 if (mime.startswith("image/") or ct == "upload_image") else 1
+                    return (upload + panel, photo)
+
+                rows = sorted(rows, key=_upload_rank)
     except Exception as exc:
         print(f">>> [VAULT] Chat context query failed: {type(exc).__name__}: {exc}")
         return user_text, "", None
@@ -190,6 +200,7 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
 
     parts = []
     image_data_url = None
+    missed_images: list[str] = []
     for row in rows:
         name = row["display_name"] or "uploaded file"
         content_type = (row["content_type"] or "").lower()
@@ -201,10 +212,7 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
                     "Study what is actually in the picture."
                 )
             else:
-                parts.append(
-                    f"[VAULT IMAGE MISSING: {name}] Pixels did not load this turn. "
-                    "Do not claim you can see the file."
-                )
+                missed_images.append(name)
             continue
 
         text = (row["extracted_text_preview"] or "").strip()
@@ -235,6 +243,13 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
                     "Cite as their Google/Gemini/AI Mode history.)"
                 )
             parts.append(f"[{label}: {name}]{note}\n{text[:inject_n]}")
+
+    if image_data_url is None:
+        for name in missed_images[:2]:
+            parts.append(
+                f"[VAULT IMAGE MISSING: {name}] Pixels did not load this turn. "
+                "Do not claim you can see the file."
+            )
 
     if not parts:
         if rows:

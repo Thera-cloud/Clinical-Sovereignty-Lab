@@ -112,6 +112,45 @@ async def test_vault_sse_panel_row_attaches_vision(monkeypatch):
     assert "pixels" in ctx
 
 
+@pytest.mark.asyncio
+async def test_untagged_photo_prefers_upload_over_sse_panel(monkeypatch):
+    async def fake_img(row):
+        name = row["display_name"]
+        if name.startswith("IMG_"):
+            return "data:image/jpeg;base64,upload"
+        return None
+
+    monkeypatch.setattr(_vault, "_read_image_data_url", fake_img)
+    panel = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "display_name": "neuro_panel: cloudstone",
+        "content_type": "sse_panel",
+        "extracted_text_preview": "",
+        "blob_path": "https://example/nate-vault/sse/a.png",
+        "thumbnail_path": None,
+        "mime_type": "image/png",
+        "size_bytes": 12000,
+    }
+    upload = {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "display_name": "IMG_9560.jpeg",
+        "content_type": "upload_image",
+        "extracted_text_preview": "",
+        "blob_path": "/app/data/archives/quarantine/photo",
+        "thumbnail_path": None,
+        "mime_type": "image/jpeg",
+        "size_bytes": 4788570,
+    }
+    db = _FakeDB(rows=[panel, upload])
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    _new, ctx, img = await build_vault_chat_context(
+        db, profile, "look at this photo I uploaded"
+    )
+    assert img == "data:image/jpeg;base64,upload"
+    assert "IMG_9560.jpeg" in ctx
+    assert "IMAGE MISSING" not in ctx
+
+
 def test_upload_ref_matches_photo_language():
     assert _vault._UPLOAD_REF_RE.search("can you look at this photo I uploaded")
     assert _vault._row_is_image({

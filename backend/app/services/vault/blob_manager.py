@@ -35,6 +35,60 @@ def _local_archive_root() -> Path:
     return data_dir / "archives"
 
 
+def local_blob_paths(blob_path: str) -> list[Path]:
+    """Filesystem candidates for a vault blob.
+
+    Uploads are written inside nate_backend (`/app/data` → data/backend).
+    Chat runs on nate_bridge, where `/app/data` is data/bridge and the
+    backend volume is mounted at `/app/backend_data`.
+    """
+    raw = (blob_path or "").split("?")[0].strip()
+    if not raw or ".." in raw:
+        return []
+    data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
+    roots: list[Path] = []
+    extra = (os.getenv("BACKEND_DATA_DIR") or "").strip()
+    if extra:
+        roots.append(Path(extra))
+    for candidate in (Path("/app/backend_data"), Path("/app/bridge_data"), data_dir):
+        if candidate not in roots:
+            roots.append(candidate)
+    out: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(path: Path) -> None:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+
+    if raw.startswith("/"):
+        _add(Path(raw))
+        for prefix in ("/app/data/", "/app/backend_data/", "/app/bridge_data/"):
+            if raw.startswith(prefix):
+                rel = raw[len(prefix) :]
+                for root in roots:
+                    _add(root / rel)
+                break
+    else:
+        rel = raw.lstrip("/")
+        for root in roots:
+            _add(root / "archives" / rel)
+            _add(root / rel)
+    return out
+
+
+def read_local_blob_bytes(blob_path: str) -> bytes:
+    """Return bytes from the first existing local candidate, else empty."""
+    for path in local_blob_paths(blob_path):
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return path.read_bytes()
+        except OSError:
+            continue
+    return b""
+
+
 # Container / path prefixes for vault tiers
 VAULT_QUARANTINE = "vault-quarantine"
 VAULT_CLEAN = "vault-clean"
@@ -159,7 +213,10 @@ class VaultBlobManager:
         """
         if not blob_path or ".." in blob_path:
             return b""
-        if blob_storage.is_azure_configured():
+        local = read_local_blob_bytes(blob_path)
+        if local:
+            return local
+        if blob_storage.is_azure_configured() and not blob_path.startswith("/"):
             for container_name in [
                 self.permanent_container,
                 self.clean_container,
@@ -172,10 +229,6 @@ class VaultBlobManager:
                 )
                 if content:
                     return content
-        # Local: blob_path may be full path or relative
-        path = Path(blob_path) if blob_path.startswith("/") else _local_archive_root() / blob_path.lstrip("/")
-        if path.exists() and path.is_file():
-            return path.read_bytes()
         try:
             from app.services.r2_storage import download_bytes as r2_get, is_r2_configured
 

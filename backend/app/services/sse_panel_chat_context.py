@@ -860,7 +860,11 @@ async def build_sse_panel_chat_context(
         followup = bool(_PANEL_FOLLOWUP_RE.search(user_text))
         if not followup and _SHORT_PANEL_ACK_RE.match(user_text.strip()):
             followup = await _recent_panel_thread(db_pool, ids)
-        if not followup and _VISUAL_FOLLOW_RE.search(user_text):
+        if (
+            not followup
+            and _VISUAL_FOLLOW_RE.search(user_text)
+            and "referring to my vault item" not in user_text.lower()
+        ):
             followup = await _recent_panel_thread(db_pool, ids)
         if not followup:
             return user_text, "", None

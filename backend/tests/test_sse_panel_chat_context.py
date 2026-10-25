@@ -444,6 +444,35 @@ async def test_visual_followup_reinjects_recent_panel():
     assert "open sky" in ctx.lower()
 
 
+@pytest.mark.asyncio
+async def test_vault_item_referral_does_not_hijack_panel_followup():
+    row = {
+        "panel_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "panel_type": "journey",
+        "r2_url": None,
+        "narrative_text": "You stand freely beneath the boundless open sky.",
+        "biome": "open_sky",
+        "character_manifest": "Curiosity",
+        "panel_tone": "meditative",
+        "crystal_domains_used": {"themes": ["wonder"], "domains": ["clinical"]},
+        "generated_at": datetime(2026, 10, 24, tzinfo=timezone.utc),
+    }
+    chat_rows = [
+        {
+            "user_text": "(asking about my Sovereign Journey story panel image id:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)",
+            "ai_text": "You stand beneath the open sky.",
+            "created_at": datetime(2026, 10, 24, tzinfo=timezone.utc),
+        },
+    ]
+    db = _FakeDB(row=row, chat_rows=chat_rows)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    _new, ctx, img = await build_sse_panel_chat_context(
+        db, profile, "look at this photo (referring to my vault item: IMG_9560.jpeg)"
+    )
+    assert ctx == ""
+    assert img is None
+
+
 def test_prefer_scene_matched_row_picks_open_sky():
     cloud = {
         "panel_id": "1",

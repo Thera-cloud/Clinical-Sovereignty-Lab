@@ -96,6 +96,17 @@ async def fetch_image_bytes(url_or_key: str) -> Optional[bytes]:
     raw = (url_or_key or "").strip()
     if not raw or raw.startswith("mock://"):
         return None
+    if not raw.startswith("http"):
+        try:
+            from app.services.vault.blob_manager import read_local_blob_bytes
+
+            local = read_local_blob_bytes(raw)
+            if local:
+                return local
+        except Exception as exc:
+            print(f">>> [VISION] local blob skipped: {type(exc).__name__}: {exc}")
+        if raw.startswith("/") or "archives/" in raw or raw.startswith("quarantine/"):
+            return None
     key = r2_key_from_url(raw)
     if key:
         data = await _s3_get(key)
