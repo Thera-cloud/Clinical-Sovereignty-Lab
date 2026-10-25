@@ -86,3 +86,38 @@ async def test_matched_row_without_text_gets_fallback_note():
     assert "scan.pdf" in ctx
     assert "unavailable" in ctx.lower()
 
+
+@pytest.mark.asyncio
+async def test_vault_sse_panel_row_attaches_vision(monkeypatch):
+    async def fake_img(_row):
+        return "data:image/jpeg;base64,xyz"
+
+    monkeypatch.setattr(_vault, "_read_image_data_url", fake_img)
+    row = {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "display_name": "neuro_panel: aerolith_cloud_city",
+        "content_type": "sse_panel",
+        "extracted_text_preview": "",
+        "blob_path": "https://example.r2.cloudflarestorage.com/nate-vault/sse/journey/x.png",
+        "thumbnail_path": None,
+        "mime_type": "image/png",
+        "size_bytes": 12000,
+    }
+    db = _FakeDB(row=row)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    text = "Look at this photo [Vault:33333333-3333-3333-3333-333333333333]"
+    _new, ctx, img = await build_vault_chat_context(db, profile, text)
+    assert img == "data:image/jpeg;base64,xyz"
+    assert "VAULT IMAGE: neuro_panel: aerolith_cloud_city" in ctx
+    assert "pixels" in ctx
+
+
+def test_upload_ref_matches_photo_language():
+    assert _vault._UPLOAD_REF_RE.search("can you look at this photo I uploaded")
+    assert _vault._row_is_image({
+        "content_type": "sse_panel",
+        "mime_type": "image/png",
+        "display_name": "panel.png",
+        "blob_path": "https://x/nate-vault/sse/a.png",
+    })
+

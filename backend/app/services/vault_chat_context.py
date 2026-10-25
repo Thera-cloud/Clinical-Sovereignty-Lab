@@ -12,11 +12,15 @@ from typing import Any
 
 _VAULT_REF_RE = re.compile(r"\[Vault:([a-fA-F0-9\-]+)\]")
 _UPLOAD_REF_RE = re.compile(
-    r"\b(uploaded?\s+(files?|documents?|docs?)|my\s+(uploaded\s+)?(files?|documents?|docs?)|"
+    r"\b(uploaded?\s+(files?|documents?|docs?|photos?|pictures?|images?|screenshots?)|"
+    r"my\s+(uploaded\s+)?(files?|documents?|docs?|photos?|pictures?|images?)|"
     r"using\s+the\s+uploaded|based\s+on\s+my\s+(files?|documents?|docs?)|from\s+my\s+vault|"
-    r"vault\s+(files?|documents?|docs?))\b",
+    r"vault\s+(files?|documents?|docs?|photos?|images?)|"
+    r"look(?:ing)?\s+at\s+(this|the|my)\s+(photo|picture|image|screenshot|pic)|"
+    r"review\s+(this|the|my)\s+(photo|picture|image|screenshot))\b",
     re.I,
 )
+_IMAGE_NAME_RE = re.compile(r"\.(png|jpe?g|webp|gif|heic)$", re.I)
 # Soft trigger for Google AI Mode / Gemini Apps MyActivity exports uploaded as vault docs
 _AI_EXPORT_REF_RE = re.compile(
     r"\b(google\s+(ai|gemini|history)|ai\s+mode|myactivity|gemini\s+(history|chats?|export|apps?)|"
@@ -80,6 +84,43 @@ async def _read_blob_text(row: Any, *, max_chars: int = 50_000) -> str:
         return ""
 
 
+def _row_is_image(row: Any) -> bool:
+    content_type = ((row.get("content_type") if hasattr(row, "get") else row["content_type"]) or "").lower()
+    mime = ((row.get("mime_type") if hasattr(row, "get") else row["mime_type"]) or "").lower()
+    name = ((row.get("display_name") if hasattr(row, "get") else row["display_name"]) or "").lower()
+    blob = ((row.get("blob_path") if hasattr(row, "get") else row["blob_path"]) or "").split("?")[0].lower()
+    return (
+        "image" in content_type
+        or content_type in ("sse_panel", "upload_image", "sse_frame")
+        or mime.startswith("image/")
+        or _IMAGE_NAME_RE.search(name)
+        or blob.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+    )
+
+
+async def _read_image_data_url(row: Any) -> str | None:
+    blob_path = row.get("blob_path") if hasattr(row, "get") else row["blob_path"]
+    thumb = row.get("thumbnail_path") if hasattr(row, "get") else row["thumbnail_path"]
+    try:
+        from app.services.chat_vision import url_to_vision_data_url, bytes_to_vision_data_url
+        from app.services.vault.blob_manager import VaultBlobManager
+
+        for path in (blob_path, thumb):
+            if not path:
+                continue
+            data_url = await url_to_vision_data_url(str(path))
+            if data_url:
+                return data_url
+            blob = VaultBlobManager().read_blob(str(path))
+            if blob:
+                data_url = bytes_to_vision_data_url(blob)
+                if data_url:
+                    return data_url
+    except Exception as exc:
+        print(f">>> [VAULT] Image bytes skipped: {type(exc).__name__}: {exc}")
+    return None
+
+
 async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: str) -> tuple[str, str, str | None]:
     """Return (updated_user_text, vault_context, image_data_url)."""
     if not db_pool or not profile or not user_text:
@@ -111,7 +152,10 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
                           blob_path, thumbnail_path, mime_type, size_bytes
                    FROM vault_items
                    WHERE member_id = ANY($1::text[])
-                     AND (content_type = ANY($2::text[]) OR content_type LIKE 'upload_%')
+                     AND (content_type = ANY($2::text[])
+                          OR content_type LIKE 'upload_%'
+                          OR content_type = 'sse_panel'
+                          OR COALESCE(mime_type, '') LIKE 'image/%')
                    ORDER BY COALESCE(uploaded_at, created_at) DESC
                    LIMIT 8""",
                 ids, list(_TEXT_TYPES),
@@ -149,19 +193,18 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
     for row in rows:
         name = row["display_name"] or "uploaded file"
         content_type = (row["content_type"] or "").lower()
-        if "image" in content_type and image_data_url is None:
-            try:
-                from app.services.vault.blob_manager import VaultBlobManager
-                import base64
-
-                blob_path = row["thumbnail_path"] or row["blob_path"]
-                data = VaultBlobManager().read_blob(blob_path) if blob_path else b""
-                if data:
-                    mime = row["mime_type"] or "image/jpeg"
-                    image_data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
-                    parts.append(f"[VAULT IMAGE: {name}] The image is attached as a vision block.")
-            except Exception as exc:
-                print(f">>> [VAULT] Image context skipped: {type(exc).__name__}: {exc}")
+        if _row_is_image(row) and image_data_url is None:
+            image_data_url = await _read_image_data_url(row)
+            if image_data_url:
+                parts.append(
+                    f"[VAULT IMAGE: {name}] The image is attached as pixels. "
+                    "Study what is actually in the picture."
+                )
+            else:
+                parts.append(
+                    f"[VAULT IMAGE MISSING: {name}] Pixels did not load this turn. "
+                    "Do not claim you can see the file."
+                )
             continue
 
         text = (row["extracted_text_preview"] or "").strip()

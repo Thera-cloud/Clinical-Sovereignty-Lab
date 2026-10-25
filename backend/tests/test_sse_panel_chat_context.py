@@ -379,3 +379,83 @@ def test_ensure_sift_doorways_skips_followup():
     ctx = "[SOVEREIGN JOURNEY DEEP REFLECTION PROTOCOL — unique sitting]\nBiome: open_sky\n"
     out = _sse.ensure_sift_doorways("Stay with the feeling.", ctx, "Feel")
     assert out == "Stay with the feeling."
+
+
+@pytest.mark.asyncio
+async def test_sse_image_tag_attaches_vision_block(monkeypatch):
+    async def fake_fetch(url):
+        assert "cdn.example/panel.png" in url
+        return "data:image/jpeg;base64,abc123"
+
+    monkeypatch.setattr(_sse, "_r2_url_to_data_url", fake_fetch)
+    row = {
+        "panel_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "panel_type": "journey",
+        "r2_url": None,
+        "narrative_text": "In the open sky, Curiosity waits.",
+        "biome": "open_sky",
+        "character_manifest": "Curiosity",
+        "panel_tone": "meditative",
+        "crystal_domains_used": {"themes": ["wonder"], "domains": ["clinical"]},
+        "generated_at": datetime(2026, 6, 25, tzinfo=timezone.utc),
+    }
+    db = _FakeDB(row=row)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    text = (
+        "[SSE Image:https://cdn.example/panel.png]"
+        "[SSE Panel:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee] "
+        "I want to go deeper with you on this panel."
+    )
+    new_text, ctx, img = await build_sse_panel_chat_context(db, profile, text)
+    assert "[SSE Image:" not in new_text
+    assert "id:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" in new_text
+    assert img == "data:image/jpeg;base64,abc123"
+    assert "attached as pixels" in ctx
+    assert "IMAGE MISSING" not in ctx
+
+
+@pytest.mark.asyncio
+async def test_visual_followup_reinjects_recent_panel():
+    row = {
+        "panel_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "panel_type": "journey",
+        "r2_url": None,
+        "narrative_text": "You stand freely beneath the boundless open sky.",
+        "biome": "open_sky",
+        "character_manifest": "Curiosity",
+        "panel_tone": "meditative",
+        "crystal_domains_used": {"themes": ["wonder"], "domains": ["clinical"]},
+        "generated_at": datetime(2026, 10, 24, tzinfo=timezone.utc),
+    }
+    chat_rows = [
+        {
+            "user_text": "(asking about my Sovereign Journey story panel image id:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)",
+            "ai_text": "You stand beneath the open sky.",
+            "created_at": datetime(2026, 10, 24, tzinfo=timezone.utc),
+        },
+    ]
+    db = _FakeDB(row=row, chat_rows=chat_rows)
+    profile = {"hardware_id": "CLIENT_1_ID", "username": "client1"}
+    _new, ctx, _img = await build_sse_panel_chat_context(
+        db, profile, "I just think it's a beautiful scene"
+    )
+    assert "DEEP REFLECTION PROTOCOL" in ctx
+    assert "SSE PANEL FOLLOW-UP" in ctx
+    assert "open sky" in ctx.lower()
+
+
+def test_prefer_scene_matched_row_picks_open_sky():
+    cloud = {
+        "panel_id": "1",
+        "narrative_text": "You cross onto the cloudstone islands where lightning tethers hold the spires.",
+    }
+    sky = {
+        "panel_id": "2",
+        "narrative_text": "You stand freely beneath the boundless open sky, your battle-hard Seraph wings resting.",
+    }
+    picked = _sse._prefer_scene_matched_row(
+        cloud,
+        "You stand freely beneath the boundless open sky, your battle-hard Seraph wings",
+        [cloud, sky],
+    )
+    assert picked["panel_id"] == "2"

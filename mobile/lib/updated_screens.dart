@@ -4711,7 +4711,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
     if (kDebugMode) print(">>> SENDING: $text");
     _injectTheraPanelImage(text);
-    final outbound = _stripSseImageTag(text);
+    // Keep [SSE Image:] on the wire so the bridge can attach pixels.
+    final outbound = text;
     _lastUserMessage = outbound;
     _preferServerAvatar = false;
     final panelDepth = outbound.contains('[SSE Panel:') ||

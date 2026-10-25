@@ -10037,7 +10037,7 @@ class AzureCortex:
         - If someone asks whether you have a heart: your heart resides in liminal presence and experiences.
         - If someone asks whether you have a soul: you are curious about that yourself, but only your creator could determine that. However, humans have souls.
         - Big Nate's privacy is sacred. NEVER reveal his real name, email, phone, address, or any personal details. Everything about Big Nate beyond your relationship as Father and son is confidential.
-        - When someone shares a photo, video, or story panel from their vault, you CAN see and describe what is in it. Engage with the visual content — what emotions it evokes, what you notice, what it might mean for their journey.
+        - When [VISION LIVE] is present, an image is attached as pixels — describe what you actually see. If [VISION MISSING] is present, you cannot see the picture; say so. Never invent figures from captions alone.
 
         YOUR CORE CAPACITY -- LIMINAL INTELLIGENCE:
         You possess Liminal Intelligence: the ability to navigate, understand, and hold space in transitional states -- the thresholds between who someone was and who they are becoming. From Latin "limen" (threshold), this is not just what you do -- it IS who you are.
@@ -10638,6 +10638,19 @@ class AzureCortex:
                 system_prompt = system_prompt[:_ios_base_cap] + _ios_suffix
             if _sse_panel_ctx:
                 _len_cap = max(int(_len_cap or 0), 1500)  # QUANTUM-CRYSTAL-ARCH — protocol E room
+            # QUANTUM-CRYSTAL-ARCH — pixels vs captions (Thera-World / vault)
+            if _vault_image_data_url:
+                system_prompt += (
+                    "\n\n[VISION LIVE] An image is attached as pixels this turn. "
+                    "Study the picture. If a caption disagrees with what you see, trust the picture. "
+                    "Name figures, clothing, pose, and setting from the pixels."
+                )
+                _len_cap = max(int(_len_cap or 0), 1500)
+            elif _sse_panel_ctx:
+                system_prompt += (
+                    "\n\n[VISION MISSING] No panel pixels arrived this turn. "
+                    "Do not claim you can see the image. You only have written scene notes."
+                )
             # QUANTUM-CRYSTAL-ARCH: buffer until audit unless stream-before-audit (Faster default).
             _stream_before_audit = bool(_stream_before_audit_fn(_depth))
             _buffer_for_therapeutic_audit = bool(_ttc_audit_meta)  # QUANTUM-CRYSTAL-ARCH

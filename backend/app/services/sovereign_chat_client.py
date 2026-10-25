@@ -546,11 +546,21 @@ async def generate_streaming(
 
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
-    # SOVEREIGN-VOICE: if image present, prefer vision-capable providers
+    # QUANTUM-CRYSTAL-ARCH: pixels must hit a vision model — never Workers/Ollama text-only.
     if image_data_url:
-        _vision_providers = [p for p in providers_to_try if p in ("azure", "grok")]
-        if _vision_providers:
-            providers_to_try = _vision_providers + [p for p in providers_to_try if p not in _vision_providers]
+        providers_to_try = []
+        if _GROK_URL and _GROK_KEY:
+            providers_to_try.append("grok")
+        if _AZURE_ENDPOINT and _AZURE_KEY:
+            providers_to_try.append("azure")
+        if not providers_to_try:
+            yield (
+                "I received the image but vision routing is offline this turn. "
+                "Please send it again in a moment.",
+                "none",
+            )
+            return
+        print(f">>> [VISION] routing pixels to {providers_to_try} ({len(image_data_url)} chars)")
 
     for provider in providers_to_try:
         if provider in seen:
@@ -566,7 +576,7 @@ async def generate_streaming(
                     {"role": "system", "content": _sp},
                     {"role": "user", "content": [
                         {"type": "text", "text": _um},
-                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                        {"type": "image_url", "image_url": {"url": image_data_url, "detail": "high"}},
                     ]},
                 ]
             else:
@@ -713,6 +723,7 @@ async def generate_complete(
     domain: str = "general",
     known_names: Optional[List[str]] = None,
     program_id: Optional[str] = None,
+    image_data_url: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
     Non-streaming generation with ODPE routing. Returns (full_text, provider).
@@ -736,6 +747,19 @@ async def generate_complete(
 
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
+    if image_data_url:
+        providers_to_try = []
+        if _GROK_URL and _GROK_KEY:
+            providers_to_try.append("grok")
+        if _AZURE_ENDPOINT and _AZURE_KEY:
+            providers_to_try.append("azure")
+        if not providers_to_try:
+            return (
+                "I received the image but vision routing is offline this turn. "
+                "Please send it again in a moment.",
+                "none",
+            )
+
     for provider in providers_to_try:
         if provider in seen:
             continue
@@ -745,10 +769,19 @@ async def generate_complete(
             _sp, _um = trim_prompt_to_ceiling(
                 system_prompt, user_message, provider, max_tokens
             )
-            messages = [
-                {"role": "system", "content": _sp},
-                {"role": "user", "content": _um},
-            ]
+            if image_data_url and provider in ("azure", "grok"):
+                messages = [
+                    {"role": "system", "content": _sp},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": _um},
+                        {"type": "image_url", "image_url": {"url": image_data_url, "detail": "high"}},
+                    ]},
+                ]
+            else:
+                messages = [
+                    {"role": "system", "content": _sp},
+                    {"role": "user", "content": _um},
+                ]
             _chars_in = len(_sp) + len(_um)
 
             if _book is not None:

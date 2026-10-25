@@ -5,11 +5,23 @@ VaultOperations: CRUD for folders, items, search, stats, activity logging.
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from typing import Any, Optional
 
 import asyncpg
+
+
+def _jsonb_param(value: Any) -> Optional[str]:
+    """asyncpg binds JSONB as text; a Python dict raises DataError (expected str)."""
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
 
 _UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -303,8 +315,8 @@ class VaultOperations:
         content_hash: Optional[str] = None,
     ) -> dict:
         """Add vault item."""
-        import json as _json
-        themes_json = _json.dumps(themes) if themes else "[]"
+        themes_json = _jsonb_param(themes) if themes else "[]"
+        dimensions_json = _jsonb_param(dimensions)
         async with self.db.acquire() as conn:
             row = await conn.fetchrow(
                 """INSERT INTO vault_items
@@ -315,7 +327,7 @@ class VaultOperations:
                    RETURNING *""",
                 member_id, folder_id, content_type, display_name, blob_path, thumbnail_path,
                 size_bytes, mime_type, extracted_text_preview or None, page_count,
-                dimensions if dimensions is not None else None, session_id, coherence_at_creation,
+                dimensions_json, session_id, coherence_at_creation,
                 ttl_seconds, themes_json, content_hash,
             )
             item = _row_to_item(row)

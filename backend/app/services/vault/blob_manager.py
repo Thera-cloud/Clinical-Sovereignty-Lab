@@ -172,11 +172,22 @@ class VaultBlobManager:
                 )
                 if content:
                     return content
-            return b""
         # Local: blob_path may be full path or relative
         path = Path(blob_path) if blob_path.startswith("/") else _local_archive_root() / blob_path.lstrip("/")
         if path.exists() and path.is_file():
             return path.read_bytes()
+        try:
+            from app.services.r2_storage import download_bytes as r2_get, is_r2_configured
+
+            if is_r2_configured():
+                key = blob_path.split("?")[0]
+                if "nate-vault/" in key:
+                    key = key.split("nate-vault/", 1)[-1]
+                data = r2_get(key=key.lstrip("/"))
+                if data:
+                    return data
+        except Exception:
+            pass
         return b""
 
     def get_signed_url(self, blob_path: str, ttl_minutes: int = 15) -> str:

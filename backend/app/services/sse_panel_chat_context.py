@@ -11,11 +11,23 @@ import re
 from typing import Any
 
 _SSE_PANEL_REF_RE = re.compile(r"\[SSE Panel:([a-fA-F0-9\-]+)\]", re.I)
+_SSE_IMAGE_RE = re.compile(r"\[SSE Image:([^\]]+)\]", re.I)
 _STORY_PANEL_LEGACY_RE = re.compile(r"\[Story Panel:[^\]]*\]\s*", re.I)
+_PANEL_ID_IN_HISTORY_RE = re.compile(
+    r"story panel image id:([a-fA-F0-9\-]{36})",
+    re.I,
+)
+_SCENE_HOOK_RE = re.compile(r"Scene:\s*(.{20,280})", re.I)
 _PANEL_FOLLOWUP_RE = re.compile(
     r"(?:focus topics?|three topics|3 topics|got cut off|cut off|"
     r"post them again|story panel|journey (?:image|panel)|"
     r"sovereign journey|sift(?:\s+pass)?)",
+    re.I,
+)
+_VISUAL_FOLLOW_RE = re.compile(
+    r"\b(?:scene|panel|image|picture|figure|knight|scribe|wings|hooded|"
+    r"beautiful|this one|look(?:ing)? at|in (?:the|this) (?:panel|image|scene)|"
+    r"death knight|book scribe|open sky|what is that)\b",
     re.I,
 )
 _SHORT_PANEL_ACK_RE = re.compile(
@@ -703,24 +715,12 @@ def _http_get_bytes(url: str) -> bytes | None:
 
 
 async def _r2_url_to_data_url(url: str) -> str | None:
-    if not url or not url.startswith("http"):
+    if not url or url.startswith("mock://"):
         return None
-    url = _refresh_r2_presigned(url) or url
     try:
-        import asyncio
-        import base64
+        from app.services.chat_vision import url_to_vision_data_url
 
-        data = await asyncio.to_thread(_http_get_bytes, url)
-        if not data or len(data) > 4_000_000:
-            return None
-        ctype = "image/png"
-        lower = url.split("?")[0].lower()
-        if lower.endswith(".jpg") or lower.endswith(".jpeg"):
-            ctype = "image/jpeg"
-        elif lower.endswith(".webp"):
-            ctype = "image/webp"
-        b64 = base64.b64encode(data).decode("ascii")
-        return f"data:{ctype};base64,{b64}"
+        return await url_to_vision_data_url(url)
     except Exception as exc:
         print(f">>> [SSE PANEL] Image fetch skipped: {type(exc).__name__}: {exc}")
         return None
@@ -752,6 +752,69 @@ async def _recent_panel_thread(db_pool, ids: list[str]) -> bool:
     return False
 
 
+async def _last_discussed_panel_id(db_pool, ids: list[str]) -> str | None:
+    if not db_pool or not ids:
+        return None
+    try:
+        rows = await db_pool.fetch(
+            """
+            SELECT user_text
+            FROM conversation_history
+            WHERE user_id = ANY($1::text[])
+            ORDER BY created_at DESC
+            LIMIT 8
+            """,
+            ids,
+        )
+    except Exception:
+        return None
+    for r in rows or []:
+        m = _PANEL_ID_IN_HISTORY_RE.search(r.get("user_text") or "")
+        if m:
+            return m.group(1)
+    return None
+
+
+async def _recent_journey_panels(db_pool, ids: list[str], limit: int = 12):
+    if not db_pool or not ids:
+        return []
+    try:
+        return await db_pool.fetch(
+            """
+            SELECT panel_id, panel_type, r2_url, narrative_text, biome,
+                   character_manifest, panel_tone, crystal_domains_used, generated_at,
+                   panel_metadata
+            FROM sse_panel_log
+            WHERE user_id = ANY($1::text[])
+            ORDER BY generated_at DESC NULLS LAST
+            LIMIT $2
+            """,
+            ids,
+            limit,
+        )
+    except Exception as exc:
+        print(f">>> [SSE PANEL] Recent panels skipped: {type(exc).__name__}: {exc}")
+        return []
+
+
+def _prefer_scene_matched_row(row, scene: str, candidates) -> Any:
+    if not scene or not candidates:
+        return row
+    try:
+        from app.services.chat_vision import overlap_score
+    except Exception:
+        return row
+    best = row
+    best_score = overlap_score(scene, (row or {}).get("narrative_text") or "") if row else 0
+    for cand in candidates:
+        score = overlap_score(scene, cand.get("narrative_text") or "")
+        if score > best_score:
+            best, best_score = cand, score
+    if best is not None and best_score >= 3:
+        return best
+    return row
+
+
 async def _latest_journey_panel_row(db_pool, ids: list[str]):
     if not db_pool or not ids:
         return None
@@ -780,6 +843,12 @@ async def build_sse_panel_chat_context(
     if not db_pool or not profile or not user_text:
         return user_text, "", None
 
+    tagged_image_url = ""
+    img_match = _SSE_IMAGE_RE.search(user_text)
+    if img_match:
+        tagged_image_url = (img_match.group(1) or "").strip()
+        user_text = _SSE_IMAGE_RE.sub("", user_text, count=1).strip()
+
     match = _SSE_PANEL_REF_RE.search(user_text)
     legacy = bool(_STORY_PANEL_LEGACY_RE.search(user_text)) if not match else False
     ids = _member_ids(profile)
@@ -790,6 +859,8 @@ async def build_sse_panel_chat_context(
     if not match and not legacy:
         followup = bool(_PANEL_FOLLOWUP_RE.search(user_text))
         if not followup and _SHORT_PANEL_ACK_RE.match(user_text.strip()):
+            followup = await _recent_panel_thread(db_pool, ids)
+        if not followup and _VISUAL_FOLLOW_RE.search(user_text):
             followup = await _recent_panel_thread(db_pool, ids)
         if not followup:
             return user_text, "", None
@@ -844,7 +915,9 @@ async def build_sse_panel_chat_context(
             except Exception as exc:
                 print(f">>> [SSE PANEL] Delivery lookup skipped: {type(exc).__name__}: {exc}")
         user_text = _SSE_PANEL_REF_RE.sub(
-            "(asking about my Sovereign Journey story panel image)", user_text, count=1
+            f"(asking about my Sovereign Journey story panel image id:{panel_id})",
+            user_text,
+            count=1,
         ).strip()
     else:
         user_text = _STORY_PANEL_LEGACY_RE.sub(
@@ -852,7 +925,30 @@ async def build_sse_panel_chat_context(
         ).strip()
 
     if followup and not row:
-        row = await _latest_journey_panel_row(db_pool, ids)
+        prior_id = await _last_discussed_panel_id(db_pool, ids)
+        if prior_id:
+            try:
+                row = await db_pool.fetchrow(
+                    """
+                    SELECT panel_id, panel_type, r2_url, narrative_text, biome,
+                           character_manifest, panel_tone, crystal_domains_used, generated_at,
+                           panel_metadata
+                    FROM sse_panel_log
+                    WHERE panel_id = $1::uuid AND user_id = ANY($2::text[])
+                    """,
+                    prior_id,
+                    ids,
+                )
+            except Exception:
+                row = None
+        if not row:
+            row = await _latest_journey_panel_row(db_pool, ids)
+
+    scene_m = _SCENE_HOOK_RE.search(user_text or "")
+    scene_clip = (scene_m.group(1) if scene_m else "").strip()
+    if scene_clip:
+        cands = await _recent_journey_panels(db_pool, ids)
+        row = _prefer_scene_matched_row(row, scene_clip, cands)
 
     if not row:
         evidence = await _gather_therapeutic_evidence(db_pool, ids, [])
@@ -890,9 +986,22 @@ async def build_sse_panel_chat_context(
     themes, domains = _parse_crystal_meta(row.get("crystal_domains_used"))
     evidence = await _gather_therapeutic_evidence(db_pool, ids, themes)
     ctx = _build_panel_block(row, themes, domains, evidence)
-    image_data_url = await _r2_url_to_data_url(row.get("r2_url") or "")
+    image_data_url = None
+    for candidate in (tagged_image_url, row.get("r2_url") or ""):
+        if candidate:
+            image_data_url = await _r2_url_to_data_url(candidate)
+            if image_data_url:
+                break
     if image_data_url:
-        ctx += "\n\n[SSE PANEL IMAGE] The journey panel image is attached as a vision block."
+        ctx += (
+            "\n\n[SSE PANEL IMAGE] The journey panel image is attached as pixels. "
+            "Study the picture. If this caption disagrees with the pixels, trust the pixels."
+        )
+    else:
+        ctx += (
+            "\n\n[SSE PANEL IMAGE MISSING] Pixels did not load this turn. "
+            "Do not claim you can see the panel. You only have written scene notes."
+        )
     if followup:
         ctx += (
             "\n\n[SSE PANEL FOLLOW-UP] Continue THIS scene. "
