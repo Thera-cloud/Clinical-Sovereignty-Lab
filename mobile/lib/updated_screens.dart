@@ -66,6 +66,7 @@ import 'widgets/thera_panel_legend.dart';
 import 'widgets/thera_region_choice.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/coach_integrations_hub.dart';
+import 'widgets/coach_teleprompter.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -13755,6 +13756,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         scaffold,
         _buildSessionAssistantOverlay(),
         if (_activeConsultationId != null) _buildConsultationTimerOverlay(),
+        const CoachTeleprompterOverlay(),
       ],
     );
   }
