@@ -10518,16 +10518,37 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         }
       } else if (data['type'] == 'session_assistant_response') {
         if (mounted && data['nate_response'] != null) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(data['nate_response'],
-                style: const TextStyle(color: Colors.white)),
-            backgroundColor: const Color(0xFF1A1A2E),
-            duration: const Duration(seconds: 8),
-            action: SnackBarAction(
-                label: 'OK',
-                textColor: const Color(0xFF4ECDC4),
-                onPressed: () {}),
-          ));
+          final reply = data['nate_response'].toString();
+          setState(() {
+            _sessionAssistantChat.add({
+              'role': 'nate',
+              'content': reply,
+              'ts': DateTime.now().toIso8601String(),
+            });
+          });
+          final next =
+              List<Map<String, dynamic>>.from(_liveObservations.value);
+          next.add({
+            'timestamp': DateTime.now().toIso8601String(),
+            'type': 'SESSION_ASSISTANT',
+            'message': reply,
+            'evidence': 'Nate present in live session',
+            'source': 'session_assistant_checkin',
+          });
+          _liveObservations.value = next;
+          _liveSheetRebuild?.call();
+          _scrollSessionAssistantChat();
+          if (!_liveSheetOpen) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(reply, style: const TextStyle(color: Colors.white)),
+              backgroundColor: const Color(0xFF1A1A2E),
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(
+                  label: 'OK',
+                  textColor: const Color(0xFF4ECDC4),
+                  onPressed: () {}),
+            ));
+          }
         }
       } else if (data['type'] == 'session_assistant_toggle_ack') {
         if (mounted) {
@@ -10563,6 +10584,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           _liveNotes.value = notes;
           _liveObservations.value = obs;
         } catch (_) {}
+        final startClient = (live['client_id'] ?? '').toString();
+        if (startClient.isNotEmpty && liveId.isNotEmpty) {
+          _openSessionAssistant(startClient, liveId);
+          _sendSessionCheckin(liveId, 'live',
+              'Coach started a live session. Nate is present.');
+        }
+        _liveSheetRebuild?.call();
       } else if (data['type'] == 'coach_live_note_ack') {
         final note = (data['note'] is Map)
             ? Map<String, dynamic>.from(data['note'])
@@ -20038,6 +20066,159 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     await _startLiveNoteListeningSession(noteCtrl);
   }
 
+  Widget _buildLiveNateAssistPanel() {
+    final liveId = (_activeLiveSession?['id'] ?? '').toString();
+    final clientName = (_sessionAssistantData?['client_name'] ??
+            _activeLiveSession?['label'] ??
+            'this client')
+        .toString();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF12121A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: const Color(0xFF4ECDC4),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                      color: const Color(0xFF4ECDC4).withOpacity(0.7),
+                      blurRadius: 8),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('LITTLE NATE — PRESENT',
+                style: TextStyle(
+                    color: Color(0xFF4ECDC4),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    letterSpacing: 1.1)),
+            const Spacer(),
+            Text(liveId.isEmpty ? 'starting…' : 'LIVE',
+                style: const TextStyle(
+                    color: Color(0xFF4ECDC4), fontSize: 11)),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            'Watching this session with $clientName. Notes + this chat. Not Zoom audio.',
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 160,
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A0A0F),
+              borderRadius: BorderRadius.circular(10),
+              border:
+                  Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.25)),
+            ),
+            child: _sessionAssistantChat.isEmpty && !_sessionAssistantChatBusy
+                ? const Center(
+                    child: Text(
+                      'Nate will speak here. Ask him anything about this client.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _sessionAssistantChatScroll,
+                    itemCount: _sessionAssistantChat.length +
+                        (_sessionAssistantChatBusy ? 1 : 0),
+                    itemBuilder: (context, i) {
+                      if (_sessionAssistantChatBusy &&
+                          i == _sessionAssistantChat.length) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 6),
+                          child: Text('Nate is thinking…',
+                              style: TextStyle(
+                                  color: Color(0xFF4ECDC4),
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic)),
+                        );
+                      }
+                      final m = _sessionAssistantChat[i];
+                      final isNate = (m['role'] ?? '') == 'nate';
+                      return Align(
+                        alignment: isNate
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          constraints: const BoxConstraints(maxWidth: 520),
+                          decoration: BoxDecoration(
+                            color: isNate
+                                ? const Color(0xFF9D4EDD).withOpacity(0.15)
+                                : Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${isNate ? 'Nate' : 'You'}: ${m['content'] ?? ''}',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _sessionAssistantChatCtrl,
+                  enabled: !_sessionAssistantChatBusy,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Ask Nate…',
+                    hintStyle:
+                        const TextStyle(color: Colors.white30, fontSize: 12),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.04),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: Colors.white.withOpacity(0.08)),
+                    ),
+                  ),
+                  onSubmitted: (_) => _sendSessionAssistantChat(),
+                ),
+              ),
+              IconButton(
+                onPressed: _sessionAssistantChatBusy
+                    ? null
+                    : _sendSessionAssistantChat,
+                icon: Icon(Icons.send,
+                    color: _sessionAssistantChatBusy
+                        ? Colors.white24
+                        : const Color(0xFF4ECDC4),
+                    size: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showLiveSessionSheet(
       {required String initialLabel,
       required String initialMeetingUrl,
@@ -20103,8 +20284,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                                   (_activeLiveSession?['client_id'] ?? '')
                                       .toString();
                               if (clientId.isNotEmpty) {
-                                Navigator.pop(context);
                                 _openSessionAssistant(clientId, liveId);
+                                _liveSheetRebuild?.call();
                               }
                             },
                             child: Container(
@@ -20211,7 +20392,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                               border: Border.all(color: Colors.white10),
                             ),
                             child: const Text(
-                              "Waiting for coach notes…",
+                              "Little Nate is present. He reads your notes and the ASK NATE box below — not Zoom audio.",
                               style: TextStyle(color: Colors.white54),
                             ),
                           );
@@ -20263,6 +20444,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         );
                       },
                     ),
+
+                    const SizedBox(height: 14),
+                    _buildLiveNateAssistPanel(),
 
                     const SizedBox(height: 14),
                     const Text(
@@ -20477,9 +20661,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     setState(() {
       _sessionAssistantOpen = true;
       _sessionAssistantClientId = clientId;
-      _sessionAssistantChat.clear();
+      if (_sessionAssistantChat.isEmpty) {
+        _sessionAssistantChat.add({
+          'role': 'nate',
+          'content':
+              'I am in this session with you. I read your notes and this chat. I cannot hear Zoom audio.',
+          'ts': DateTime.now().toIso8601String(),
+        });
+      }
       _sessionAssistantChatBusy = false;
     });
+    _liveSheetRebuild?.call();
   }
 
   void _handleSessionAssistantData(Map<String, dynamic> data) {
@@ -20487,17 +20679,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     setState(() {
       _sessionAssistantData = data;
     });
+    _liveSheetRebuild?.call();
   }
 
   void _sendSessionAssistantChat() {
     final text = _sessionAssistantChatCtrl.text.trim();
     if (text.isEmpty || _sessionAssistantChatBusy) return;
     final d = _sessionAssistantData;
-    if (d == null) return;
-    final sessionId = (d['session_id'] ?? '').toString();
+    final sessionId = (d?['session_id'] ??
+            _activeLiveSession?['id'] ??
+            '')
+        .toString();
     final clientId = _sessionAssistantClientId.isNotEmpty
         ? _sessionAssistantClientId
-        : (d['client_id'] ??
+        : (d?['client_id'] ??
                 _activeLiveSession?['client_id'] ??
                 '')
             .toString();
@@ -20531,12 +20726,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       'type': 'session_assistant_chat',
       'client_id': clientId,
       'session_id': sessionId,
-      'client_name': (d['client_name'] ?? '').toString(),
+      'client_name': (d?['client_name'] ?? '').toString(),
       'text': text,
       'nate_mode': _sessionAssistantMode,
       'recent_notes': notes.take(8).toList(),
       'chat_history': history,
     }));
+    _liveSheetRebuild?.call();
     _scrollSessionAssistantChat();
   }
 
@@ -20564,6 +20760,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       'source': 'session_assistant_chat',
     });
     _liveObservations.value = next;
+    _liveSheetRebuild?.call();
     _scrollSessionAssistantChat();
   }
 
@@ -20765,8 +20962,25 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   Widget _buildSessionAssistantOverlay() {
     if (isNativeIOS) return const SizedBox.shrink();
-    if (!_sessionAssistantOpen || _sessionAssistantData == null)
-      return const SizedBox.shrink();
+    if (!_sessionAssistantOpen) return const SizedBox.shrink();
+    if (_liveSheetOpen) return const SizedBox.shrink();
+    if (_sessionAssistantData == null) {
+      return Positioned(
+        right: 12,
+        top: 80,
+        width: 280,
+        child: Material(
+          elevation: 12,
+          color: const Color(0xFF0A0A0F),
+          borderRadius: BorderRadius.circular(12),
+          child: const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('Little Nate is joining this session…',
+                style: TextStyle(color: Color(0xFF4ECDC4), fontSize: 12)),
+          ),
+        ),
+      );
+    }
     final d = _sessionAssistantData!;
     final clientName = d['client_name'] ?? 'Client';
     final sessionId = d['session_id'] ?? '';
