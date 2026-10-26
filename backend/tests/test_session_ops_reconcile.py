@@ -69,6 +69,36 @@ def test_classify_paid_billable():
     assert actions == ["billable"]
 
 
+def test_classify_paid_beyond_36h_is_not_billable_flag():
+    later = NOW + timedelta(days=4)
+    actions = classify_session(
+        {
+            "status": "scheduled",
+            "scheduled_start": later.isoformat(),
+            "payment_status": "paid",
+            "price_cents": 12500,
+        },
+        NOW,
+    )
+    assert "billable" not in actions
+
+
+def test_classify_hidden_four_days_out_still_cancels():
+    later = NOW + timedelta(days=4)
+    actions = classify_session(
+        {
+            "status": "completed",
+            "scheduled_start": later.isoformat(),
+            "session_data": {"schedule_link_hidden": True},
+            "google_event_id": "g-west",
+            "sync_state": "synced",
+        },
+        NOW,
+    )
+    assert "cancel_hidden_future" in actions
+    assert "delete_gcal" in actions
+
+
 def test_classify_past_active_is_noop():
     actions = classify_session(
         {

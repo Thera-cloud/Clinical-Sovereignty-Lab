@@ -1,6 +1,7 @@
 """Next-day session operations reconciler.
 
-Accountant / admin pass over the next 36 hours:
+Accountant / admin pass: heal leftover Google/hidden cancels 14 days out;
+flag unpaid/billable inside 36 hours.
   - PG cancelled (or future hide-as-reference) while Google still has the event
     → delete Google
   - Google cancelled while PG still scheduled → cancel PG
@@ -108,7 +109,13 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
         and (int(row.get("price_cents") or 0) > 0)
     ):
         actions.append("unpaid_risk")
-    if future and status in ACTIVE_STATUSES and pay == "paid":
+    if (
+        future
+        and start
+        and start <= now + timedelta(hours=36)
+        and status in ACTIVE_STATUSES
+        and pay == "paid"
+    ):
         actions.append("billable")
     return sorted(set(actions))
 
@@ -154,7 +161,7 @@ class SessionOpsReconcileAgent:
         if not self.db_pool:
             return {"ok": False, "reason": "no pool"}
         now = datetime.now(timezone.utc)
-        window_end = now + timedelta(hours=36)
+        window_end = now + timedelta(days=14)
         rows = await self._load_window(now - timedelta(hours=2), window_end)
         healed: List[Dict[str, Any]] = []
         flags: List[Dict[str, Any]] = []
