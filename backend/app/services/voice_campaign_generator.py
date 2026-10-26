@@ -383,6 +383,41 @@ async def list_approved_unpublished(db_pool, coach_id: str, *, limit: int = 50) 
     return [serialize_item(r) for r in rows]
 
 
+async def list_published_linkedin(db_pool, coach_id: str, *, limit: int = 20) -> List[Dict[str, Any]]:
+    """What this coach actually posted to LinkedIn (token-isolated, not SkyEye)."""
+    coach_id = (coach_id or "").strip()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, title, content_type, status, post_urn, published_at,
+                   LEFT(draft_body, 400) AS excerpt
+            FROM marketing_content
+            WHERE coach_id = $1
+              AND content_type = 'linkedin_post'
+              AND status = 'published'
+            ORDER BY published_at DESC NULLS LAST, id DESC
+            LIMIT $2
+            """,
+            coach_id,
+            int(limit),
+        )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        ts = r["published_at"]
+        out.append(
+            {
+                "id": r["id"],
+                "title": r["title"] or "",
+                "excerpt": r["excerpt"] or "",
+                "post_urn": r["post_urn"] or "",
+                "published_at": ts.isoformat() if ts is not None else "",
+                "status": r["status"],
+                "content_type": r["content_type"],
+            }
+        )
+    return out
+
+
 async def set_review_status(
     db_pool,
     content_id: int,

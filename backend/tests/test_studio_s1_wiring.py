@@ -59,7 +59,7 @@ def test_flutter_label_and_live_gate():
     assert "1 clean published episode" in dart
     hub = (ROOT / "mobile/lib/widgets/coach_integrations_hub.dart").read_text()
     assert "CoachSovereignStudioTab" in hub
-    assert "length: 8" in hub
+    assert "length: 7" in hub
 
 
 def test_ingest_accepts_capture_kwargs():

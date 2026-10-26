@@ -181,7 +181,11 @@ def _cards(ws, li, drafts_waiting, day_n, flags, supervision=None, length_days=N
     ws_label = "Connected" if ws.get("connected") else (
         "Connect Workspace" if flags.get("ENABLE_WS_OAUTH") else "Not connected"
     )
-    li_label = "Connected" if li.get("connected") else "Connect LinkedIn"
+    if li.get("connected"):
+        n = int(li.get("sent_count") or 0)
+        li_label = f"Connected · {n} sent" if n else "Connected · idle"
+    else:
+        li_label = "Connect LinkedIn"
     if supervision.get("is_master"):
         master_detail = f"Master · {supervision.get('assistant_count', 0)} assistants"
     else:

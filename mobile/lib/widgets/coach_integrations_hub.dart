@@ -65,10 +65,10 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabs = TabController(length: 8, vsync: this);
+    _tabs = TabController(length: 7, vsync: this);
     _tabs.addListener(() {
       if (_tabs.indexIsChanging) return;
-      if (_tabs.index == 2) _load();
+      if (_tabs.index == 4) _load();
     });
     _load().then((_) {
       if (!mounted) return;
@@ -183,7 +183,6 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           tabs: const [
             Tab(text: 'OVERVIEW'),
             Tab(text: 'WORKSPACE'),
-            Tab(text: 'LINKEDIN'),
             Tab(text: 'VOICE'),
             Tab(text: 'VIDEO'),
             Tab(text: 'CAMPAIGN'),
@@ -200,12 +199,14 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
                   children: [
                     _overview(),
                     _workspace(),
-                    _linkedin(),
                     _voice(),
                     _video(),
                     _CampaignQueue(
                       token: widget.token,
                       isMaster: _hub?['supervision']?['is_master'] == true,
+                      linkedin: Map<String, dynamic>.from(_hub?['linkedin'] ?? {}),
+                      onConnect: _connectLinkedIn,
+                      onDisconnect: _disconnectLinkedIn,
                     ),
                     _studio(),
                     _vault(),
@@ -237,7 +238,7 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
         const Text(
           'Connect, update, and disconnect each coach slice from these tabs. '
           'Google Calendar (session sync) is separate from Google Workspace '
-          '(Gmail drafts + Drive). LinkedIn is your coach page, never Nate’s SkyEye.',
+          '(Gmail drafts + Drive). LinkedIn status, sending, and sent posts live on CAMPAIGN — your page, never Nate’s SkyEye.',
           style: TextStyle(color: _muted, fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -384,43 +385,6 @@ class _CoachIntegrationsHubState extends State<CoachIntegrationsHub>
           },
           child: const Text('Save webhook',
               style: TextStyle(color: Colors.black)),
-        ),
-      ],
-    );
-  }
-
-  Widget _linkedin() {
-    final li = Map<String, dynamic>.from(_hub?['linkedin'] ?? {});
-    final connected = li['connected'] == true;
-    final urn = (li['person_urn'] ?? '').toString();
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _panel(
-          'COACH LINKEDIN',
-          Icons.work_outline,
-          [
-            Text(
-              connected
-                  ? 'Connected${urn.isNotEmpty ? ': $urn' : ''}. Campaigns publish with this token only — never Nate’s SkyEye page.'
-                  : 'Sign in with YOUR LinkedIn. Each coach connects their own account. Campaigns publish with that token — never Nate’s SkyEye page.',
-              style: const TextStyle(color: _muted, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: _gold),
-              icon: const Icon(Icons.link, color: Colors.black, size: 18),
-              label: Text(connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn',
-                  style: const TextStyle(color: Colors.black)),
-              onPressed: _connectLinkedIn,
-            ),
-            if (connected)
-              TextButton(
-                onPressed: _disconnectLinkedIn,
-                child: const Text('Disconnect LinkedIn',
-                    style: TextStyle(color: Colors.redAccent)),
-              ),
-          ],
         ),
       ],
     );
@@ -1424,7 +1388,16 @@ class _VideoIngestState extends State<_VideoIngest> {
 class _CampaignQueue extends StatefulWidget {
   final String token;
   final bool isMaster;
-  const _CampaignQueue({required this.token, this.isMaster = false});
+  final Map<String, dynamic> linkedin;
+  final VoidCallback? onConnect;
+  final Future<void> Function()? onDisconnect;
+  const _CampaignQueue({
+    required this.token,
+    this.isMaster = false,
+    this.linkedin = const {},
+    this.onConnect,
+    this.onDisconnect,
+  });
 
   @override
   State<_CampaignQueue> createState() => _CampaignQueueState();
@@ -1452,10 +1425,27 @@ class _CampaignQueueState extends State<_CampaignQueue> {
   }
 
   @override
+  void didUpdateWidget(_CampaignQueue oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.linkedin['connected'] != widget.linkedin['connected']) {
+      _load();
+    }
+  }
+
+  @override
   void dispose() {
     _titleCtrl.dispose();
     super.dispose();
   }
+
+  Map<String, dynamic> get _li {
+    final fromApi = _data?['linkedin'];
+    if (fromApi is Map) return Map<String, dynamic>.from(fromApi);
+    return widget.linkedin;
+  }
+
+  List<Map<String, dynamic>> get _sent =>
+      List<Map<String, dynamic>>.from(_data?['published'] ?? const []);
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -1866,6 +1856,170 @@ class _CampaignQueueState extends State<_CampaignQueue> {
     _load();
   }
 
+  Widget _linkedinRail() {
+    final li = _li;
+    final connected = li['connected'] == true;
+    final sending = li['sending'] == true;
+    final urn = (li['person_urn'] ?? '').toString();
+    final n = li['sent_count'] ?? _sent.length;
+    late final Color lamp;
+    late final String lampLabel;
+    if (!connected) {
+      lamp = const Color(0xFFEF4444);
+      lampLabel = 'Off — not connected. Campaigns cannot send.';
+    } else if (sending) {
+      lamp = const Color(0xFF4ECDC4);
+      lampLabel = 'Sending — last post just went out.';
+    } else if ((n as num) > 0) {
+      lamp = const Color(0xFF22C55E);
+      lampLabel = 'Live — connected and sending to your page ($n sent).';
+    } else {
+      lamp = const Color(0xFFC9A962);
+      lampLabel = 'Connected — nothing sent yet.';
+    }
+    final lastAt = (li['last_published_at'] ?? '').toString();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: lamp.withOpacity(0.55)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(
+                color: lamp,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: lamp.withOpacity(0.7), blurRadius: 8),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('LINKEDIN',
+                style: TextStyle(
+                    color: Color(0xFFC9A962),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 1.1)),
+            const Spacer(),
+            Text(connected ? 'CONNECTED' : 'DISCONNECTED',
+                style: TextStyle(
+                    color: lamp, fontSize: 11, letterSpacing: 1.0)),
+          ]),
+          const SizedBox(height: 8),
+          Text(lampLabel,
+              style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13)),
+          if (urn.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Page: $urn',
+                  style: const TextStyle(
+                      color: Color(0xFF8B7355), fontSize: 11)),
+            ),
+          if (lastAt.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('Last sent: $lastAt',
+                  style: const TextStyle(
+                      color: Color(0xFF8B7355), fontSize: 11)),
+            ),
+          const SizedBox(height: 4),
+          const Text(
+            'Campaigns publish with this token only — never Nate’s SkyEye page.',
+            style: TextStyle(color: Color(0xFF8B7355), fontSize: 11),
+          ),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC9A962)),
+            icon: const Icon(Icons.link, color: Colors.black, size: 18),
+            label: Text(connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn',
+                style: const TextStyle(color: Colors.black)),
+            onPressed: widget.onConnect,
+          ),
+          if (connected)
+            TextButton(
+              onPressed: () async {
+                await widget.onDisconnect?.call();
+                if (mounted) _load();
+              },
+              child: const Text('Disconnect LinkedIn',
+                  style: TextStyle(color: Colors.redAccent)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sentFeed() {
+    final sent = _sent;
+    final lastTitle = (_li['last_title'] ?? '').toString();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('WHAT IT SENT',
+            style: TextStyle(
+                color: Color(0xFFC9A962), letterSpacing: 1.1, fontSize: 12)),
+        if (sent.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              lastTitle.isNotEmpty
+                  ? 'Last: $lastTitle'
+                  : 'Nothing sent yet. Approve a post, then Publish.',
+              style: const TextStyle(color: Color(0xFF8B7355), fontSize: 13),
+            ),
+          ),
+        ...sent.map((p) {
+          final title = (p['title'] ?? '').toString();
+          final excerpt = (p['excerpt'] ?? '').toString();
+          final when = (p['published_at'] ?? '').toString();
+          final urn = (p['post_urn'] ?? '').toString();
+          return Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF8B7355).withOpacity(0.35)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title.isEmpty ? 'LinkedIn post' : title,
+                    style: const TextStyle(
+                        color: Color(0xFFE8D5A3), fontSize: 13)),
+                if (when.isNotEmpty)
+                  Text(when,
+                      style: const TextStyle(
+                          color: Color(0xFF4ECDC4), fontSize: 11)),
+                if (excerpt.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(excerpt,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Color(0xFF8B7355), fontSize: 12, height: 1.35)),
+                  ),
+                if (urn.isNotEmpty)
+                  Text(urn,
+                      style: const TextStyle(
+                          color: Color(0xFF8B7355), fontSize: 10)),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -1879,6 +2033,10 @@ class _CampaignQueueState extends State<_CampaignQueue> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        _linkedinRail(),
+        const SizedBox(height: 16),
+        _sentFeed(),
+        const SizedBox(height: 16),
         TextField(
           controller: _titleCtrl,
           style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13),

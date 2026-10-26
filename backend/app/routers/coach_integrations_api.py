@@ -253,8 +253,10 @@ async def linkedin_disconnect(request: Request, user: Dict = Depends(require_coa
 
 @router.get("/campaigns")
 async def list_campaigns(request: Request, user: Dict = Depends(require_coach)):
+    from app.services.coach_linkedin_oauth import coach_linkedin_status
     from app.services.voice_campaign_generator import (
         list_approved_unpublished,
+        list_published_linkedin,
         list_review_queue,
     )
 
@@ -262,7 +264,14 @@ async def list_campaigns(request: Request, user: Dict = Depends(require_coach)):
     hw = _hw(user)
     queue = await list_review_queue(pool, hw) if pool else []
     approved = await list_approved_unpublished(pool, hw) if pool else []
-    return {"review_queue": queue, "approved_unpublished": approved}
+    published = await list_published_linkedin(pool, hw) if pool else []
+    linkedin = await coach_linkedin_status(pool, hw)
+    return {
+        "review_queue": queue,
+        "approved_unpublished": approved,
+        "published": published,
+        "linkedin": linkedin,
+    }
 
 
 @router.post("/campaigns/generate")

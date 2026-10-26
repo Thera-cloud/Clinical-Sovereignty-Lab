@@ -125,6 +125,13 @@ def test_campaign_review_includes_body_and_approved():
     hub = (ROOT / "mobile/lib/widgets/coach_integrations_hub.dart").read_text()
     assert "Preview" in hub
     assert "Generate photo" in hub
+    assert "length: 7" in hub
+    assert "Tab(text: 'LINKEDIN')" not in hub
+    assert "WHAT IT SENT" in hub
+    assert "_linkedinRail" in hub
+    gen = (ROOT / "backend/app/services/voice_campaign_generator.py").read_text()
+    assert "list_published_linkedin" in gen
+    assert '"published": published' in api or "published" in api
 
 
 def test_ng13_scopes_still_split():

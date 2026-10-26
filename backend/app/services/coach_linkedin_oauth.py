@@ -14,6 +14,7 @@ import logging
 import os
 import time
 import urllib.parse
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
@@ -305,6 +306,12 @@ async def coach_linkedin_status(db_pool, coach_id: str) -> Dict[str, Any]:
     connected = False
     person_urn = ""
     updated_at = ""
+    sent_count = 0
+    last_published_at = ""
+    last_title = ""
+    last_post_urn = ""
+    last_excerpt = ""
+    sending = False
     if db_pool:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -314,18 +321,49 @@ async def coach_linkedin_status(db_pool, coach_id: str) -> Dict[str, Any]:
                 """,
                 coach_id,
             )
-        if row and row["revoked_at"] is None:
-            connected = True
-            person_urn = row["person_urn"] or ""
-            ts = row["updated_at"]
+            if row and row["revoked_at"] is None:
+                connected = True
+                person_urn = row["person_urn"] or ""
+                ts = row["updated_at"]
+                if ts is not None:
+                    updated_at = ts.isoformat()
+            last = await conn.fetchrow(
+                """
+                SELECT COUNT(*) OVER() AS n,
+                       title, post_urn, published_at,
+                       LEFT(draft_body, 280) AS excerpt
+                FROM marketing_content
+                WHERE coach_id = $1
+                  AND content_type = 'linkedin_post'
+                  AND status = 'published'
+                ORDER BY published_at DESC NULLS LAST, id DESC
+                LIMIT 1
+                """,
+                coach_id,
+            )
+        if last:
+            sent_count = int(last["n"] or 0)
+            last_title = last["title"] or ""
+            last_post_urn = last["post_urn"] or ""
+            last_excerpt = last["excerpt"] or ""
+            ts = last["published_at"]
             if ts is not None:
-                updated_at = ts.isoformat()
+                last_published_at = ts.isoformat()
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                sending = (datetime.now(timezone.utc) - ts).total_seconds() < 900
     cid, secret, _ = coach_linkedin_credentials()
     configured = bool(cid and secret)
     return {
         "connected": connected,
         "person_urn": person_urn,
         "updated_at": updated_at,
+        "sent_count": sent_count,
+        "last_published_at": last_published_at,
+        "last_title": last_title,
+        "last_post_urn": last_post_urn,
+        "last_excerpt": last_excerpt,
+        "sending": sending,
         "oauth_enabled": _flag_on("ENABLE_COACH_LINKEDIN"),
         "connect_visible": True,
         "oauth_configured": configured,
