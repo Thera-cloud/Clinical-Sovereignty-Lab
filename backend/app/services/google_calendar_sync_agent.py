@@ -416,17 +416,20 @@ class GoogleCalendarSyncAgent:
         ext = (ev.get("extendedProperties") or {}).get("private") or {}
         session_id = ext.get("sanctuary_session_id")
         google_event_id = ev.get("id")
-        if not session_id:
+        if not session_id and not google_event_id:
             return False  # external event — busy-cache only, no DB write
         try:
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "SELECT session_id, status, google_etag FROM coaching_sessions "
-                    "WHERE session_id = $1",
-                    session_id,
+                    "WHERE ($1::text IS NOT NULL AND session_id = $1) "
+                    "   OR ($2::text IS NOT NULL AND google_event_id = $2) "
+                    "LIMIT 1",
+                    session_id, google_event_id,
                 )
                 if not row:
                     return False
+                session_id = row["session_id"]
                 etag = ev.get("etag")
                 if etag and row["google_etag"] == etag:
                     return False  # unchanged
@@ -434,7 +437,9 @@ class GoogleCalendarSyncAgent:
                     await conn.execute(
                         "UPDATE coaching_sessions SET status = 'cancelled_by_google', "
                         "google_etag = $1, google_last_synced = NOW(), "
-                        "sync_state = 'synced' WHERE session_id = $2",
+                        "sync_state = 'deleted' WHERE session_id = $2 "
+                        "AND LOWER(COALESCE(status,'')) NOT IN "
+                        "('cancelled','canceled','cancelled_by_google','rescheduled')",
                         etag, session_id,
                     )
                 else:

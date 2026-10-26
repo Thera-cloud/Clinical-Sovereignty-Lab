@@ -445,7 +445,8 @@ async def _fetch_session_pg(request: Request, session_id: str) -> Optional[dict]
                 SELECT id, session_id, client_id, coach_id, family_id, client_name,
                        session_type, status, notes, price_cents, payment_status,
                        scheduled_start, scheduled_end, zoom_meeting_id,
-                       zoom_link, zoom_host_url, session_data
+                       zoom_link, zoom_host_url, session_data,
+                       google_event_id, google_etag, google_calendar_id, sync_state
                 FROM coaching_sessions
                 WHERE session_id = $1
                 LIMIT 1
@@ -2079,8 +2080,37 @@ async def hide_schedule_link(
     db = _get_db(request)
     # Stale dual-write used to leave schedule_link_hidden=true while status stayed
     # scheduled — re-apply hide so the action list and calendar merge stay consistent.
-    if is_schedule_link_hidden(target):
-        status_l = str(target.get("status") or "").lower()
+    future_remove = not archive_required_before_hide(target)
+    already_hidden = is_schedule_link_hidden(target)
+    status_l = str(target.get("status") or "").lower()
+    dead = status_l in (
+        "cancelled", "canceled", "cancelled_by_google", "rescheduled",
+    )
+    if future_remove and not dead:
+        from app.services.session_approval import apply_coach_session_cancel
+        ns = getattr(request.app.state, "notification_system", None)
+        target["cancellation_reason"] = (
+            target.get("cancellation_reason")
+            or "Removed from Coach Command Schedule"
+        )
+        applied = await apply_coach_session_cancel(
+            db, target, reason=target["cancellation_reason"],
+            notification_system=ns,
+        )
+        save_json(DATA_DIR / "sessions.json", sessions)
+        await _save_session_dual(request, target, all_sessions=sessions)
+        if _gcal_sync and db:
+            try:
+                asyncio.create_task(_gcal_sync(db, target, action="delete"))
+            except Exception:
+                pass
+        return {
+            "message": "Session cancelled; client and coach notified",
+            "session": target,
+            "notify": applied.get("notify"),
+            "refund_status": applied.get("refund_outcome"),
+        }
+    if already_hidden:
         if status_l in ("scheduled", "active", "pending_approval"):
             try:
                 repaired = await hide_session_schedule_link(

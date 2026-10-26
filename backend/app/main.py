@@ -2515,6 +2515,20 @@ async def lifespan(app: FastAPI):
     except Exception as _cla_err:
         print(f"   ⚠️  ClassroomLearningAuditor init failed: {_cla_err}")
 
+    # ── Session Ops Reconcile — next-day billable/cancel/GCal  # QUANTUM-CRYSTAL-ARCH
+    _session_ops_reconcile_agent = None
+    try:
+        from app.services.session_ops_reconcile_agent import SessionOpsReconcileAgent
+        _session_ops_reconcile_agent = SessionOpsReconcileAgent(
+            db_pool=db_pool, app_state=app.state,
+        )
+        if not _is_clone:
+            await _session_ops_reconcile_agent.start()  # QUANTUM-CRYSTAL-ARCH
+        app.state.session_ops_reconcile_agent = _session_ops_reconcile_agent
+        print("   ✅ SessionOpsReconcileAgent started (30min, 36h window)")
+    except Exception as _sor_err:
+        print(f"   ⚠️  SessionOpsReconcileAgent init failed: {_sor_err}")
+
     # ── Stance Loop Auditor — witness-loop regression DB scorecard (3 checks)  # QUANTUM-CRYSTAL-ARCH
     _stance_loop_auditor = None
     try:
@@ -3826,6 +3840,7 @@ async def lifespan(app: FastAPI):
         ("dojo_mentor_zoom", _dojo_zoom is not None),
         ("coach_hierarchy_auditor", _coach_hierarchy_auditor is not None),
         ("classroom_learning_auditor", _classroom_learning_auditor is not None),
+        ("session_ops_reconcile_agent", _session_ops_reconcile_agent is not None),  # QUANTUM-CRYSTAL-ARCH
         ("stance_loop_auditor", _stance_loop_auditor is not None),  # QUANTUM-CRYSTAL-ARCH
         ("coaching_mesh_engine", _coaching_mesh is not None),
         ("call_coaching_engine", _call_coaching is not None),
@@ -4123,6 +4138,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ ClassroomLearningAuditor stopped")
         except Exception as _cla_stop:
             print(f"   ⚠️  ClassroomLearningAuditor shutdown: {_cla_stop}")
+    _session_ops_reconcile_agent = getattr(app.state, "session_ops_reconcile_agent", None)  # QUANTUM-CRYSTAL-ARCH
+    if _session_ops_reconcile_agent:
+        try:
+            await _session_ops_reconcile_agent.stop()
+            print("   ✅ SessionOpsReconcileAgent stopped")
+        except Exception as _sor_stop:
+            print(f"   ⚠️  SessionOpsReconcileAgent shutdown: {_sor_stop}")
     _stance_loop_auditor = getattr(app.state, "stance_loop_auditor", None)  # QUANTUM-CRYSTAL-ARCH
     if _stance_loop_auditor:
         try:

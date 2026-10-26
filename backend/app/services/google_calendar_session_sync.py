@@ -331,6 +331,20 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
     if not pool or not user_id or not session:
         return None
     session_id = session.get("session_id")
+    if action == "delete" and session_id and not session.get("google_event_id"):
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT google_event_id, google_etag, google_calendar_id "
+                    "FROM coaching_sessions WHERE session_id = $1",
+                    session_id,
+                )
+            if row and row["google_event_id"]:
+                session["google_event_id"] = row["google_event_id"]
+                session["google_etag"] = row["google_etag"]
+                session["google_calendar_id"] = row["google_calendar_id"]
+        except Exception as e:
+            logger.warning("hydrate google_event_id failed for %s: %s", session_id, e)
 
     # Dedup guard — applies to creates only.
     if action == "create" and session.get("sync_state") == "synced" and session.get("google_event_id"):

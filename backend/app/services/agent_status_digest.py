@@ -411,6 +411,7 @@ class AgentStatusDigest:
             ("Settings Tab Auditor", "settings_tab_auditor"),
             ("Coach Hierarchy Auditor", "coach_hierarchy_auditor"),
             ("Classroom Learning Auditor", "classroom_learning_auditor"),
+            ("Session Ops Reconcile Agent", "session_ops_reconcile_agent"),  # QUANTUM-CRYSTAL-ARCH
             ("Liminal Presence Auditor", "liminal_presence_auditor"),
             ("PMB Command Center Auditor", "pmb_command_center_auditor"),
             ("Token Lab Auditor", "token_lab_auditor"),

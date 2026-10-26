@@ -147,8 +147,9 @@ def test_calendar_pg_status_filter_is_case_insensitive():
     src = Path(__file__).resolve().parents[1] / "app" / "websocket" / "bridge_handlers_v2.py"
     text = src.read_text(encoding="utf-8")
     assert "LOWER(status) IN ('scheduled', 'active', 'pending_approval')" in text
-    assert "LOWER(status) IN ('cancelled', 'canceled', 'rescheduled', 'cancelled_by_google')" in text
-    assert '_st_raw not in ("scheduled", "active", "pending_approval",' in text
+    assert "scheduled_start < NOW()" in text
+    assert "cancelled_by_google" in text
+    assert '_st_raw not in ("scheduled", "active", "pending_approval")' in text
     assert '"cancelled", "canceled", "rescheduled"' in text
 
 
@@ -232,17 +233,18 @@ async def test_refund_on_coach_cancel_inside_24h_still_refunds_if_paid(monkeypat
     assert detail == "re_s4"
 
 
-def test_hide_schedule_link_does_not_call_refund():
+def test_hide_schedule_link_future_cancels_past_stays_reference():
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py"
     text = src.read_text(encoding="utf-8")
     start = text.index("async def hide_schedule_link(")
     end = text.index("async def cancel_session(")
-    chunk = text[start:end].lower()
-    assert "refund" not in chunk
-    assert "apply_coach_session_cancel" not in chunk
-    assert "notify_client_of_coach_cancel" not in chunk
+    chunk = text[start:end]
+    assert "apply_coach_session_cancel" in chunk
+    assert "future_remove" in chunk
+    assert "hide_session_schedule_link" in chunk
+    assert "calendar reference kept" in chunk
 
 
 def test_send_session_link_notifies_without_zoom():
@@ -313,6 +315,16 @@ async def test_payment_agent_overdue_notifies_unpaid_client(monkeypatch):
         "app.services.session_approval.notify_client_of_coach_cancel",
         fake_notify,
     )
+    coach_called = {}
+
+    async def fake_coach(_pool, session, **kw):
+        coach_called["session"] = session
+        return {"email": True, "sms": False}
+
+    monkeypatch.setattr(
+        "app.services.session_approval.notify_coach_of_client_cancel",
+        fake_coach,
+    )
     conn = AsyncMock()
 
     async def _fetch(sql, *args):
@@ -327,9 +339,11 @@ async def test_payment_agent_overdue_notifies_unpaid_client(monkeypatch):
         return []
 
     conn.fetch = _fetch
+    conn.fetchrow = AsyncMock(return_value=None)
     conn.execute = AsyncMock()
     agent = SessionPaymentAgent(db_pool=_MockPool(conn), app_state=None)
     await agent._run_one_cycle()
     assert called["session"]["session_id"] == "SES_S6_UNPAID"
     assert called["kw"]["template"] == "session_cancelled_unpaid"
     assert "24-hour" in called["kw"]["sms_body"]
+    assert coach_called["session"]["session_id"] == "SES_S6_UNPAID"

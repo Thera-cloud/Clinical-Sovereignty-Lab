@@ -646,19 +646,20 @@ TEMPLATES = {
 """,
     },
     "session_cancelled_coach": {
-        "subject": "{{ client_name }} cancelled a session — {{ session_time }}",
+        "subject": "Session cancelled — {{ client_name }} — {{ session_time }}",
         "html": """
 <!DOCTYPE html>
 <html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
 <div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
   <h2 style="color:#C9A962;margin-top:0;">Session cancelled</h2>
-  <p><strong>{{ client_name }}</strong> cancelled a coaching session.</p>
+  <p><strong>{{ client_name }}</strong>'s coaching session is cancelled.</p>
   <table style="width:100%;background:#0a0a0a;border-radius:6px;padding:12px;color:#cbd5e1;">
     <tr><td style="padding:6px 12px;color:#94a3b8;">When</td><td style="padding:6px 12px;"><strong>{{ session_time }}</strong></td></tr>
+    <tr><td style="padding:6px 12px;color:#94a3b8;">Reason</td><td style="padding:6px 12px;">{{ cancel_reason }}</td></tr>
     <tr><td style="padding:6px 12px;color:#94a3b8;">Session</td><td style="padding:6px 12px;">{{ session_id }}</td></tr>
   </table>
-  <p style="color:#94a3b8;font-size:13px;">The slot is free on your calendar. No action is required.</p>
-  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Coach Command scheduling.</p>
+  <p style="color:#94a3b8;font-size:13px;">The slot is free on Coach Command and Google Calendar. Prompt the client to reschedule if they still need time.</p>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Schedule operations.</p>
 </div></body></html>
 """,
     },
@@ -669,13 +670,15 @@ TEMPLATES = {
 <html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
 <div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
   <h2 style="color:#C9A962;margin-top:0;">Session cancelled</h2>
-  <p><strong>{{ coach_name }}</strong> cancelled your coaching session.</p>
+  <p>Your coaching session with <strong>{{ coach_name }}</strong> was cancelled.</p>
   <table style="width:100%;background:#0a0a0a;border-radius:6px;padding:12px;color:#cbd5e1;">
     <tr><td style="padding:6px 12px;color:#94a3b8;">When</td><td style="padding:6px 12px;"><strong>{{ session_time }}</strong></td></tr>
+    <tr><td style="padding:6px 12px;color:#94a3b8;">Reason</td><td style="padding:6px 12px;">{{ cancel_reason }}</td></tr>
     <tr><td style="padding:6px 12px;color:#94a3b8;">Session</td><td style="padding:6px 12px;">{{ session_id }}</td></tr>
   </table>
-  <p style="color:#94a3b8;font-size:13px;">If this session was already paid, a refund is issued automatically. You can book a new time from Schedule.</p>
-  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Coach Command scheduling.</p>
+  <p style="color:#E8D5A3;font-size:14px;"><a href="{{ reschedule_url }}" style="color:#C9A962;">Reschedule now in Schedule</a> — pick a new time with your coach.</p>
+  <p style="color:#94a3b8;font-size:13px;">If this session was already paid, a refund is issued automatically.</p>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Schedule operations.</p>
 </div></body></html>
 """,
     },
@@ -691,8 +694,21 @@ TEMPLATES = {
     <tr><td style="padding:6px 12px;color:#94a3b8;">When</td><td style="padding:6px 12px;"><strong>{{ session_time }}</strong></td></tr>
     <tr><td style="padding:6px 12px;color:#94a3b8;">Session</td><td style="padding:6px 12px;">{{ session_id }}</td></tr>
   </table>
-  <p style="color:#94a3b8;font-size:13px;">You can book a new time from Schedule. A card on file is required for paid sessions.</p>
-  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Coach Command scheduling.</p>
+  <p style="color:#E8D5A3;font-size:14px;"><a href="{{ reschedule_url }}" style="color:#C9A962;">Reschedule now in Schedule</a> — a card on file is required for paid sessions.</p>
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Schedule operations.</p>
+</div></body></html>
+""",
+    },
+    "session_ops_digest": {
+        "subject": "Schedule ops — next-day review ({{ issue_count }} item{{ issue_count_plural }})",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:720px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Next-day schedule review</h2>
+  <p>Accountant pass for the next 36 hours. Healed Google Calendar and Sanctuary Schedule where they disagreed.</p>
+  {{ digest_html }}
+  <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Session Ops Reconcile Agent.</p>
 </div></body></html>
 """,
     },

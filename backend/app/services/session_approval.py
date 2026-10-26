@@ -33,6 +33,7 @@ _SECRET = (
     or os.getenv("SECRET_KEY", "")
 )
 PUBLIC_API_BASE = os.getenv("PUBLIC_API_BASE", "https://api.sovereignsanctuary.net")
+RESCHEDULE_URL = os.getenv("PUBLIC_APP_URL", "https://app.sovereignsanctuary.net")
 TOKEN_TTL_SECONDS = 30 * 24 * 3600  # 30 days — links stay valid until decided
 
 # Statuses that occupy a calendar slot (block double-booking)
@@ -598,6 +599,9 @@ async def notify_coach_of_client_cancel(
         "client_name": client_name,
         "session_time": when,
         "session_id": session.get("session_id") or "",
+        "cancel_reason": (session.get("cancellation_reason") or "").strip()
+        or "The session was cancelled.",
+        "reschedule_url": RESCHEDULE_URL,
     }
     ics = cancel_ics_bytes(session, coach_name=(coach or {}).get("name") or "")
     if dest and sender:
@@ -639,7 +643,7 @@ async def notify_client_of_coach_cancel(
 ) -> Dict[str, bool]:
     """Email + SMS the client after a coach REST cancel or unpaid auto-cancel.
 
-    Hide must not call this. Unpaid path passes template=session_cancelled_unpaid.
+    Unpaid path passes template=session_cancelled_unpaid.
     """
     result = {"email": False, "sms": False}
     if not session:
@@ -665,6 +669,9 @@ async def notify_client_of_coach_cancel(
         "coach_name": coach_name,
         "session_time": when,
         "session_id": session.get("session_id") or "",
+        "cancel_reason": (session.get("cancellation_reason") or "").strip()
+        or "This session was cancelled.",
+        "reschedule_url": RESCHEDULE_URL,
     }
     ics = cancel_ics_bytes(session, coach_name=coach_name)
     if dest and sender:
@@ -705,7 +712,7 @@ async def apply_coach_session_cancel(
 ) -> Dict:
     """Soft-cancel a session from coach REST. Refund if paid (no 24h gate). Notify client.
 
-    Caller persists via _save_session_dual / GCal. Hide must not call this.
+    Caller persists via _save_session_dual / GCal. Future hide-from-Schedule also calls this.
     """
     if not session:
         return {
@@ -743,6 +750,14 @@ async def apply_coach_session_cancel(
         ) or notify
     except Exception as e:
         logger.warning("session_approval: coach cancel notify failed: %s", e)
+    try:
+        coach_n = await notify_coach_of_client_cancel(
+            db_pool, session, notification_system=notification_system,
+        )
+        notify["coach_email"] = bool((coach_n or {}).get("email"))
+        notify["coach_sms"] = bool((coach_n or {}).get("sms"))
+    except Exception as e:
+        logger.warning("session_approval: coach-side cancel email failed: %s", e)
 
     return {
         "session": session,

@@ -16,7 +16,12 @@ except ImportError:
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from app.services.session_schedule_link import annotate_calendar_item, annotate_calendar_schedule
+from app.services.session_schedule_link import (
+    annotate_calendar_item,
+    annotate_calendar_schedule,
+    archive_required_before_hide,
+    is_schedule_link_hidden,
+)
 
 
 def calendar_zoom_fields(row: Dict[str, Any]) -> Dict[str, str]:
@@ -172,15 +177,16 @@ class CoachNexusV2:
             except:
                 pass
         
-        # Filter by month/year — past cancelled stay off; future cancelled stay visible
+        # Filter by month/year — cancelled never occupy Coach Command Schedule.
         filtered = []
         _gone = {"cancelled", "canceled", "rescheduled", "cancelled_by_google"}
-        _today = datetime.datetime.now(datetime.timezone.utc).date()
         for s in schedule:
             try:
                 st = str((s or {}).get("status") or "").lower()
                 dt = _parse_date_any(s.get("date", ""))
-                if st in _gone and (not dt or dt.date() < _today):
+                if st in _gone:
+                    continue
+                if (is_schedule_link_hidden(s) or st == "completed") and not archive_required_before_hide(s):
                     continue
                 if dt and dt.month == month and dt.year == year:
                     filtered.append(s)
@@ -215,8 +221,7 @@ class CoachNexusV2:
                     if (ses.get("coach_id") or "") != hid:
                         continue
                     _st_raw = (ses.get("status") or "").lower()
-                    if _st_raw not in ("scheduled", "active", "pending_approval",
-                                       "cancelled", "canceled", "rescheduled"):
+                    if _st_raw not in ("scheduled", "active", "pending_approval"):
                         continue
 
                     st = (ses.get("scheduled_start") or "").replace("Z", "+00:00")
@@ -350,13 +355,7 @@ class CoachNexusV2:
                     WHERE coach_id = $1
                       AND scheduled_start >= $2
                       AND scheduled_start <  $3
-                      AND (
-                        LOWER(status) IN ('scheduled', 'active', 'pending_approval')
-                        OR (
-                          LOWER(status) IN ('cancelled', 'canceled', 'rescheduled', 'cancelled_by_google')
-                          AND scheduled_start > NOW()
-                        )
-                      )
+                      AND LOWER(status) IN ('scheduled', 'active', 'pending_approval')
                       AND COALESCE(session_data->>'schedule_link_hidden', 'false')
                           NOT IN ('true', '1', 'yes')
                     ORDER BY scheduled_start ASC
@@ -461,6 +460,7 @@ class CoachNexusV2:
                       AND scheduled_start <  $3
                       AND COALESCE(session_data->>'schedule_link_hidden', 'false')
                           IN ('true', '1', 'yes')
+                      AND scheduled_start < NOW()
                       AND LOWER(COALESCE(status, '')) NOT IN
                           ('rescheduled', 'cancelled', 'canceled', 'cancelled_by_google')
                     ORDER BY scheduled_start ASC

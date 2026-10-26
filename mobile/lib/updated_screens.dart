@@ -14597,7 +14597,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
         ],
         // ===== CONFIRMED SESSIONS =====
-        if (_actionableSchedule.isNotEmpty) ...[
+        if (() {
+          final dayCards = _actionableSchedule.where((raw) {
+            if (_calSelectedDay == null) return true;
+            if (raw is! Map) return false;
+            return _sessionMatchesCalendarDay(
+                Map<String, dynamic>.from(raw), _calSelectedDay!);
+          }).toList();
+          return dayCards.isNotEmpty;
+        }()) ...[
           if (hasPending) ...[
             const Padding(
               padding: EdgeInsets.only(bottom: 12),
@@ -14609,7 +14617,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                       letterSpacing: 1)),
             ),
           ],
-          ..._actionableSchedule.asMap().entries.map((entry) {
+          ..._actionableSchedule
+              .where((raw) {
+                if (_calSelectedDay == null) return true;
+                if (raw is! Map) return false;
+                return _sessionMatchesCalendarDay(
+                    Map<String, dynamic>.from(raw), _calSelectedDay!);
+              })
+              .toList()
+              .asMap()
+              .entries
+              .map((entry) {
             final index = entry.key;
             final raw = entry.value;
             final session = (raw is Map)
@@ -14631,7 +14649,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                         session['client_id'] ??
                         'Session')
                     .toString();
-            final date = (session['date'] ?? '').toString();
+            final date = _sessionDateLabel(session);
             final time = _formatScheduledTime(session); // COACH-SCHEDULE-LOCAL
             final consultSubject =
                 (session['consultation_subject'] ?? '').toString().trim();
@@ -14932,7 +14950,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             if (pastLocked) {
                               _snackPastSessionLocked();
                             } else {
-                              await _confirmRemoveScheduleLink(sessionId);
+                              _confirmCoachCancelSession(
+                                sessionId,
+                                displayName,
+                                [date, time]
+                                    .where((s) => s.trim().isNotEmpty)
+                                    .join(' at '),
+                              );
                             }
                           }
                         },
@@ -15024,8 +15048,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             enabled: !pastLocked,
                             child: Text(
                                 pastLocked
-                                    ? "Remove from Schedule (locked — past)"
-                                    : "Remove from Schedule",
+                                    ? "Cancel session (locked — past)"
+                                    : "Cancel session",
                                 style: TextStyle(
                                     color: pastLocked
                                         ? Colors.white38
@@ -15314,21 +15338,43 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }
   }
 
-  /// True if session belongs on [d] in local timezone (PG payloads often omit/wrong `date`).
+  bool _isDeadCalendarStatus(Map session) {
+    final st = (session['status'] ?? '').toString().toLowerCase();
+    return const {
+      'cancelled',
+      'canceled',
+      'cancelled_by_google',
+      'rescheduled',
+    }.contains(st);
+  }
+
+  /// Prefer appointment instant; stale `date` on vault JSON put Paula on the wrong day.
   bool _sessionMatchesCalendarDay(Map<String, dynamic> m, DateTime d) {
-    final iso = _fmtDate(d);
-    final ds = (m['date'] ?? '').toString();
-    if (ds.startsWith(iso)) return true;
     try {
       final ss = (m['scheduled_start'] ?? '').toString();
-      if (ss.isEmpty) return false;
-      final local = DateTime.parse(ss).toLocal();
-      return local.year == d.year &&
-          local.month == d.month &&
-          local.day == d.day;
-    } catch (_) {
-      return false;
-    }
+      if (ss.isNotEmpty) {
+        final local = DateTime.parse(ss).toLocal();
+        return local.year == d.year &&
+            local.month == d.month &&
+            local.day == d.day;
+      }
+    } catch (_) {}
+    final iso = _fmtDate(d);
+    return (m['date'] ?? '').toString().startsWith(iso);
+  }
+
+  String _sessionDateLabel(Map session) {
+    try {
+      final ss = (session['scheduled_start'] ?? '').toString();
+      if (ss.isNotEmpty) {
+        final local = DateTime.parse(ss).toLocal();
+        final y = local.year.toString().padLeft(4, '0');
+        final mo = local.month.toString().padLeft(2, '0');
+        final da = local.day.toString().padLeft(2, '0');
+        return '$y-$mo-$da';
+      }
+    } catch (_) {}
+    return (session['date'] ?? '').toString();
   }
 
   // List of confirmed sessions on a given date (best-effort match against _schedule items)
@@ -15336,6 +15382,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final out = <Map<String, dynamic>>[];
     final seen = <String>{};
     void add(Map<String, dynamic> m) {
+      if (_isDeadCalendarStatus(m)) return;
+      if (_isCalendarReferenceOnly(m) && !_sessionAppointmentIsPast(m)) return;
       if (!_sessionMatchesCalendarDay(m, d)) return;
       final id = (m['session_id'] ?? m['id'] ?? '').toString();
       if (id.isNotEmpty) {
@@ -15981,20 +16029,37 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                   if (hasSession)
                     Padding(
                       padding: const EdgeInsets.only(top: 1),
-                      child: Text(
-                        (() {
-                          final s = daySessions.first;
-                          final nm = (s['client_name'] ?? 'Client').toString();
-                          return nm.length > 7 ? nm.substring(0, 7) : nm;
-                        })(),
-                        style: TextStyle(
-                          color: hasApproved
-                              ? const Color(0xFF4ECDC4)
-                              : const Color(0xFFC9A962),
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        children: [
+                          for (final s in daySessions.take(3))
+                            Text(
+                              (() {
+                                final nm =
+                                    (s['client_name'] ?? 'Client').toString();
+                                return nm.length > 8
+                                    ? nm.substring(0, 8)
+                                    : nm;
+                              })(),
+                              style: TextStyle(
+                                color: hasApproved
+                                    ? const Color(0xFF4ECDC4)
+                                    : const Color(0xFFC9A962),
+                                fontSize: daySessions.length > 1 ? 7 : 8,
+                                fontWeight: FontWeight.w700,
+                                height: 1.05,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          if (daySessions.length > 3)
+                            Text(
+                              '+${daySessions.length - 3}',
+                              style: const TextStyle(
+                                color: Color(0xFFC9A962),
+                                fontSize: 7,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                 ],
@@ -16089,7 +16154,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             crossAxisCount: 7,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 1.1,
+            childAspectRatio: 0.82,
             children: cells,
           ),
           const SizedBox(height: 8),

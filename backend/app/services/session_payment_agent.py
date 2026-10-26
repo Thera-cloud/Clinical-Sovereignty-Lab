@@ -183,7 +183,8 @@ class SessionPaymentAgent:
 
             # Auto-cancel unpaid sessions past the 24-hour deadline
             overdue = await conn.fetch(
-                f"""SELECT id, session_id, coach_id, client_id,
+                f"""SELECT id, session_id, coach_id, client_id, client_name,
+                          google_event_id, scheduled_end,
                           {_APPT_TIME_BARE} AS scheduled_at
                    FROM coaching_sessions
                    WHERE {_APPT_TIME_BARE} <= $1
@@ -197,7 +198,14 @@ class SessionPaymentAgent:
             for s in overdue:
                 await conn.execute(
                     """UPDATE coaching_sessions
-                       SET status = 'CANCELLED', payment_status = 'cancelled',
+                       SET status = 'cancelled', payment_status = 'cancelled',
+                           session_data = COALESCE(session_data, '{}'::jsonb)
+                             || '{"cancel_notify_sent": true}'::jsonb
+                             || jsonb_build_object(
+                                  'cancellation_reason',
+                                  'Payment was not received before the 24-hour deadline.',
+                                  'cancelled_at', NOW()::text
+                                ),
                            updated_at = NOW()
                        WHERE id = $1""",
                     s["id"],
@@ -208,7 +216,13 @@ class SessionPaymentAgent:
                     "session_id": s["session_id"],
                     "client_id": s["client_id"],
                     "coach_id": s["coach_id"],
+                    "client_name": s.get("client_name"),
+                    "google_event_id": s.get("google_event_id"),
                     "scheduled_start": s["scheduled_at"],
+                    "scheduled_end": s.get("scheduled_end"),
+                    "cancellation_reason": (
+                        "Payment was not received before the 24-hour deadline."
+                    ),
                 })
 
             try:
@@ -286,12 +300,15 @@ class SessionPaymentAgent:
                 )
 
         for sess in unpaid_cancel_sessions:
+            notify_sys = (
+                getattr(self.app_state, "notification_system", None)
+                if self.app_state
+                else None
+            )
             try:
-                from app.services.session_approval import notify_client_of_coach_cancel
-                notify_sys = (
-                    getattr(self.app_state, "notification_system", None)
-                    if self.app_state
-                    else None
+                from app.services.session_approval import (
+                    notify_client_of_coach_cancel,
+                    notify_coach_of_client_cancel,
                 )
                 await notify_client_of_coach_cancel(
                     self.db_pool,
@@ -300,12 +317,27 @@ class SessionPaymentAgent:
                     template="session_cancelled_unpaid",
                     sms_body=(
                         "Sanctuary: your session was cancelled because payment "
-                        "was not received before the 24-hour deadline."
+                        "was not received before the 24-hour deadline. "
+                        "Open Schedule to book a new time."
                     ),
+                )
+                await notify_coach_of_client_cancel(
+                    self.db_pool, sess, notification_system=notify_sys,
                 )
             except Exception as e:
                 logger.warning(
                     "SessionPaymentAgent: unpaid cancel notify failed sid=%s: %s",
+                    sess.get("session_id"),
+                    e,
+                )
+            try:
+                from app.services.google_calendar_session_sync import (
+                    sync_session_for_participants as _gcal_del,
+                )
+                await _gcal_del(self.db_pool, sess, action="delete")
+            except Exception as e:
+                logger.warning(
+                    "SessionPaymentAgent: unpaid GCal delete failed sid=%s: %s",
                     sess.get("session_id"),
                     e,
                 )
