@@ -117,6 +117,26 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
         and pay == "paid"
     ):
         actions.append("billable")
+    sd = row.get("session_data") or {}
+    if isinstance(sd, str):
+        try:
+            sd = json.loads(sd) if sd else {}
+        except Exception:
+            sd = {}
+    if not isinstance(sd, dict):
+        sd = {}
+    late = str(sd.get("late_cancel_fee") or "").lower() in ("true", "1", "yes")
+    inv_id = str(sd.get("stripe_invoice_id") or "").strip()
+    inv_st = str(sd.get("invoice_status") or "").lower()
+    if (
+        status in DEAD_STATUSES
+        and not late
+        and pay in ("pending", "unpaid")
+        and (inv_id or pay in ("pending", "unpaid"))
+        and inv_st not in ("void", "voided", "paid")
+    ):
+        actions.append("void_orphan_invoice")
+        actions.append("billing_mismatch")
     return sorted(set(actions))
 
 
@@ -190,7 +210,11 @@ class SessionOpsReconcileAgent:
                 await self._notify_cancel(row)
                 item["notified"] = True
                 healed.append(item)
-            if "unpaid_risk" in actions or "billable" in actions:
+            if "void_orphan_invoice" in actions:
+                await self._void_orphan_invoice(row)
+                item["healed"] = "voided_orphan_invoice"
+                healed.append(item)
+            if "unpaid_risk" in actions or "billable" in actions or "billing_mismatch" in actions:
                 flags.append(item)
         digest = {"healed": healed, "flags": flags, "scanned": len(rows)}
         await self._maybe_digest(digest, now)
@@ -208,8 +232,16 @@ class SessionOpsReconcileAgent:
                        payment_status, price_cents, google_event_id, sync_state,
                        scheduled_start, scheduled_end, session_data
                 FROM coaching_sessions
-                WHERE COALESCE(scheduled_start, scheduled_at) >= $1
-                  AND COALESCE(scheduled_start, scheduled_at) < $2
+                WHERE (
+                        COALESCE(scheduled_start, scheduled_at) >= $1
+                    AND COALESCE(scheduled_start, scheduled_at) < $2
+                    )
+                   OR (
+                        UPPER(COALESCE(status,'')) IN
+                          ('CANCELLED','CANCELED','CANCELLED_BY_GOOGLE','RESCHEDULED')
+                    AND LOWER(COALESCE(payment_status,'')) IN ('pending','unpaid')
+                    AND COALESCE(scheduled_start, scheduled_at) > NOW() - INTERVAL '90 days'
+                    )
                 ORDER BY scheduled_start ASC
                 LIMIT 500
                 """,
@@ -244,8 +276,22 @@ class SessionOpsReconcileAgent:
             )
         row["status"] = "cancelled"
         row["cancellation_reason"] = reason
+        await self._void_orphan_invoice(row)
         await self._delete_gcal(row)
         await self._notify_cancel(row)
+
+    async def _void_orphan_invoice(self, row: Dict[str, Any]) -> None:
+        if not self.db_pool:
+            return
+        try:
+            from app.services.session_invoice_ledger import void_open_session_invoice
+            async with self.db_pool.acquire() as conn:
+                await void_open_session_invoice(conn, row)
+        except Exception as e:
+            logger.warning(
+                "SessionOpsReconcileAgent: void invoice failed sid=%s: %s",
+                row.get("session_id"), e,
+            )
 
     async def _delete_gcal(self, row: Dict[str, Any]) -> None:
         try:

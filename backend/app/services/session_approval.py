@@ -741,6 +741,11 @@ async def apply_coach_session_cancel(
         except Exception as e:
             logger.warning("session_approval: refund_on_coach_cancel: %s", e)
             refund_outcome, refund_detail = "error", str(e)
+    try:
+        from app.services.session_invoice_ledger import sync_stripe_on_session_cancel
+        await sync_stripe_on_session_cancel(db_pool, session, keep_due=False)
+    except Exception as e:
+        logger.warning("session_approval: void invoice on coach cancel: %s", e)
 
     notify = {"email": False, "sms": False}
     notify_fn = _notify if _notify is not None else notify_client_of_coach_cancel
@@ -841,6 +846,13 @@ async def cancel_client_session(
         except Exception as e:
             logger.warning("session_approval: refund_on_client_cancel: %s", e)
             refund_outcome, refund_detail = "error", str(e)
+    try:
+        from app.services.session_invoice_ledger import sync_stripe_on_session_cancel
+        await sync_stripe_on_session_cancel(
+            db_pool, cancelled, keep_due=(refund_outcome == "too_late"),
+        )
+    except Exception as e:
+        logger.warning("session_approval: sync invoice on client cancel: %s", e)
 
     upsert = _upsert
     if upsert is None and db_pool:

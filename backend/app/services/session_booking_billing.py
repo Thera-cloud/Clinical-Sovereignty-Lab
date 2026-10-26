@@ -1,10 +1,11 @@
 """Session booking billing — card gate, membership session discounts, cancel refunds.
 
-Policy (client-facing): charge membership session rate after coach accepts,
-via SessionPaymentAgent in the 72h pre-session window. Inner Chamber is
-listed at $125/session ($50 off CoachN $175). Sovereign Circle is listed at
-$90/session ($85 off). Cancel ≥24h before start → full Stripe refund if already
-paid. Cancel inside 24h → no refund.
+Policy (client-facing): Pay now on Billing → Invoices as soon as scheduled;
+SessionPaymentAgent also charges in the 72h pre-session window. Inner Chamber
+$125/session; Sovereign Circle $90/session. Unpaid 24h before start →
+auto-cancel (consent by non-payment) and Stripe invoice voided. Client cancel
+≥24h → void invoice / refund if paid. Client cancel inside 24h → payment still
+due (late_cancel_fee). Coach cancel → refund even inside 24h.
 """
 
 from __future__ import annotations
@@ -21,14 +22,25 @@ SESSION_PAYMENT_POLICY = (
     "By booking, you agree to pay your session rate with your assigned coach. "
     "Inner Chamber: $125/session. Sovereign Circle: $90/session. "
     "Coach-only: the coach's listed session fee (no membership discount). "
-    "Your default card is charged automatically in the 72-hour window BEFORE "
-    "the session — not after. Open invoices live under Billing → Invoices; "
-    "pay them there or via the emailed Stripe link. Unpaid Stripe invoices "
-    "are emailed again every 7 days until paid. Payment is due before the "
-    "session. Cancel at least 24 hours before the start time for a full "
-    "refund. Cancellations inside 24 hours are not refundable. "
-    "If your coach cancels, a paid session is refunded even inside 24 hours. "
-    "A coach-assigned special rate replaces membership discounts for that client."
+    "Pay now is available on Billing → Invoices as soon as the session is scheduled. "
+    "Your default card is also charged automatically in the 72-hour window BEFORE "
+    "the session. Payment must be received at least 24 hours before the start. "
+    "If you have not paid 24 hours before the session, the session is cancelled "
+    "and you consent to that cancellation by non-payment so the slot can be filled. "
+    "Cancel 24 hours or more before the start: the invoice is voided and a paid "
+    "session is refunded. Cancel inside 24 hours: payment is still due because "
+    "that slot cannot be filled. If your coach cancels, a paid session is refunded "
+    "even inside 24 hours. A coach-assigned special rate replaces membership "
+    "discounts for that client."
+)
+
+INVOICE_TAB_NOTE = (
+    "Pay now is for sessions that are still on the calendar and for sessions "
+    "you already used. Cancelled sessions are removed and their Stripe invoices "
+    "are voided. Pay at least 24 hours before the start or the session is "
+    "cancelled (non-payment is consent to cancel). Cancel inside 24 hours and "
+    "payment is still due. Your card is also charged in the 72 hours before "
+    "the appointment. Unpaid invoices are emailed every 7 days until paid."
 )
 
 # Past scheduled rows: no_show only when there is nothing for SessionPaymentAgent

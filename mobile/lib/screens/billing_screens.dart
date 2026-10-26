@@ -1676,7 +1676,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Sessions must be cancelled at least 24 hours before the scheduled time.',
+                    'Cancel 24 hours or more before the start to void the invoice. Cancel inside 24 hours and payment is still due because that slot cannot be filled.',
                     style: TextStyle(color: _D.red, fontSize: 11),
                   ),
                 ),
@@ -2445,7 +2445,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                           ),
                           const SizedBox(height: 10),
                           const Text(
-                            'Your default card is charged automatically in the 72 hours before each session with your assigned coach — not after. Coach-only pays the listed coach fee; Inner Chamber is \$125/session; Sovereign Circle is \$90/session.',
+                            'Pay now is on Invoices as soon as a session is scheduled. Your card is also charged in the 72 hours before the appointment. Unpaid 24 hours before start cancels the session. Cancel inside 24 hours and payment is still due. Coach-only pays the listed coach fee; Inner Chamber is \$125/session; Sovereign Circle is \$90/session.',
                             style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.35),
                           ),
                         ],
@@ -2573,7 +2573,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      'Open invoices can be paid here. Session fees use your default card 72 hours before the appointment. Unpaid Stripe invoices are emailed every 7 days until paid.',
+                      'Pay now is for sessions still on the calendar and for sessions you used. Cancelled sessions are removed and their Stripe invoices are voided. Pay at least 24 hours before the start or the session is cancelled (non-payment is consent to cancel). Cancel inside 24 hours and payment is still due. Your card is also charged in the 72 hours before the appointment. Unpaid invoices are emailed every 7 days until paid.',
                       style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.35),
                     ),
                     const SizedBox(height: 16),
@@ -2598,6 +2598,13 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             status == 'unpaid' ||
                             status == 'draft' ||
                             status == 'pending';
+                        if (status == 'void' ||
+                            status == 'voided' ||
+                            status == 'uncollectible' ||
+                            status == 'cancelled' ||
+                            status == 'canceled') {
+                          return const SizedBox.shrink();
+                        }
                         final due = inv['amount_due'] ?? 0;
                         final paidAmt = inv['amount_paid'] ?? 0;
                         final displayAmt = unpaid ? due : paidAmt;

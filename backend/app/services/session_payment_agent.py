@@ -184,13 +184,13 @@ class SessionPaymentAgent:
             # Auto-cancel unpaid sessions past the 24-hour deadline
             overdue = await conn.fetch(
                 f"""SELECT id, session_id, coach_id, client_id, client_name,
-                          google_event_id, scheduled_end,
+                          google_event_id, scheduled_end, session_data,
                           {_APPT_TIME_BARE} AS scheduled_at
                    FROM coaching_sessions
                    WHERE {_APPT_TIME_BARE} <= $1
                    AND payment_status = 'pending'
                    AND COALESCE(price_cents, 0) > 0
-                   AND COALESCE(session_data->>'stripe_invoice_id', '') = ''
+                   AND COALESCE(session_data->>'late_cancel_fee', '') NOT IN ('true','1','yes')
                    AND {_NOT_CANCELLED_BARE}""",
                 cancel_deadline,
             )
@@ -212,6 +212,14 @@ class SessionPaymentAgent:
                 )
                 await self._log_event(conn, s["id"], "cancellation", 0, note="Auto-cancelled: payment overdue")
                 cancelled += 1
+                try:
+                    from app.services.session_invoice_ledger import void_open_session_invoice
+                    await void_open_session_invoice(conn, dict(s))
+                except Exception as e:
+                    logger.warning(
+                        "SessionPaymentAgent: void invoice on unpaid cancel failed sid=%s: %s",
+                        s.get("session_id"), e,
+                    )
                 unpaid_cancel_sessions.append({
                     "session_id": s["session_id"],
                     "client_id": s["client_id"],
@@ -608,10 +616,11 @@ class SessionPaymentAgent:
                 subject = "Payment Due — Upcoming Session"
                 body = f"""<p>Hello {client_name},</p>
 <p>Your coaching session is scheduled for <strong>{when_str}</strong>.</p>
-<p>Payment of ${amount_cents / 100:.2f} is due <strong>before</strong> the session
-(your card is charged in the 72 hours leading up to it, not after).</p>
-<p>Open <strong>Billing → Invoices</strong> in the app to pay any open invoice
-or confirm your default card for automatic payment.</p>
+<p>Payment of ${amount_cents / 100:.2f} is due at least <strong>24 hours before</strong>
+the session. Pay now on <strong>Billing → Invoices</strong>, or your default card
+is charged in the 72 hours leading up to the appointment.</p>
+<p>If payment is not received 24 hours before the start, the session is cancelled
+and that non-payment is your consent to cancel so the slot can be filled.</p>
 <p>Thank you,<br>Sovereign Sanctuary</p>"""
                 await notify._send_email(client_email, subject, body)
                 await conn.execute(
@@ -645,7 +654,12 @@ or confirm your default card for automatic payment.</p>
             try:
                 payment_note = ""
                 if payment_status != "paid":
-                    payment_note = "<p><strong>Payment reminder:</strong> Your card is charged in the 72 hours <em>before</em> the session, not after. Open invoices are in Billing → Invoices. Unpaid Stripe invoices are emailed every 7 days until paid.</p>"
+                    payment_note = (
+                        "<p><strong>Payment reminder:</strong> Pay now on Billing → Invoices. "
+                        "Your card is also charged in the 72 hours before the session. "
+                        "If unpaid 24 hours before the start, the session is cancelled "
+                        "(non-payment is consent to cancel).</p>"
+                    )
 
                 from app.services.calendar_invite import html_cta_fragment, invite_from_session
 
@@ -654,7 +668,7 @@ or confirm your default card for automatic payment.</p>
                 body = f"""<p>Hello {client_name},</p>
 <p>This is a reminder that your coaching session is scheduled for <strong>{session_date}</strong>.</p>
 {payment_note}
-<p><strong>Cancellation policy:</strong> Cancel at least 24 hours before the session for a full refund. Cancellations inside 24 hours are not refundable.</p>
+<p><strong>Cancellation policy:</strong> Cancel 24 hours or more before the session to void the invoice / receive a refund. Cancel inside 24 hours and payment is still due because that slot cannot be filled.</p>
 {html_cta_fragment(invite, include_join=True)}
 <p>See you soon!<br>Sovereign Sanctuary</p>"""
 

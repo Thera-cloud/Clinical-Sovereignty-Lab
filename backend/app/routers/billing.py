@@ -739,6 +739,8 @@ async def get_invoices(user_id: str, request: Request, limit: int = 40):
     pool = getattr(request.app.state, "db_pool", None)
     stripe_items = []
     session_items = []
+    hide_sids: set = set()
+    hide_invs: set = set()
 
     # Try Stripe
     if STRIPE_AVAILABLE and stripe.api_key:
@@ -757,17 +759,24 @@ async def get_invoices(user_id: str, request: Request, limit: int = 40):
 
     if pool:
         try:
-            from app.services.session_invoice_ledger import load_session_invoices
-
             async with pool.acquire() as conn:
-                session_items = await load_session_invoices(conn, user_id, limit)
+                from app.services.session_invoice_ledger import load_session_invoice_bundle
+
+                session_items, hide_sids, hide_invs = await load_session_invoice_bundle(
+                    conn, user_id, limit,
+                )
         except Exception as e:
             logger.warning("get_invoices: session list failed for %s: %s", user_id, e)
+            hide_sids, hide_invs = set(), set()
 
     if stripe_items or session_items:
         from app.services.session_invoice_ledger import merge_invoice_lists
+        from app.services.session_booking_billing import INVOICE_TAB_NOTE
 
-        merged = merge_invoice_lists(stripe_items, session_items, limit=limit)
+        merged = merge_invoice_lists(
+            stripe_items, session_items, limit=limit,
+            hide_session_ids=hide_sids, hide_invoice_ids=hide_invs,
+        )
         pending = sum(
             1 for i in merged
             if str(i.get("status") or "").lower() in ("open", "unpaid", "draft")
@@ -776,10 +785,7 @@ async def get_invoices(user_id: str, request: Request, limit: int = 40):
             "source": "stripe+sessions" if stripe_items else "sessions",
             "pending_count": pending,
             "invoices": merged,
-            "autopay_note": (
-                "Your default card is charged automatically in the 72 hours "
-                "before each session with your assigned coach — not after the session."
-            ),
+            "autopay_note": INVOICE_TAB_NOTE,
         }
 
     # PG fallback: token_transactions

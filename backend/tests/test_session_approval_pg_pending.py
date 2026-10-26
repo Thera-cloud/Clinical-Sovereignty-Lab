@@ -194,6 +194,7 @@ async def test_cancel_inside_24h_too_late_still_cancels():
     assert out["json_changed"] is True
     assert sessions[0]["status"] == "cancelled"
     assert out["refund_outcome"] == "too_late"
+    assert sessions[0].get("late_cancel_fee") is True
     refund.assert_awaited_once()
 
 

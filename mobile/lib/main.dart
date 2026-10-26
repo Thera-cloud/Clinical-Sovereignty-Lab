@@ -11280,12 +11280,14 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   String _paymentPolicy =
       'By booking, you agree to pay your membership session rate '
       '(Inner Chamber: \$125/session; Sovereign Circle: \$90/session). '
-      'After your coach accepts, your default card is charged automatically '
-      'in the 72-hour window BEFORE the session — not after. Open invoices '
-      'are under Billing → Invoices; unpaid Stripe invoices are emailed '
-      'every 7 days until paid. Payment is due before the session. '
-      'Cancel at least 24 hours before the start time for a full refund. '
-      'Cancellations inside 24 hours are not refundable.';
+      'Pay now is on Billing → Invoices as soon as the session is scheduled. '
+      'Your default card is also charged in the 72-hour window BEFORE the session. '
+      'Payment must be received at least 24 hours before the start. '
+      'If you have not paid 24 hours before, the session is cancelled and that '
+      'non-payment is your consent to cancel so the slot can be filled. '
+      'Cancel 24 hours or more ahead: the invoice is voided and a paid session '
+      'is refunded. Cancel inside 24 hours: payment is still due because that '
+      'slot cannot be filled.';
   bool _hasCardOnFile = false;
   bool _cardCheckLoading = false;
   bool _paymentConsent = false;
@@ -12223,10 +12225,41 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   }
   
   void _cancelSession(String sessionId) {
-    _socket?.sink.add(jsonEncode({
-      "type": "client_cancel_session",
-      "session_id": sessionId,
-    }));
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Cancel session',
+            style: TextStyle(color: Color(0xFFC9A962))),
+        content: const Text(
+          'Cancel 24 hours or more before the start and the invoice is voided '
+          '(a paid session is refunded).\n\n'
+          'Cancel inside 24 hours and payment is still due — that slot cannot '
+          'be filled.\n\n'
+          'If this session is unpaid 24 hours before the start, it is cancelled '
+          'automatically and that non-payment is your consent to cancel.',
+          style: TextStyle(color: Color(0xFFE8D5A3), fontSize: 13, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep session',
+                style: TextStyle(color: Color(0xFF8B7355))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel session',
+                style: TextStyle(color: Color(0xFFEF4444))),
+          ),
+        ],
+      ),
+    ).then((ok) {
+      if (ok != true) return;
+      _socket?.sink.add(jsonEncode({
+        "type": "client_cancel_session",
+        "session_id": sessionId,
+      }));
+    });
   }
 
   void _fetchCoachDirectory() async {
@@ -12402,7 +12435,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Add a card before requesting a session. Your default card is charged in the 72 hours before the appointment — not after. Pay open invoices in Billing → Invoices.',
+                    'Add a card before requesting a session. Pay now is on Billing → Invoices. Your card is also charged in the 72 hours before the appointment. Unpaid 24 hours before start cancels the session.',
                     style: TextStyle(color: Colors.grey, fontSize: 11, height: 1.3),
                   ),
                   const SizedBox(height: 8),

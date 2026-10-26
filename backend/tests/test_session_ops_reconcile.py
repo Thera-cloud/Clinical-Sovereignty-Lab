@@ -69,6 +69,36 @@ def test_classify_paid_billable():
     assert actions == ["billable"]
 
 
+def test_classify_cancelled_pending_voids_orphan_invoice():
+    actions = classify_session(
+        {
+            "status": "cancelled",
+            "scheduled_start": FUTURE.isoformat(),
+            "payment_status": "pending",
+            "price_cents": 12500,
+            "session_data": {"stripe_invoice_id": "in_west", "invoice_status": "open"},
+            "sync_state": "deleted",
+        },
+        NOW,
+    )
+    assert "void_orphan_invoice" in actions
+    assert "billing_mismatch" in actions
+
+
+def test_classify_late_cancel_keeps_invoice():
+    actions = classify_session(
+        {
+            "status": "cancelled",
+            "scheduled_start": FUTURE.isoformat(),
+            "payment_status": "pending",
+            "session_data": {"late_cancel_fee": True, "stripe_invoice_id": "in_keep"},
+            "sync_state": "deleted",
+        },
+        NOW,
+    )
+    assert "void_orphan_invoice" not in actions
+
+
 def test_classify_paid_beyond_36h_is_not_billable_flag():
     later = NOW + timedelta(days=4)
     actions = classify_session(
