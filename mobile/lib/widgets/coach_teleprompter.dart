@@ -1,10 +1,11 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
-/// Host teleprompter overlay. Paste or load a script, tap a word, optional follow.
+/// Host teleprompter overlay. Paste or load a script; gold word follows speech.
 class CoachTeleprompterOverlay extends StatefulWidget {
   const CoachTeleprompterOverlay({super.key});
 
@@ -25,6 +26,9 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
   bool _open = false;
   bool _follow = false;
   bool _listening = false;
+  bool _inited = false;
+  bool _restarting = false;
+  String? _micHint;
   double _left = 16;
   double _top = 88;
   List<String> _words = [];
@@ -36,6 +40,104 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
     _speech.stop();
     _paste.dispose();
     super.dispose();
+  }
+
+  Future<bool> _ensureInit() async {
+    if (_inited) return true;
+    try {
+      final ok = await _speech.initialize(
+        onError: (e) {
+          if (!_follow) return;
+          if (mounted) {
+            setState(() {
+              _listening = false;
+              _micHint = e.errorMsg.isNotEmpty
+                  ? 'Mic: ${e.errorMsg}'
+                  : 'Allow the microphone for this site.';
+            });
+          }
+          _scheduleRestart();
+        },
+        onStatus: (status) {
+          if (!_follow) return;
+          if (status == 'listening') {
+            if (mounted) setState(() => _listening = true);
+            return;
+          }
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _listening = false);
+            _scheduleRestart();
+          }
+        },
+      );
+      _inited = ok;
+      return ok;
+    } catch (_) {
+      _inited = false;
+      return false;
+    }
+  }
+
+  void _scheduleRestart() {
+    if (!_follow || _restarting || _words.isEmpty) return;
+    _restarting = true;
+    Future.delayed(const Duration(milliseconds: 160), () async {
+      _restarting = false;
+      if (!_follow || !mounted || _words.isEmpty) return;
+      if (_speech.isListening) return;
+      await _listenLoop();
+    });
+  }
+
+  Future<void> _listenLoop() async {
+    if (!_follow || _words.isEmpty) return;
+    if (_speech.isListening) return;
+    try {
+      await _speech.listen(
+        onResult: (r) {
+          final text = r.recognizedWords.trim();
+          if (text.isNotEmpty) _onHeard(text);
+        },
+        localeId: 'en-US',
+        listenOptions: SpeechListenOptions(
+          partialResults: true,
+          listenMode: ListenMode.dictation,
+          cancelOnError: false,
+        ),
+      );
+      if (mounted) setState(() => _listening = true);
+    } catch (_) {
+      if (mounted) setState(() => _listening = false);
+      _scheduleRestart();
+    }
+  }
+
+  Future<void> _startFollow() async {
+    if (_words.isEmpty) return;
+    setState(() {
+      _follow = true;
+      _micHint = null;
+    });
+    final ok = await _ensureInit();
+    if (!ok || !mounted) {
+      setState(() {
+        _follow = false;
+        _listening = false;
+        _micHint = 'Allow the microphone, then tap Follow me.';
+      });
+      return;
+    }
+    await _listenLoop();
+  }
+
+  Future<void> _stopFollow() async {
+    _follow = false;
+    try {
+      await _speech.stop();
+    } catch (_) {}
+    if (mounted) {
+      setState(() => _listening = false);
+    }
   }
 
   void _setScript(String raw) {
@@ -50,6 +152,7 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
       _paste.text = raw;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _reveal(_cursor));
+    _startFollow();
   }
 
   Future<void> _pickFile() async {
@@ -71,7 +174,7 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
     Scrollable.ensureVisible(
       ctx,
       alignment: 0.35,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
     );
   }
@@ -86,54 +189,73 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
   String _norm(String w) =>
       w.toLowerCase().replaceAll(RegExp(r"[^a-z0-9']"), '');
 
+  bool _fuzzy(String a, String b) {
+    if (a == b) return true;
+    if (a.isEmpty || b.isEmpty) return false;
+    if ((a.length - b.length).abs() > 1) return false;
+    if (a.length < 4 || b.length < 4) return false;
+    if (a.length == b.length) {
+      var d = 0;
+      for (var i = 0; i < a.length; i++) {
+        if (a.codeUnitAt(i) != b.codeUnitAt(i)) d++;
+        if (d > 1) return false;
+      }
+      return true;
+    }
+    final longer = a.length > b.length ? a : b;
+    final shorter = a.length > b.length ? b : a;
+    var i = 0;
+    var j = 0;
+    var skipped = false;
+    while (i < longer.length && j < shorter.length) {
+      if (longer.codeUnitAt(i) == shorter.codeUnitAt(j)) {
+        i++;
+        j++;
+      } else {
+        if (skipped) return false;
+        skipped = true;
+        i++;
+      }
+    }
+    return true;
+  }
+
+  int? _locate(List<String> heard) {
+    if (heard.isEmpty || _words.isEmpty) return null;
+    final from = math.max(0, _cursor - 2);
+    final to = math.min(_words.length, _cursor + 22);
+    for (var n = math.min(5, heard.length); n >= 1; n--) {
+      final needle = heard.sublist(heard.length - n);
+      int? hit;
+      for (var i = from; i + n <= to; i++) {
+        if (n == 1 && i < _cursor) continue;
+        var ok = true;
+        for (var k = 0; k < n; k++) {
+          if (!_fuzzy(_norm(_words[i + k]), needle[k])) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          hit = i + n - 1;
+          if (n == 1) break;
+        }
+      }
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+
   void _onHeard(String raw) {
     if (!_follow || _words.isEmpty) return;
     final heard = raw
         .split(RegExp(r'\s+'))
         .map(_norm)
-        .where((w) => w.length > 1)
+        .where((w) => w.isNotEmpty)
         .toList();
     if (heard.isEmpty) return;
-    final take = heard.length >= 4 ? heard.sublist(heard.length - 4) : heard;
-    final start = _cursor;
-    final end = (_cursor + 12).clamp(0, _words.length);
-    var best = -1;
-    var bestHit = 0;
-    for (var i = start; i < end; i++) {
-      var hit = 0;
-      for (var k = 0; k < take.length && i + k < _words.length; k++) {
-        if (_norm(_words[i + k]) == take[k]) hit++;
-      }
-      if (hit > bestHit) {
-        bestHit = hit;
-        best = i + take.length - 1;
-      }
-    }
-    if (bestHit >= (take.length >= 3 ? 2 : 1) && best > _cursor) {
-      _jump(best);
-    }
-  }
-
-  Future<void> _toggleFollow() async {
-    if (_follow) {
-      await _speech.stop();
-      setState(() {
-        _follow = false;
-        _listening = false;
-      });
-      return;
-    }
-    final ok = await _speech.initialize();
-    if (!ok || !mounted) return;
-    setState(() => _follow = true);
-    await _speech.listen(
-      onResult: (r) => _onHeard(r.recognizedWords),
-      listenMode: ListenMode.dictation,
-      partialResults: true,
-      pauseFor: const Duration(seconds: 8),
-      listenFor: const Duration(minutes: 30),
-    );
-    if (mounted) setState(() => _listening = true);
+    final found = _locate(heard);
+    if (found != null && found != _cursor) _jump(found);
   }
 
   @override
@@ -150,7 +272,10 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
 
   Widget _pill() {
     return GestureDetector(
-      onTap: () => setState(() => _open = true),
+      onTap: () {
+        setState(() => _open = true);
+        if (_words.isNotEmpty) _startFollow();
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -159,7 +284,8 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
           border: Border.all(color: _gold),
         ),
         child: const Text('Teleprompter',
-            style: TextStyle(color: _gold, fontSize: 12, fontWeight: FontWeight.w600)),
+            style: TextStyle(
+                color: _gold, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -171,7 +297,8 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
       onPanUpdate: (d) {
         setState(() {
           _left = (_left + d.delta.dx).clamp(0, maxW - 80);
-          _top = (_top + d.delta.dy).clamp(0, MediaQuery.sizeOf(context).height - 80);
+          _top =
+              (_top + d.delta.dy).clamp(0, MediaQuery.sizeOf(context).height - 80);
         });
       },
       child: Container(
@@ -190,27 +317,39 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
               child: Row(children: [
                 const Text('Teleprompter',
                     style: TextStyle(
-                        color: _gold, fontSize: 13, fontWeight: FontWeight.w600)),
+                        color: _gold,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
                 const Spacer(),
                 TextButton(
-                  onPressed: _toggleFollow,
-                  child: Text(_follow ? 'Following' : 'Follow me',
-                      style: TextStyle(
-                          color: _follow ? _gold : _dim, fontSize: 12)),
+                  onPressed: () {
+                    if (_follow) {
+                      _stopFollow();
+                    } else {
+                      _startFollow();
+                    }
+                  },
+                  child: Text(
+                    _follow ? 'Listening' : 'Follow me',
+                    style: TextStyle(
+                        color: _follow ? _gold : _dim, fontSize: 12),
+                  ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, color: _dim, size: 18),
                   onPressed: () async {
-                    await _speech.stop();
-                    setState(() {
-                      _open = false;
-                      _follow = false;
-                      _listening = false;
-                    });
+                    await _stopFollow();
+                    if (mounted) setState(() => _open = false);
                   },
                 ),
               ]),
             ),
+            if (_micHint != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: Text(_micHint!,
+                    style: const TextStyle(color: _dim, fontSize: 11)),
+              ),
             if (_words.isEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -218,7 +357,8 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
                   TextField(
                     controller: _paste,
                     maxLines: 5,
-                    style: const TextStyle(color: _ink, fontSize: 14, height: 1.4),
+                    style: const TextStyle(
+                        color: _ink, fontSize: 14, height: 1.4),
                     decoration: const InputDecoration(
                       hintText: 'Paste what you want to say',
                       hintStyle: TextStyle(color: _dim, fontSize: 13),
@@ -288,13 +428,11 @@ class _CoachTeleprompterOverlayState extends State<CoachTeleprompterOverlay> {
                     const Text('Listening',
                         style: TextStyle(color: _gold, fontSize: 11)),
                   TextButton(
-                      onPressed: () {
-                        _speech.stop();
+                      onPressed: () async {
+                        await _stopFollow();
                         setState(() {
                           _words = [];
                           _cursor = 0;
-                          _follow = false;
-                          _listening = false;
                         });
                       },
                       child: const Text('Clear',
