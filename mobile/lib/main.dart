@@ -29,6 +29,7 @@ import 'screens/onboarding_threshold_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
 import 'screens/ai_consent_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/billing_screens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shared_widgets.dart';
@@ -11293,6 +11294,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   bool _paymentConsent = false;
   Timer? _cardPollTimer;
   bool _negotiationBusy = false;
+  int _shellTab = 0;
 
   bool get _hasCoach => _coachId.isNotEmpty;
 
@@ -12327,11 +12329,97 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
     super.dispose();
   }
   
+  Widget _buildCoachOnlySettings() {
+    final profile = Map<String, dynamic>.from(widget.currentUserProfile ?? {});
+    final coachName = (profile['assigned_coach'] ??
+            profile['assigned_coach_name'] ??
+            'Your Coach')
+        .toString();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: const Color(0xFFC9A962).withOpacity(0.4)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('YOUR COACH',
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 10, letterSpacing: 1.2)),
+                const SizedBox(height: 4),
+                Text(
+                  _hasCoach ? coachName : 'No coach assigned yet',
+                  style: const TextStyle(
+                      color: Color(0xFFC9A962),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold),
+                ),
+                if (_coachFee != null && _coachFee! > 0)
+                  Text(
+                    'Session rate: \$${_coachFee!.toStringAsFixed(_coachFee == _coachFee!.roundToDouble() ? 0 : 2)}',
+                    style: const TextStyle(
+                        color: Color(0xFFE8D5A3), fontSize: 12),
+                  ),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() => _shellTab = 0);
+                        _requestUpcomingSessions();
+                        _requestMonthOverview();
+                      },
+                      icon: const Icon(Icons.calendar_month,
+                          size: 16, color: Color(0xFFC9A962)),
+                      label: const Text('View coach schedule',
+                          style: TextStyle(
+                              color: Color(0xFFC9A962), fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFC9A962)),
+                      ),
+                    ),
+                  ),
+                  if (_hasCoach) ...[
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () =>
+                          _showCoachChangeRequestDialog(coachName),
+                      child: const Text('Change Coach',
+                          style: TextStyle(
+                              color: Color(0xFF4ECDC4), fontSize: 12)),
+                    ),
+                  ],
+                ]),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: PaymentMethodsScreen(
+            currentUserProfile: profile,
+            embedded: true,
+            billingOnly: true,
+            onPaymentMethodsChanged: _refreshCardOnFile,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = widget.currentUserProfile?['name'] ?? 'Client';
     final plan = (widget.currentUserProfile?['subscription_plan'] ?? '').toString().toUpperCase();
-    
+    final onSettings = _shellTab == 1;
+
     return Scaffold(
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
@@ -12352,24 +12440,53 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.bold)),
-            Text(plan == 'COACH_ONLY' ? 'Scheduling Only' : 'Schedule', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+            Text(onSettings ? 'Settings' : name, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              onSettings
+                  ? 'Coach schedule, payment & invoices'
+                  : (plan == 'COACH_ONLY' ? 'Scheduling Only' : 'Schedule'),
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+            ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Color(0xFFC9A962)),
-            onPressed: _requestUpcomingSessions,
-          ),
+          if (!onSettings)
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Color(0xFFC9A962)),
+              onPressed: _requestUpcomingSessions,
+            ),
         ],
       ),
-      body: _isLoading
-        ? const Center(child: CircularProgressIndicator(color: Color(0xFFC9A962)))
-        : _hasCoach
-          ? _buildScheduleView()
-          : _pendingRequest != null
-            ? _buildPendingRequestView()
-            : _buildCoachDirectoryView(),
+      body: IndexedStack(
+        index: _shellTab,
+        children: [
+          _isLoading
+              ? const Center(child: CircularProgressIndicator(color: Color(0xFFC9A962)))
+              : _hasCoach
+                  ? _buildScheduleView()
+                  : _pendingRequest != null
+                      ? _buildPendingRequestView()
+                      : _buildCoachDirectoryView(),
+          _buildCoachOnlySettings(),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _shellTab,
+        type: BottomNavigationBarType.fixed,
+        onTap: (i) {
+          setState(() => _shellTab = i);
+          if (i == 0) _refreshCardOnFile();
+        },
+        backgroundColor: const Color(0xFF0A0A0A),
+        selectedItemColor: const Color(0xFFC9A962),
+        unselectedItemColor: Colors.grey,
+        items: const [
+          BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month), label: 'Schedule'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.settings), label: 'Settings'),
+        ],
+      ),
     );
   }
   

@@ -1943,11 +1943,19 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
 class PaymentMethodsScreen extends StatefulWidget {
   final Map<String, dynamic> currentUserProfile;
   final int initialTab;
+  /// No AppBar — parent (coach-only Settings tab) supplies chrome.
+  final bool embedded;
+  /// Methods + Invoices only (hides Discounts / Scholarships).
+  final bool billingOnly;
+  final VoidCallback? onPaymentMethodsChanged;
 
   const PaymentMethodsScreen({
     super.key,
     required this.currentUserProfile,
     this.initialTab = 0,
+    this.embedded = false,
+    this.billingOnly = false,
+    this.onPaymentMethodsChanged,
   });
 
   @override
@@ -1978,13 +1986,19 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   String get _userId =>
       widget.currentUserProfile['hardware_id']?.toString() ?? '';
 
+  int get _tabCount => widget.billingOnly ? 2 : 4;
+
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this, initialIndex: widget.initialTab);
+    _tabCtrl = TabController(
+      length: _tabCount,
+      vsync: this,
+      initialIndex: widget.initialTab.clamp(0, _tabCount - 1),
+    );
     _loadPaymentMethods();
     _loadInvoices();
-    _loadScholarships();
+    if (!widget.billingOnly) _loadScholarships();
   }
 
   @override
@@ -2010,6 +2024,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 List<Map<String, dynamic>>.from(data['payment_methods'] ?? []);
             _loadingMethods = false;
           });
+          widget.onPaymentMethodsChanged?.call();
         }
         return;
       }
@@ -2029,6 +2044,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           setState(() {
             _invoices =
                 List<Map<String, dynamic>>.from(data['invoices'] ?? []);
+            _invoices.sort((a, b) {
+              int rank(Map<String, dynamic> inv) {
+                final s = (inv['status'] ?? '').toString().toLowerCase();
+                if (inv['past_due'] == true) return 0;
+                if (s == 'open' || s == 'unpaid' || s == 'draft' || s == 'pending') {
+                  return 1;
+                }
+                return 2;
+              }
+              return rank(a).compareTo(rank(b));
+            });
             _billingHold = data['billing_hold'] == true;
             _loadingInvoices = false;
           });
@@ -2374,38 +2400,31 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         _addingBank = false;
       });
       _loadPaymentMethods();
+      widget.onPaymentMethodsChanged?.call();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _D.bgVoid,
-      appBar: AppBar(
-        backgroundColor: _D.bgCard,
-        title: const Text('BILLING',
-            style: TextStyle(
-                color: _D.gold,
-                fontSize: 16,
-                letterSpacing: 3,
-                fontFamily: 'Cormorant Garamond')),
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: _D.textPrimary),
-        bottom: TabBar(
-          controller: _tabCtrl,
-          indicatorColor: _D.gold,
-          labelColor: _D.gold,
-          unselectedLabelColor: _D.textSecondary,
-          isScrollable: true,
-          tabs: const [
-            Tab(text: 'Methods'),
-            Tab(text: 'Invoices'),
-            Tab(text: 'Discounts'),
-            Tab(text: 'Scholarships'),
-          ],
-        ),
-      ),
-      body: TabBarView(
+    final tabBar = TabBar(
+      controller: _tabCtrl,
+      indicatorColor: _D.gold,
+      labelColor: _D.gold,
+      unselectedLabelColor: _D.textSecondary,
+      isScrollable: !widget.billingOnly,
+      tabs: widget.billingOnly
+          ? const [
+              Tab(text: 'Payment Method'),
+              Tab(text: 'Invoices'),
+            ]
+          : const [
+              Tab(text: 'Methods'),
+              Tab(text: 'Invoices'),
+              Tab(text: 'Discounts'),
+              Tab(text: 'Scholarships'),
+            ],
+    );
+    final views = TabBarView(
         controller: _tabCtrl,
         children: [
           // Payment Methods tab
@@ -2628,7 +2647,19 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                         final paidAmt = inv['amount_paid'] ?? 0;
                         final displayAmt = unpaid ? due : paidAmt;
                         final hosted = inv['hosted_url']?.toString();
-                        return Container(
+                        return Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: unpaid
+                                  ? () => _payInvoice(inv)
+                                  : (hosted != null && hosted.isNotEmpty
+                                      ? () => _openUrl(hosted)
+                                      : (inv['pdf_url'] != null
+                                          ? () => _openUrl(
+                                              inv['pdf_url']?.toString())
+                                          : null)),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
@@ -2661,7 +2692,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                           fontWeight: FontWeight.bold),
                                     ),
                                     Text(
-                                      '${inv['description'] ?? inv['session_id'] ?? ''} ${inv['created'] ?? inv['timestamp'] ?? ''} · ${status.toUpperCase()}',
+                                      '${inv['description'] ?? inv['session_id'] ?? ''} ${inv['created'] ?? inv['timestamp'] ?? ''} · ${unpaid ? 'UNPAID' : 'PAID'} · ${status.toUpperCase()}',
                                       style: const TextStyle(
                                           color: _D.textSecondary,
                                           fontSize: 10),
@@ -2692,6 +2723,8 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                       color: _D.gold, size: 18),
                                 ),
                             ]),
+                        ),
+                            ),
                         );
                       }),
                     const SizedBox(height: 16),
@@ -2725,6 +2758,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                   ],
                 ),
 
+          if (!widget.billingOnly)
           // Discounts tab — code inputs hidden on iOS per Apple Guideline 3.1.1
           ListView(
             padding: const EdgeInsets.all(16),
@@ -2808,6 +2842,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             ],
           ),
 
+          if (!widget.billingOnly)
           // Scholarships tab
           _loadingScholarships
               ? const Center(child: CircularProgressIndicator(color: _D.gold))
@@ -2895,7 +2930,30 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                   ],
                 ),
         ],
+    );
+    if (widget.embedded) {
+      return Column(
+        children: [
+          Material(color: _D.bgCard, child: tabBar),
+          Expanded(child: views),
+        ],
+      );
+    }
+    return Scaffold(
+      backgroundColor: _D.bgVoid,
+      appBar: AppBar(
+        backgroundColor: _D.bgCard,
+        title: const Text('BILLING',
+            style: TextStyle(
+                color: _D.gold,
+                fontSize: 16,
+                letterSpacing: 3,
+                fontFamily: 'Cormorant Garamond')),
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: _D.textPrimary),
+        bottom: tabBar,
       ),
+      body: views,
     );
   }
 
