@@ -102,9 +102,24 @@ def session_row_to_invoice(row: Dict[str, Any]) -> Dict[str, Any]:
     paid = str(row.get("payment_status") or "").lower() == "paid"
     amount = (row.get("payment_amount_cents") or cents or 0) / 100.0
     created = row.get("scheduled_start") or row.get("created_at")
+    start_dt = created if isinstance(created, datetime) else None
     if hasattr(created, "isoformat"):
         created = created.isoformat()
     hosted = data.get("hosted_invoice_url") or data.get("receipt_url")
+    cl = data.get("collect_later")
+    collect_later = cl is True or str(cl or "").lower() in ("true", "1", "yes")
+    days_overdue = 0
+    if start_dt and not paid:
+        now = datetime.now(timezone.utc)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        days_overdue = max(0, (now.date() - start_dt.date()).days)
+    past_due = collect_later and days_overdue > 0 and not paid
+    desc = f"Coaching session {row.get('session_id') or ''}".strip()
+    if collect_later and not paid:
+        desc = f"Live session (collect later) {row.get('session_id') or ''}".strip()
+        if past_due:
+            desc = f"Past-due live session {row.get('session_id') or ''}".strip()
     return {
         "id": data.get("stripe_invoice_id") or row.get("stripe_payment_intent_id")
         or row.get("session_id"),
@@ -119,7 +134,10 @@ def session_row_to_invoice(row: Dict[str, Any]) -> Dict[str, Any]:
         "hosted_url": hosted,
         "period_start": created,
         "period_end": None,
-        "description": f"Coaching session {row.get('session_id') or ''}".strip(),
+        "description": desc,
+        "collect_later": collect_later,
+        "past_due": past_due,
+        "days_overdue": days_overdue,
     }
 
 
@@ -198,6 +216,10 @@ def _stripe_inv_dict(inv) -> Dict[str, Any]:
             else None
         ),
         "description": getattr(inv, "description", None) or "Stripe invoice",
+        "collect_later": (
+            isinstance(meta, dict)
+            and str(meta.get("collect_later") or "").lower() in ("true", "1", "yes")
+        ),
     }
 
 
@@ -340,20 +362,29 @@ def create_open_session_invoice(
     session_id_str: str,
     description: str,
     days_until_due: int = DUNNING_INTERVAL_DAYS,
+    due_date: Optional[int] = None,
+    extra_metadata: Optional[Dict[str, Any]] = None,
 ):
     """Draft + finalize a send_invoice Stripe Invoice for an unpaid session."""
     import stripe
 
     if amount_cents <= 0 or not customer_id:
         return None
-    inv = stripe.Invoice.create(
-        customer=customer_id,
-        collection_method="send_invoice",
-        days_until_due=days_until_due,
-        auto_advance=False,
-        metadata={"type": "session_fee", "session_id": session_id_str},
-        description=description[:200],
-    )
+    meta = {"type": "session_fee", "session_id": session_id_str}
+    if extra_metadata:
+        meta.update({str(k): str(v) for k, v in extra_metadata.items() if v is not None})
+    create_kwargs: Dict[str, Any] = {
+        "customer": customer_id,
+        "collection_method": "send_invoice",
+        "auto_advance": False,
+        "metadata": meta,
+        "description": description[:200],
+    }
+    if due_date:
+        create_kwargs["due_date"] = int(due_date)
+    else:
+        create_kwargs["days_until_due"] = days_until_due
+    inv = stripe.Invoice.create(**create_kwargs)
     stripe.InvoiceItem.create(
         customer=customer_id,
         invoice=inv.id,
@@ -364,7 +395,7 @@ def create_open_session_invoice(
     return stripe.Invoice.finalize_invoice(inv.id)
 
 
-async def persist_session_invoice(conn, session_uuid, invoice) -> None:
+async def persist_session_invoice(conn, session_uuid, invoice, extra: Optional[Dict[str, Any]] = None) -> None:
     hosted = getattr(invoice, "hosted_invoice_url", None)
     pdf = getattr(invoice, "invoice_pdf", None)
     payload = {
@@ -373,6 +404,8 @@ async def persist_session_invoice(conn, session_uuid, invoice) -> None:
         "invoice_pdf": pdf,
         "invoice_status": getattr(invoice, "status", None),
     }
+    if extra:
+        payload.update(extra)
     await conn.execute(
         """UPDATE coaching_sessions
               SET session_data = COALESCE(session_data, '{}'::jsonb) || $2::jsonb,
@@ -477,6 +510,14 @@ async def remind_open_stripe_invoices(db_pool, notify) -> int:
                     await void_open_session_invoice(conn, dict(sess))
                 except Exception:
                     pass
+                continue
+            sess_data = _session_data(dict(sess) if sess else {})
+            cl = sess_data.get("collect_later")
+            meta = getattr(inv, "metadata", None) or {}
+            if hasattr(meta, "to_dict"):
+                meta = meta.to_dict()
+            if (cl is True or str(cl or "").lower() in ("true", "1", "yes")
+                    or str((meta or {}).get("collect_later") or "").lower() in ("true", "1", "yes")):
                 continue
             dunn = await conn.fetchrow(
                 """SELECT last_reminded_at FROM stripe_invoice_dunning

@@ -781,9 +781,19 @@ async def get_invoices(user_id: str, request: Request, limit: int = 40):
             1 for i in merged
             if str(i.get("status") or "").lower() in ("open", "unpaid", "draft")
         )
+        past_due = sum(1 for i in merged if i.get("past_due") or i.get("collect_later"))
+        billing_hold = False
+        if pool:
+            try:
+                from app.services.session_collect_later import client_booking_paused
+                billing_hold = await client_booking_paused(pool, user_id)
+            except Exception:
+                billing_hold = False
         return {
             "source": "stripe+sessions" if stripe_items else "sessions",
             "pending_count": pending,
+            "past_due_live_sessions": past_due,
+            "billing_hold": billing_hold,
             "invoices": merged,
             "autopay_note": INVOICE_TAB_NOTE,
         }
@@ -834,6 +844,11 @@ async def pay_open_invoice(req: PayInvoiceRequest, request: Request):
                 "metadata": dict(getattr(inv, "metadata", None) or {}),
             }
             await mark_session_paid_from_invoice(pool, payload)
+            try:
+                from app.services.session_collect_later import on_session_invoice_paid
+                await on_session_invoice_paid(pool, payload)
+            except Exception as e:
+                logger.warning("pay_open_invoice: collect-later follow-up: %s", e)
         return {
             "status": getattr(inv, "status", None),
             "invoice_id": inv.id,
@@ -921,10 +936,17 @@ async def attach_payment_method(req: PaymentMethodAttachRequest, request: Reques
             payment_method_id=req.payment_method_id,
             stripe_customer_id=stripe_customer,
         )
+        charged = 0
+        try:
+            from app.services.session_collect_later import try_charge_overdue_for_user
+            charged = await try_charge_overdue_for_user(pool, req.user_id)
+        except Exception as e:
+            logger.warning("attach_payment_method: collect-later charge: %s", e)
         return {
             "status": "attached",
             "payment_method_id": req.payment_method_id,
             "default_mirrored": mirrored,
+            "overdue_charged": charged,
         }
     except Exception as e:
         raise HTTPException(400, f"Failed to attach payment method: {e}")

@@ -2133,6 +2133,14 @@ class StripeWebhookHandler:
                 from app.services.session_invoice_ledger import mark_session_paid_from_invoice
 
                 await mark_session_paid_from_invoice(self.db, invoice)
+                try:
+                    from app.services.session_collect_later import on_session_invoice_paid
+                    await on_session_invoice_paid(self.db, invoice)
+                except Exception:
+                    _logger.exception(
+                        "collect-later invoice.paid follow-up failed id=%s",
+                        invoice.get("id"),
+                    )
             except Exception:
                 _logger.exception(
                     "session invoice.paid mark failed id=%s", invoice.get("id")

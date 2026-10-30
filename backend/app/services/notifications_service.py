@@ -699,6 +699,62 @@ TEMPLATES = {
 </div></body></html>
 """,
     },
+    "session_collect_later_24h": {
+        "subject": "Please pay your live-session invoice",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Live session invoice</h2>
+  <p>Hello {{ name }},</p>
+  <p>Your session is complete. You have an unpaid live-session balance of <strong>${{ amount }}</strong>. This invoice was due on the session day.</p>
+  <p>Please update your payment method in Account Settings and pay now.</p>
+  <p><a href="{{ pay_url }}" style="color:#C9A962;">Pay invoice</a></p>
+  <p style="color:#64748b;font-size:12px;">Sovereign Sanctuary</p>
+</div></body></html>
+""",
+    },
+    "session_collect_later_nudge": {
+        "subject": "Reminder: update your payment method",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Payment method needed</h2>
+  <p>Hello {{ name }},</p>
+  <p>Please update your card so overdue live-session balances (${{ amount }}) can be charged. We will remind you every 3 days until this is current.</p>
+  <p><a href="{{ pay_url }}" style="color:#C9A962;">Pay invoice</a></p>
+  <p style="color:#64748b;font-size:12px;">Sovereign Sanctuary</p>
+</div></body></html>
+""",
+    },
+    "session_collect_later_paused": {
+        "subject": "Membership paused — past-due live session",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Membership paused</h2>
+  <p>Hello {{ name }},</p>
+  <p>Your live-session balance of <strong>${{ amount }}</strong> is more than 30 days past due. Membership is paused until you update your payment method and the overdue invoices are paid. You cannot book new sessions until then.</p>
+  <p><a href="{{ pay_url }}" style="color:#C9A962;">Pay invoice</a></p>
+  <p style="color:#64748b;font-size:12px;">Sovereign Sanctuary</p>
+</div></body></html>
+""",
+    },
+    "session_collect_later_cleared": {
+        "subject": "Your account is current — thank you",
+        "html": """
+<!DOCTYPE html>
+<html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
+<div style="max-width:640px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
+  <h2 style="color:#C9A962;margin-top:0;">Account current</h2>
+  <p>Hello {{ name }},</p>
+  <p>Your live-session invoices are paid and nothing is past due. Your membership is active and you can book time with your coach.</p>
+  <p style="color:#64748b;font-size:12px;">Sovereign Sanctuary</p>
+</div></body></html>
+""",
+    },
     "session_ops_digest": {
         "subject": "Schedule ops — next-day review ({{ issue_count }} item{{ issue_count_plural }})",
         "html": """

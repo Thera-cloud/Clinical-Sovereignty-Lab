@@ -88,6 +88,7 @@ async def test_payment_agent_overdue_query_uses_appointment_time_and_price_guard
     sql = overdue_fetch.args[0]
     assert _APPT_TIME_BARE in sql
     assert "COALESCE(price_cents, 0) > 0" in sql
+    assert "collect_later" in sql
     assert _NOT_CANCELLED_BARE in sql
     assert "stripe_invoice_id" not in sql or "late_cancel_fee" in sql
     assert "scheduled_at <" not in sql.replace(_APPT_TIME_BARE, "")

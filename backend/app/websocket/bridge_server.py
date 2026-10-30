@@ -15411,6 +15411,18 @@ async def handle_client(websocket, path=None):
                                         "detail": "Payment verification failed. Please try again.",
                                     }))
                                     continue
+                                # QUANTUM-CRYSTAL-ARCH: 30-day collect-later membership hold
+                                try:
+                                    from app.services.session_collect_later import client_booking_paused
+                                    if db_pool and await client_booking_paused(db_pool, client_id):
+                                        await websocket.send(json.dumps({
+                                            "type": "error",
+                                            "message": "PAYMENT_HOLD",
+                                            "detail": "Membership is paused until past-due live-session invoices are paid. Update your payment method in Account Settings → Invoices.",
+                                        }))
+                                        continue
+                                except Exception as _hold_e:
+                                    print(f">>> [BOOKING] payment hold check failed: {_hold_e}")
 
                                 # QUANTUM-CRYSTAL-ARCH: duration from booked window (never leave 0)
                                 _book_dur = 50

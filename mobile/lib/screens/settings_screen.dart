@@ -3087,6 +3087,17 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 ));
               })),
               const SizedBox(width: 8),
+              Expanded(child: _billingLink(Icons.receipt_long, 'Invoices', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => PaymentMethodsScreen(
+                    currentUserProfile: _profile,
+                    initialTab: 1,
+                  ),
+                ));
+              })),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
               Expanded(child: _billingLink(Icons.people, 'Family', () {
                 Navigator.push(context, MaterialPageRoute(
                   builder: (_) => FamilyManagementScreen(

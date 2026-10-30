@@ -7567,6 +7567,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     String sessionType = "COACH",
     String notes = "",
     bool disableRecording = false,
+    bool collectLater = false,
   }) async {
     final stUtc = scheduledStartLocal.toUtc();
     final enUtc = stUtc.add(Duration(minutes: durationMinutes));
@@ -7582,6 +7583,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       "notes": notes,
       "zoom_link": "",
       "disable_recording": disableRecording,
+      "collect_later": collectLater,
     };
 
     try {
@@ -8039,6 +8041,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     int durationMinutes = 50;
     String notes = "";
     bool disableRecording = false;
+    bool collectLater = false;
     bool consultationSubmitting = false;
     final consulteeEmailCtrl = TextEditingController();
     final consulteeNameCtrl = TextEditingController();
@@ -8512,6 +8515,38 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                               inactiveThumbColor: const Color(0xFF00F5D4),
                             ),
                           ),
+                          if (sessionType != "CONSULTATION") ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: collectLater
+                                      ? const Color(0xFFC9A962)
+                                      : Colors.white10),
+                            ),
+                            child: SwitchListTile(
+                              title: const Text("Collect later",
+                                  style: TextStyle(color: Colors.white)),
+                              subtitle: Text(
+                                collectLater
+                                    ? "Stripe invoice due session day. Will not auto-cancel if the card is missing."
+                                    : "Charge the card on file. Unpaid 24h before start cancels.",
+                                style: TextStyle(
+                                    color: collectLater
+                                        ? const Color(0xFFC9A962)
+                                        : Colors.grey,
+                                    fontSize: 12),
+                              ),
+                              value: collectLater,
+                              onChanged: (v) =>
+                                  setLocal(() => collectLater = v),
+                              activeColor: const Color(0xFFC9A962),
+                              inactiveThumbColor: const Color(0xFF00F5D4),
+                            ),
+                          ),
+                          ],
                           const SizedBox(height: 6),
                           Text(
                             "Zoom auto-create happens server-side when ENABLE_ZOOM=true.",
@@ -8616,6 +8651,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             sessionType: sessionType,
                             notes: notes,
                             disableRecording: disableRecording,
+                            collectLater: collectLater,
                           );
                           if (created && ctx.mounted) Navigator.of(ctx).pop();
                         }

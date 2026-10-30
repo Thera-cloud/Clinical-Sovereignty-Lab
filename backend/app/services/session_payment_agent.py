@@ -191,6 +191,7 @@ class SessionPaymentAgent:
                    AND payment_status = 'pending'
                    AND COALESCE(price_cents, 0) > 0
                    AND COALESCE(session_data->>'late_cancel_fee', '') NOT IN ('true','1','yes')
+                   AND COALESCE(session_data->>'collect_later', '') NOT IN ('true','1','yes')
                    AND {_NOT_CANCELLED_BARE}""",
                 cancel_deadline,
             )
@@ -359,6 +360,15 @@ class SessionPaymentAgent:
                 logger.info("SessionPaymentAgent: sent %d unpaid-invoice reminders", n)
         except Exception as e:
             logger.warning("SessionPaymentAgent: invoice dunning skipped: %s", e)
+
+        try:
+            from app.services.session_collect_later import run_collect_later_cycle
+
+            n = await run_collect_later_cycle(self.db_pool, self.app_state)
+            if n:
+                logger.info("SessionPaymentAgent: collect-later cycle actions=%d", n)
+        except Exception as e:
+            logger.warning("SessionPaymentAgent: collect-later cycle skipped: %s", e)
 
     async def _issue_unpaid_session_invoices(self, conn):
         """Capture unpaid priced sessions as Stripe send_invoice (no second charge)."""

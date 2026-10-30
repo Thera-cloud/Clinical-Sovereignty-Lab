@@ -359,6 +359,7 @@ class ScheduleSessionRequest(BaseModel):
     notes: Optional[str] = ""
     zoom_link: Optional[str] = ""
     disable_recording: Optional[bool] = False  # Coach can opt-out of auto-recording
+    collect_later: Optional[bool] = False  # Coach override: Stripe invoice, skip 24h cancel
 
 class RescheduleSessionRequest(BaseModel):
     scheduled_start: str
@@ -862,6 +863,21 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     if _ooo_msg:
         raise HTTPException(409, _ooo_msg)
 
+    if not req.collect_later:
+        try:
+            from app.services.session_collect_later import client_booking_paused
+            if await client_booking_paused(_get_db(request), req.client_id):
+                raise HTTPException(
+                    409,
+                    "Client membership is paused for past-due live-session invoices. "
+                    "Toggle Collect later to keep the appointment, or the client must "
+                    "update their payment method in Account Settings.",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            _logger.warning("schedule_session: billing hold check failed: %s", e)
+
     session_id = generate_session_id()
 
     _is_consultation = req.session_type == "MASTER_CONSULTATION"
@@ -928,6 +944,9 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
         "price_cents": _price_cents,
         "payment_status": "waived" if _is_consultation else "pending",
     }
+    if req.collect_later and not _is_consultation:
+        session["collect_later"] = True
+        session["collect_later_by"] = req.coach_id
 
     # Optional: auto-create Zoom meeting if enabled and no link provided.
     zoom_error = None
@@ -992,6 +1011,14 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     
     sessions.append(session)
     await _save_session_dual(request, session, sessions)
+
+    if req.collect_later and not _is_consultation and _price_cents > 0:
+        try:
+            from app.services.session_collect_later import issue_collect_later_invoice
+            await issue_collect_later_invoice(db, session, actor=req.coach_id)
+            await _save_session_dual(request, session, sessions)
+        except Exception as e:
+            _logger.warning("schedule_session: collect-later invoice failed: %s", e)
 
     # Fire-and-forget Google Calendar push for both coach and client (if connected).
     if _gcal_sync:

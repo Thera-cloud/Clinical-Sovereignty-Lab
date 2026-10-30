@@ -59,6 +59,7 @@ def test_session_row_to_invoice_pending_and_paid():
     assert pending["status"] == "open"
     assert pending["amount_due"] == 125.0
     assert pending["hosted_url"].startswith("https://")
+    assert pending.get("collect_later") is False
 
     paid = session_row_to_invoice(
         {

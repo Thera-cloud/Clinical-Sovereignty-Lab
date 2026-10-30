@@ -1962,6 +1962,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   List<Map<String, dynamic>> _scholarships = [];
   bool _loadingMethods = true;
   bool _loadingInvoices = true;
+  bool _billingHold = false;
   bool _loadingScholarships = true;
   bool _addingCard = false;
   bool _addingBank = false;
@@ -2028,6 +2029,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           setState(() {
             _invoices =
                 List<Map<String, dynamic>>.from(data['invoices'] ?? []);
+            _billingHold = data['billing_hold'] == true;
             _loadingInvoices = false;
           });
         }
@@ -2572,8 +2574,24 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                       ),
                     ),
                     const SizedBox(height: 12),
+                    if (_billingHold) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: _D.red.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _D.red),
+                        ),
+                        child: const Text(
+                          'Membership paused: a live-session balance is more than 30 days past due. Update your payment method and pay overdue invoices to resume booking.',
+                          style: TextStyle(color: _D.red, fontSize: 12, height: 1.35),
+                        ),
+                      ),
+                    ],
                     const Text(
-                      'Pay now is for sessions still on the calendar and for sessions you used. Cancelled sessions are removed and their Stripe invoices are voided. Pay at least 24 hours before the start or the session is cancelled (non-payment is consent to cancel). Cancel inside 24 hours and payment is still due. Your card is also charged in the 72 hours before the appointment. Unpaid invoices are emailed every 7 days until paid.',
+                      'Pay now is for sessions still on the calendar and for sessions you used. Cancelled sessions are removed and their Stripe invoices are voided. Pay at least 24 hours before the start or the session is cancelled (non-payment is consent to cancel). Cancel inside 24 hours and payment is still due. Your card is also charged in the 72 hours before the appointment. Unpaid invoices are emailed every 7 days until paid. Collect-later live sessions stay billed in Stripe as due the session day and appear here as past due until paid.',
                       style: TextStyle(color: _D.textSecondary, fontSize: 11, height: 1.35),
                     ),
                     const SizedBox(height: 16),
@@ -2598,6 +2616,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             status == 'unpaid' ||
                             status == 'draft' ||
                             status == 'pending';
+                        final pastDue = inv['past_due'] == true;
                         if (status == 'void' ||
                             status == 'voided' ||
                             status == 'uncollectible' ||
@@ -2616,7 +2635,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                               color: _D.bgCard,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                  color: unpaid ? _D.gold : _D.border),
+                                  color: pastDue
+                                      ? _D.red
+                                      : (unpaid ? _D.gold : _D.border)),
                             ),
                             child: Row(children: [
                               Icon(

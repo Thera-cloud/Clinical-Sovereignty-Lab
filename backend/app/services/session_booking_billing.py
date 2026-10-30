@@ -40,7 +40,10 @@ INVOICE_TAB_NOTE = (
     "are voided. Pay at least 24 hours before the start or the session is "
     "cancelled (non-payment is consent to cancel). Cancel inside 24 hours and "
     "payment is still due. Your card is also charged in the 72 hours before "
-    "the appointment. Unpaid invoices are emailed every 7 days until paid."
+    "the appointment. Unpaid invoices are emailed every 7 days until paid. "
+    "If your coach used Collect later, the session stays on the calendar and "
+    "the invoice is due the same day as the live session. Past-due live "
+    "sessions appear here until you update your payment method and pay."
 )
 
 # Past scheduled rows: no_show only when there is nothing for SessionPaymentAgent
