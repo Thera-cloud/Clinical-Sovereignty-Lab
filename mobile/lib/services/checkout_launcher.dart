@@ -18,22 +18,21 @@
 /// ```
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
+import 'checkout_href.dart';
 
 /// Open a billing URL (Stripe Checkout, Stripe Customer Portal, etc.).
 ///
-/// On Flutter Web this navigates the current tab (`window.open(url, '_self')`)
-/// to avoid popup-blockers. On native iOS / Android / desktop it opens the
-/// platform browser via `LaunchMode.externalApplication`.
+/// On Flutter Web this assigns `window.location` (same tab). `url_launcher`'s
+/// `window.open` is silently blocked on Safari/Chrome even with `_self`.
+/// Native iOS / Android / desktop uses `LaunchMode.externalApplication`.
 ///
 /// Returns `true` if the navigation/launch succeeded.
 Future<bool> launchCheckoutUrl(String url) async {
   if (url.isEmpty) return false;
+  if (kIsWeb) {
+    return openCheckoutHref(url);
+  }
   final uri = Uri.tryParse(url);
   if (uri == null) return false;
-
-  return await launchUrl(
-    uri,
-    mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
-    webOnlyWindowName: kIsWeb ? '_self' : null,
-  );
+  return launchUrl(uri, mode: LaunchMode.externalApplication);
 }

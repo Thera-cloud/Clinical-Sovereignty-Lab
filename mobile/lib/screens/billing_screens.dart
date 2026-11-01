@@ -2104,27 +2104,29 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     } catch (_) {}
   }
 
-  Future<void> _payInvoice(Map<String, dynamic> inv) async {
-    final hosted = inv['hosted_url']?.toString();
-    if (hosted != null && hosted.isNotEmpty) {
-      await _openUrl(hosted);
+  String? _hostedPayUrl(Map<String, dynamic> inv) {
+    for (final key in ['hosted_url', 'hosted_invoice_url', 'hostedInvoiceUrl']) {
+      final v = inv[key]?.toString() ?? '';
+      if (v.startsWith('http://') || v.startsWith('https://')) return v;
+    }
+    return null;
+  }
+
+  void _payInvoice(Map<String, dynamic> inv) {
+    final hosted = _hostedPayUrl(inv);
+    if (hosted != null) {
+      launchCheckoutUrl(hosted);
       return;
     }
-    final id = inv['id']?.toString() ?? '';
-    if (!id.startsWith('in_')) return;
-    try {
-      final resp = await http.post(
-        Uri.parse('$defaultApiBaseUrl/api/billing/invoices/pay'),
-        headers: _authHeaders(widget.currentUserProfile, json: true),
-        body: jsonEncode({'user_id': _userId, 'invoice_id': id}),
-      );
-      if (resp.statusCode == 200 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Payment submitted'),
-            backgroundColor: Color(0xFF22C55E)));
-        _loadInvoices();
-      }
-    } catch (_) {}
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Invoice link is missing. Refresh Invoices, or use the Stripe invoice in your email.',
+        ),
+        backgroundColor: _D.red,
+      ),
+    );
   }
 
   Future<void> _deleteMethod(String pmId) async {
@@ -2689,14 +2691,14 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                         final due = inv['amount_due'] ?? 0;
                         final paidAmt = inv['amount_paid'] ?? 0;
                         final displayAmt = unpaid ? due : paidAmt;
-                        final hosted = inv['hosted_url']?.toString();
+                        final hosted = _hostedPayUrl(inv);
                         return Material(
                             color: Colors.transparent,
                             child: InkWell(
                               onTap: unpaid
                                   ? () => _payInvoice(inv)
-                                  : (hosted != null && hosted.isNotEmpty
-                                      ? () => _openUrl(hosted)
+                                  : (hosted != null
+                                      ? () => launchCheckoutUrl(hosted)
                                       : (inv['pdf_url'] != null
                                           ? () => _openUrl(
                                               inv['pdf_url']?.toString())
