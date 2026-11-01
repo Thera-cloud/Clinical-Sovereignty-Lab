@@ -1868,6 +1868,15 @@ class StripeWebhookHandler:
         
         if not user_id:
             return
+
+        # QUANTUM-CRYSTAL-ARCH — setup Checkout must become the default PM
+        if session.get("mode") == "setup" or metadata.get("purpose") == "session_booking_card":
+            try:
+                from app.services.payment_method_notices import promote_checkout_setup
+                await promote_checkout_setup(self.db, session)
+            except Exception:
+                _logger.exception("setup checkout default PM failed")
+            return
         
         if session['mode'] == 'subscription':
             db_uid = await self.db.fetchval(
@@ -2259,9 +2268,12 @@ class StripeWebhookHandler:
                 from app.services.notifications_service import EmailService
                 email_svc = EmailService()
                 user_row = await self.db.fetchrow(
-                    "SELECT email, name FROM users WHERE id = $1", user_id
+                    """SELECT COALESCE(NULLIF(email, ''), profile_data->>'email') AS email,
+                              COALESCE(NULLIF(name, ''), profile_data->>'name') AS name
+                         FROM users WHERE id = $1""",
+                    user_id,
                 )
-                if user_row:
+                if user_row and user_row["email"]:
                     amount_str = f"${invoice['amount_due'] / 100:.2f}" if invoice.get('amount_due') else "$0.00"
                     await email_svc.send_payment_failed(
                         to_email=user_row["email"],

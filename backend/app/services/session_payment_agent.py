@@ -370,6 +370,15 @@ class SessionPaymentAgent:
         except Exception as e:
             logger.warning("SessionPaymentAgent: collect-later cycle skipped: %s", e)
 
+        try:
+            from app.services.payment_method_notices import run_payment_method_notice_cycle
+
+            n = await run_payment_method_notice_cycle(self.db_pool, self.app_state)
+            if n:
+                logger.info("SessionPaymentAgent: payment-method notices=%d", n)
+        except Exception as e:
+            logger.warning("SessionPaymentAgent: payment-method notices skipped: %s", e)
+
     async def _issue_unpaid_session_invoices(self, conn):
         """Capture unpaid priced sessions as Stripe send_invoice (no second charge)."""
         rows = await conn.fetch(
@@ -453,6 +462,17 @@ class SessionPaymentAgent:
                 sid, e,
             )
 
+    def _queue_pm_blocked(self, session, reason: str) -> None:
+        try:
+            from app.services.payment_method_notices import notify_payment_blocked
+            asyncio.create_task(notify_payment_blocked(
+                self.db_pool, self.app_state,
+                user_key=str(session.get("client_id") or ""),
+                reason=(reason or "")[:200],
+            ))
+        except Exception:
+            pass
+
     async def _charge_card(self, conn, session, stripe_customer_id: str, amount_cents: int) -> bool:
         """Charge client default PM; Connect destination + app fee when coach linked; receipt email."""
         session_id = session["id"]
@@ -492,6 +512,7 @@ class SessionPaymentAgent:
                     await self._log_event(
                         conn, session_id, "charge_failed", amount_cents, error="No card on file"
                     )
+                    self._queue_pm_blocked(session, "No card on file")
                     return False
                 pm_id = payment_methods.data[0].id
 
@@ -593,6 +614,7 @@ class SessionPaymentAgent:
                     conn, session_id, "charge_failed", amount_cents,
                     error=f"Status: {intent.status}",
                 )
+                self._queue_pm_blocked(session, f"Status: {intent.status}")
                 return False
 
         except Exception as e:
@@ -601,6 +623,7 @@ class SessionPaymentAgent:
                 session_id, e,
             )
             await self._log_event(conn, session_id, "charge_failed", amount_cents, error=str(e))
+            self._queue_pm_blocked(session, str(e))
             return False
 
     async def _send_payment_reminder(self, conn, session, amount_cents: int):
@@ -631,6 +654,10 @@ the session. Pay now on <strong>Billing → Invoices</strong>, or your default c
 is charged in the 72 hours leading up to the appointment.</p>
 <p>If payment is not received 24 hours before the start, the session is cancelled
 and that non-payment is your consent to cancel so the slot can be filled.</p>
+<p>To update a card or bank: log in → <strong>Settings → Payments</strong>
+(coach-only: the Settings tab). Use Update Card or Update Bank, then tap the star
+so it is the default.</p>
+<p><a href="https://app.sovereignsanctuary.net">Open Sovereign Sanctuary</a></p>
 <p>Thank you,<br>Sovereign Sanctuary</p>"""
                 await notify._send_email(client_email, subject, body)
                 await conn.execute(

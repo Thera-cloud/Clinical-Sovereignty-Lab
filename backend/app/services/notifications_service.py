@@ -254,6 +254,44 @@ TEMPLATES = {
     },
 
     # -------------------------------------------------------------------------
+    # PAYMENT METHOD UPDATE (expired card / blocked charge)
+    # -------------------------------------------------------------------------
+    "payment_method_update": {
+        "subject": "Update your card or bank — payment method needs attention",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Georgia', serif; background: #050505; color: #F5F5F5; margin: 0; padding: 40px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .logo { font-size: 32px; color: #C9A962; letter-spacing: 4px; text-align: center; margin-bottom: 40px; }
+        .content { background: #111111; border: 1px solid #1A1A1A; padding: 40px; border-radius: 4px; }
+        p { color: #9A9A9A; line-height: 1.8; margin-bottom: 20px; }
+        .cta { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 14px 32px; font-size: 14px; letter-spacing: 1px; margin-top: 20px; }
+        .footer { text-align: center; margin-top: 40px; color: #5A5A5A; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">SANCTUARY</div>
+        <div class="content">
+            <p>Hello {{ name }},</p>
+            <p>{{ why }}</p>
+            {% if detail %}<p>{{ detail }}</p>{% endif %}
+            <p>{{ settings_hint }}</p>
+            <a href="{{ app_url }}" class="cta">Open Settings → Payments</a>
+        </div>
+        <div class="footer">
+            <p>Sovereign Sanctuary · support@sovereignsanctuary.net</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+    },
+
+    # -------------------------------------------------------------------------
     # PAYMENT FAILED
     # -------------------------------------------------------------------------
     "payment_failed": {
@@ -286,12 +324,12 @@ TEMPLATES = {
                 <p>Your payment of ${{ amount }} on {{ date }} was unsuccessful.</p>
             </div>
             <h1>Let's resolve this together.</h1>
-            <p>Your access continues for now, but please update your payment method to avoid any interruption to your journey.</p>
+            <p>Your access continues for now, but please update your card or bank in Settings → Payments so the next charge can go through.</p>
             <p>If you're experiencing financial difficulties, reach out — we may be able to help.</p>
-            <a href="{{ app_url }}/settings/billing" class="cta">Update Payment Method</a>
+            <a href="{{ app_url }}" class="cta">Open Settings → Payments</a>
         </div>
         <div class="footer">
-            <p>Questions? Reply to this email or contact support@littlenate.ai</p>
+            <p>Questions? Reply to this email or contact support@sovereignsanctuary.net</p>
         </div>
     </div>
 </body>

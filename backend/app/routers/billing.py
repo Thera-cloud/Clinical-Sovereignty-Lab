@@ -875,9 +875,13 @@ async def list_payment_methods(user_id: str, request: Request):
                 stripe.Customer.retrieve(stripe_customer)
                 .invoice_settings.get("default_payment_method")
             )
+            from app.services.payment_method_notices import card_health
+
             cards = stripe.PaymentMethod.list(customer=stripe_customer, type="card")
-            result = [
-                {
+            result = []
+            for pm in cards.data:
+                health = card_health(pm.card.exp_month, pm.card.exp_year)
+                result.append({
                     "id": pm.id,
                     "type": "card",
                     "brand": pm.card.brand,
@@ -885,9 +889,10 @@ async def list_payment_methods(user_id: str, request: Request):
                     "exp_month": pm.card.exp_month,
                     "exp_year": pm.card.exp_year,
                     "is_default": pm.id == default_pm,
-                }
-                for pm in cards.data
-            ]
+                    "expired": health == "expired",
+                    "expiring_soon": health == "expiring",
+                    "needs_update": health != "ok",
+                })
             try:
                 banks = stripe.PaymentMethod.list(customer=stripe_customer, type="us_bank_account")
                 for pm in banks.data:
@@ -942,6 +947,11 @@ async def attach_payment_method(req: PaymentMethodAttachRequest, request: Reques
             charged = await try_charge_overdue_for_user(pool, req.user_id)
         except Exception as e:
             logger.warning("attach_payment_method: collect-later charge: %s", e)
+        try:
+            from app.services.payment_method_notices import clear_notices
+            await clear_notices(pool, req.user_id)
+        except Exception:
+            pass
         return {
             "status": "attached",
             "payment_method_id": req.payment_method_id,
@@ -1493,6 +1503,11 @@ async def set_default_payment_method(req: SetDefaultPaymentMethodRequest, reques
             payment_method_id=req.payment_method_id,
             stripe_customer_id=customer_id,
         )
+        try:
+            from app.services.payment_method_notices import clear_notices
+            await clear_notices(pool, req.user_id)
+        except Exception:
+            pass
         return {
             "default_payment_method": req.payment_method_id,
             "updated": True,

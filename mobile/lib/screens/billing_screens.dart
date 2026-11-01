@@ -2065,11 +2065,28 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     if (mounted) setState(() => _loadingInvoices = false);
   }
 
+  bool _methodNeedsUpdate(Map<String, dynamic> m) {
+    if (m['needs_update'] == true || m['expired'] == true) return true;
+    if (m['expiring_soon'] == true) return true;
+    final month = m['exp_month'];
+    final year = m['exp_year'];
+    if (month is! num || year is! num) return false;
+    final end = DateTime(year.toInt(), month.toInt() + 1, 1);
+    final now = DateTime.now();
+    if (!now.isBefore(end)) return true;
+    return end.difference(now).inDays <= 45;
+  }
+
   Future<void> _openUrl(String? raw) async {
     if (raw == null || raw.isEmpty) return;
-    final url = Uri.parse(raw);
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+    final ok = await launchCheckoutUrl(raw);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open payment page'),
+          backgroundColor: _D.red,
+        ),
+      );
     }
   }
 
@@ -2474,12 +2491,29 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                     ),
                     const SizedBox(height: 16),
 
+                    if (_methods.any(_methodNeedsUpdate))
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: _D.red.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _D.red.withOpacity(0.45)),
+                        ),
+                        child: const Text(
+                          'A card on file is expired or expiring. Tap Update Card or Update Bank, then the star to set it as default.',
+                          style: TextStyle(color: _D.textPrimary, fontSize: 12, height: 1.35),
+                        ),
+                      ),
+
                     Row(
                         children: [
                           Expanded(
                             child: _AddPaymentButton(
                               icon: Icons.credit_card,
-                              label: 'Add Card',
+                              label: _methods.any((m) => m['type'] == 'card')
+                                  ? 'Update Card'
+                                  : 'Add Card',
                               loading: _addingCard,
                               onTap: () => _addPaymentMethod('card'),
                             ),
@@ -2488,7 +2522,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                           Expanded(
                             child: _AddPaymentButton(
                               icon: Icons.account_balance,
-                              label: 'Add Bank Account',
+                              label: _methods.any((m) => m['type'] == 'us_bank_account')
+                                  ? 'Update Bank'
+                                  : 'Add Bank Account',
                               loading: _addingBank,
                               onTap: () => _addPaymentMethod('bank'),
                             ),
@@ -2515,6 +2551,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                       ..._methods.map((m) {
                         final isBank = m['type'] == 'us_bank_account';
                         final isDefault = m['is_default'] == true;
+                        final needsUpdate = _methodNeedsUpdate(m);
                         return Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(14),
@@ -2522,7 +2559,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                               color: _D.bgCard,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: isDefault
+                                color: needsUpdate
+                                    ? _D.red.withOpacity(0.5)
+                                    : isDefault
                                     ? _D.gold.withOpacity(0.5)
                                     : _D.border,
                               ),
@@ -2530,7 +2569,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             child: Row(children: [
                               Icon(
                                 isBank ? Icons.account_balance : Icons.credit_card,
-                                color: isDefault ? _D.gold : _D.textSecondary,
+                                color: needsUpdate
+                                    ? _D.red
+                                    : isDefault
+                                        ? _D.gold
+                                        : _D.textSecondary,
                                 size: 24,
                               ),
                               const SizedBox(width: 12),
@@ -2550,10 +2593,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                     ),
                                     Text(
                                       isBank
-                                          ? 'ACH Direct Debit${isDefault ? ' · Default' : ''}'
-                                          : 'Exp ${m['exp_month'] ?? '??'}/${m['exp_year'] ?? '??'}${isDefault ? ' · Default' : ''}',
-                                      style: const TextStyle(
-                                          color: _D.textSecondary,
+                                          ? 'ACH Direct Debit${isDefault ? ' · Default' : ''}${needsUpdate ? ' · Update needed' : ''}'
+                                          : 'Exp ${m['exp_month'] ?? '??'}/${m['exp_year'] ?? '??'}${isDefault ? ' · Default' : ''}${needsUpdate ? ' · Update needed' : ''}',
+                                      style: TextStyle(
+                                          color: needsUpdate ? _D.red : _D.textSecondary,
                                           fontSize: 11),
                                     ),
                                   ],
