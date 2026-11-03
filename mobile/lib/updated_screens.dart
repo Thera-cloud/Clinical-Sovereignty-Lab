@@ -67,6 +67,7 @@ import 'widgets/thera_region_choice.dart';
 import 'widgets/upload_progress_indicator.dart';
 import 'widgets/coach_integrations_hub.dart';
 import 'widgets/coach_teleprompter.dart';
+import 'services/checkout_launcher.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -7043,6 +7044,47 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   Uri _sessionZoomDeleteEndpoint(String sessionId) =>
       _apiUri('/api/sessions/$sessionId/zoom/delete');
 
+  Uri _sessionZoomEnsureEndpoint(String sessionId) =>
+      _apiUri('/api/sessions/$sessionId/zoom/ensure');
+
+  Future<Map<String, dynamic>?> _ensureZoomForSession(String sessionId) async {
+    if (sessionId.isEmpty) return null;
+    try {
+      final resp = await http
+          .post(_sessionZoomEnsureEndpoint(sessionId), headers: _restHeaders())
+          .timeout(const Duration(seconds: 25));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        debugPrint('zoom ensure HTTP ${resp.statusCode}');
+        return null;
+      }
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map) return null;
+      final session = decoded['session'];
+      final host = (session is Map
+              ? session['zoom_host_url']
+              : decoded['zoom_host_url'])
+          ?.toString() ??
+          '';
+      final join = (session is Map ? session['zoom_link'] : decoded['zoom_link'])
+              ?.toString() ??
+          '';
+      final mid = (session is Map
+              ? session['zoom_meeting_id']
+              : decoded['zoom_meeting_id'])
+          ?.toString() ??
+          '';
+      return {
+        'zoom_host_url': host,
+        'zoom_link': join,
+        'zoom_meeting_id': mid,
+        'recreated': decoded['recreated'] == true,
+      };
+    } catch (e) {
+      debugPrint('zoom ensure failed: $e');
+      return null;
+    }
+  }
+
   Uri _sessionZoomArchiveTranscriptEndpoint(String sessionId) => _apiUri(
         '/api/sessions/$sessionId/zoom/archive_transcript',
         query: const {"delete_recordings": "true", "delete_meeting": "false"},
@@ -10197,7 +10239,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }));
   }
 
-  void _startLiveSession(Map<String, dynamic> session) {
+  Future<void> _startLiveSession(Map<String, dynamic> session) async {
     if (_isCoachExternalConsultation(session)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -10220,11 +10262,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             session['title'] ??
             'Live Coaching Session')
         .toString();
-    final meetingUrl =
+    var meetingUrl =
         (session['zoom_link'] ?? session['meeting_url'] ?? '').toString();
-    final hostUrl =
+    var hostUrl =
         (session['zoom_host_url'] ?? '').toString(); // Host URL for coaches
-    final zoomMeetingId = (session['zoom_meeting_id'] ?? '').toString();
+    var zoomMeetingId = (session['zoom_meeting_id'] ?? '').toString();
+    if (sessionId.isNotEmpty) {
+      final ensured = await _ensureZoomForSession(sessionId);
+      if (ensured != null) {
+        final h = (ensured['zoom_host_url'] ?? '').toString();
+        final j = (ensured['zoom_link'] ?? '').toString();
+        final m = (ensured['zoom_meeting_id'] ?? '').toString();
+        if (h.isNotEmpty) hostUrl = h;
+        if (j.isNotEmpty) meetingUrl = j;
+        if (m.isNotEmpty) zoomMeetingId = m;
+      }
+    }
     final dynamic durRaw = session['duration'] ??
         session['duration_minutes'] ??
         session['scheduled_duration_minutes'];
@@ -10255,7 +10308,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     _showLiveSessionSheet(
         initialLabel: label,
         initialMeetingUrl: meetingUrl,
-        initialHostUrl: hostUrl);
+        initialHostUrl: hostUrl,
+        scheduleSessionId: sessionId);
   }
 
   void _sendLiveNote(String text) {
@@ -14807,8 +14861,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                               side: const BorderSide(
                                   color: consultAccent, width: 0.8),
                             ),
-                            onPressed: () =>
-                                _launchZoomMeeting(zoomHostUrl, meetingUrl),
+                            onPressed: () => _launchZoomMeeting(
+                                zoomHostUrl, meetingUrl,
+                                sessionId: sessionId),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -14897,8 +14952,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                             side: const BorderSide(
                                 color: Color(0xFF00F5D4), width: 0.8),
                           ),
-                          onPressed: () =>
-                              _launchZoomMeeting(zoomHostUrl, meetingUrl),
+                          onPressed: () => _launchZoomMeeting(
+                              zoomHostUrl, meetingUrl,
+                              sessionId: sessionId),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -16525,9 +16581,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   /// Launch Zoom meeting directly - opens in Zoom app or browser
   /// Prefers host URL (coach enters as host with waiting room control)
   /// Falls back to join URL if host URL not available
-  Future<void> _launchZoomMeeting(String hostUrl, String joinUrl) async {
+  Future<void> _launchZoomMeeting(String hostUrl, String joinUrl,
+      {String sessionId = ''}) async {
+    var host = hostUrl;
+    var join = joinUrl;
+    if (sessionId.isNotEmpty) {
+      final ensured = await _ensureZoomForSession(sessionId);
+      if (ensured != null) {
+        final h = (ensured['zoom_host_url'] ?? '').toString();
+        final j = (ensured['zoom_link'] ?? '').toString();
+        if (h.isNotEmpty) host = h;
+        if (j.isNotEmpty) join = j;
+      }
+    }
     // Prefer host URL - this makes the coach the host with waiting room control
-    final urlToLaunch = hostUrl.isNotEmpty ? hostUrl : joinUrl;
+    final urlToLaunch = host.isNotEmpty ? host : join;
 
     if (urlToLaunch.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -16539,10 +16607,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       return;
     }
 
-    // On web, use the dart:html window.open directly (via conditional import)
-    // This avoids url_launcher plugin issues on Flutter web
+    // After ensure-zoom the user-gesture is gone; same-tab assign is not popup-blocked.
     if (kIsWeb) {
-      launchExternalUrl(urlToLaunch);
+      if (sessionId.isNotEmpty) {
+        await launchCheckoutUrl(urlToLaunch);
+      } else {
+        launchExternalUrl(urlToLaunch);
+      }
       return;
     }
 
@@ -20260,7 +20331,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   void _showLiveSessionSheet(
       {required String initialLabel,
       required String initialMeetingUrl,
-      String initialHostUrl = ''}) {
+      String initialHostUrl = '',
+      String scheduleSessionId = ''}) {
     if (_liveSheetOpen) return;
     _liveSheetOpen = true;
     final noteCtrl = TextEditingController();
@@ -20396,8 +20468,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                           ElevatedButton.icon(
                             icon: const Icon(Icons.launch, size: 16),
                             label: const Text("Open Zoom"),
-                            onPressed: () =>
-                                _launchZoomMeeting(initialHostUrl, meetingUrl),
+                            onPressed: () => _launchZoomMeeting(
+                                initialHostUrl, meetingUrl,
+                                sessionId: scheduleSessionId),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF00F5D4),
                               foregroundColor: Colors.black,

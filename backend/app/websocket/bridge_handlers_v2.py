@@ -60,7 +60,7 @@ def overlay_calendar_zoom(schedule: List[Any], sid: str, zoom: Dict[str, str]) -
         if (s.get("session_id") or s.get("id") or "") != sid:
             continue
         for k in ("zoom_link", "zoom_host_url", "zoom_meeting_id"):
-            if not str(s.get(k) or "").strip() and zoom.get(k):
+            if zoom.get(k):
                 s[k] = zoom[k]
         return
 

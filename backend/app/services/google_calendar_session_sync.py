@@ -180,7 +180,7 @@ def compose_session_event_payload(
     """Build Google event body. B4: never add Sanctuary clients as attendees.
 
     vault_sync=false → ``Session — {initials}``, empty description, no attendees.
-    Meet conferenceData has no client PII. Zoom join URL stays on the session card.
+    Meet conferenceData has no client PII. Zoom join URL is event location.
     """
     start = session.get("scheduled_start") or session.get("start_time")
     end = session.get("scheduled_end") or session.get("end_time")
@@ -189,16 +189,18 @@ def compose_session_event_payload(
     client_name = (session.get("client_name") or "").strip()
     initials = _client_initials(client_name) if client_name else "S"
     session_id = session.get("session_id") or "session"
-    join_url = (
-        session.get("zoom_join_url")
-        or session.get("join_url")
-        or session.get("zoom_link")
-    )
+    from app.services.calendar_invite import join_from_host_path, safe_join_url
+
+    join_url = safe_join_url(
+        session.get("zoom_join_url"),
+        session.get("join_url"),
+        session.get("zoom_link"),
+    ) or join_from_host_path(session.get("zoom_host_url") or "")
 
     if not vault_sync:
         summary = f"Session — {initials}"
         description = ""
-        location = None
+        location = join_url or None
         attendees = None
     else:
         coach_name = session.get("coach_name") or session.get("coach_id") or "Coach"

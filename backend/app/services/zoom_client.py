@@ -13,11 +13,34 @@ import base64
 import datetime as dt
 import logging
 import os
+import re
 import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import httpx
+
+_ZOOM_MEETING_ID_RE = re.compile(
+    r"zoom\.us/(?:j|s|wc|w)/(\d+)",
+    re.IGNORECASE,
+)
+
+
+def parse_zoom_meeting_id(*urls: Any) -> str:
+    """Extract numeric Zoom meeting id from join/host URLs."""
+    for raw in urls:
+        m = _ZOOM_MEETING_ID_RE.search(str(raw or ""))
+        if m:
+            return m.group(1)
+    return ""
+
+
+def host_start_url(meeting_id: str, zak: str) -> str:
+    mid = (meeting_id or "").strip()
+    token = (zak or "").strip()
+    if not mid or not token:
+        return ""
+    return f"https://zoom.us/s/{mid}?zak={token}"
 
 
 def double_encode_meeting_uuid(meeting_uuid: str) -> str:
@@ -485,4 +508,98 @@ class ZoomClient:
         except Exception as e:
             print(f"[Zoom] Meeting status check failed: {e}")
             return {"status": "unknown", "error": str(e)}
+
+    async def get_meeting(self, *, meeting_id: str) -> Optional[Dict[str, Any]]:
+        """Return Zoom meeting JSON, or None when the meeting does not exist (404 / code 3001)."""
+        token = await self._get_access_token()
+        mid = (meeting_id or "").strip()
+        if not mid:
+            return None
+        url = f"https://api.zoom.us/v2/meetings/{mid}"
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 404:
+            return None
+        try:
+            data = resp.json() if resp.content else {}
+        except Exception:
+            data = {}
+        if isinstance(data, dict) and data.get("code") == 3001:
+            return None
+        resp.raise_for_status()
+        return data if isinstance(data, dict) else None
+
+    async def get_zak_token(self, host_user: Optional[str] = None) -> str:
+        """Fresh host ZAK. Stored start_url zak tokens expire in hours."""
+        token = await self._get_access_token()
+        user = (host_user or self.host_user or "me").strip() or "me"
+        url = f"https://api.zoom.us/v2/users/{user}/token"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                url,
+                params={"type": "zak"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            data = resp.json() or {}
+        return str(data.get("token") or "").strip()
+
+    async def ensure_scheduled_meeting(
+        self,
+        *,
+        meeting_id: str = "",
+        topic: str,
+        start_time_iso: str,
+        duration_minutes: int,
+        agenda: str = "",
+        settings: Optional[Dict[str, Any]] = None,
+        host_user: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Keep a live scheduled meeting + fresh host start_url.
+
+        Zoom 404 / code 3001 means the stored meeting was deleted. Recreate it.
+        If the meeting still exists, mint a new ZAK so Open Zoom is host, not guest.
+        """
+        mid = (meeting_id or "").strip()
+        existing = None
+        if mid:
+            existing = await self.get_meeting(meeting_id=mid)
+        status = str((existing or {}).get("status") or "").lower()
+        if existing and status not in ("finished", "ended"):
+            live_id = str(existing.get("id") or mid)
+            join_url = str(existing.get("join_url") or "")
+            start_url = str(existing.get("start_url") or "")
+            try:
+                zak = await self.get_zak_token(host_user=host_user)
+                refreshed = host_start_url(live_id, zak)
+                if refreshed:
+                    start_url = refreshed
+            except Exception as e:
+                logging.getLogger("zoom_client").warning(
+                    "ensure_scheduled_meeting ZAK refresh failed for %s: %s", live_id, e
+                )
+            return {
+                "id": live_id,
+                "join_url": join_url,
+                "start_url": start_url,
+                "recreated": False,
+                "status": status or "waiting",
+            }
+
+        created = await self.create_meeting(
+            topic=topic,
+            start_time_iso=start_time_iso,
+            duration_minutes=int(duration_minutes or 50),
+            agenda=agenda,
+            settings=settings,
+            host_user=host_user,
+        )
+        return {
+            "id": str(created.get("id") or ""),
+            "join_url": str(created.get("join_url") or ""),
+            "start_url": str(created.get("start_url") or ""),
+            "recreated": True,
+            "status": str(created.get("status") or "waiting"),
+        }
 

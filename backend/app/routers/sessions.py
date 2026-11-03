@@ -26,6 +26,12 @@ import httpx
 from app.config import settings
 from app.auth import get_current_user_id
 from app.services.zoom_client import ZoomClient
+from app.services.session_zoom_repair import (
+    mint_session_zoom,
+    session_is_host,
+    user_can_access_session as _user_can_access_session,
+    zoom_meeting_id_from_session,
+)
 from app.services.blob_storage import upload_bytes
 
 _logger = logging.getLogger("sessions")
@@ -778,6 +784,10 @@ def _parse_iso_dt(s: str) -> Optional[datetime]:
     except Exception:
         return None
 
+def _zoom_meeting_id_from_session(session: dict) -> str:
+    return zoom_meeting_id_from_session(session)
+
+
 def _iso_to_zoom_start(iso_str: str) -> str:
     """
     Zoom accepts ISO strings. If naive, we treat as UTC and add 'Z' for stability.
@@ -1337,19 +1347,49 @@ async def expire_stale_sessions(request: Request):
     return {"expired": expired_count}
 
 
-def _user_can_access_session(user: Dict[str, Any], session: dict) -> bool:
-    role = str(user.get("role") or "").upper()
-    if role == "ADMIN":
-        return True
-    ids = {
-        str(user.get("hardware_id") or ""),
-        str(user.get("username") or ""),
-        str(user.get("id") or ""),
-        str(user.get("user_id") or ""),
-    }
-    ids.discard("")
-    targets = {str(session.get("client_id") or ""), str(session.get("coach_id") or "")}
-    return bool(ids & targets)
+async def _refresh_zoom_best_effort(request: Request, session: dict) -> dict:
+    """Mint a live Zoom join URL for ICS/Google templates when the session is near start."""
+    if not settings.ENABLE_ZOOM or not session:
+        return session
+    st = _parse_iso_dt(str(session.get("scheduled_start") or session.get("scheduled_at") or ""))
+    now = datetime.now(timezone.utc)
+    if st:
+        if st - now > timedelta(hours=36):
+            return session
+        if now - st > timedelta(hours=6):
+            return session
+    try:
+        session, recreated = await asyncio.wait_for(
+            mint_session_zoom(session, _make_zoom_client()),
+            timeout=12,
+        )
+        sessions = await _load_sessions_pf(request)
+        if not isinstance(sessions, list):
+            sessions = []
+        sid = str(session.get("session_id") or "")
+        mid = str(session.get("zoom_meeting_id") or "")
+        if sid and mid:
+            _update_zoom_meeting_map(
+                mid,
+                schedule_session_id=sid,
+                client_id=str(session.get("client_id") or ""),
+                family_id=str(session.get("family_id") or ""),
+                topic=f"Coaching Session — {session.get('client_name') or 'Client'}",
+            )
+        for s in sessions:
+            if s.get("session_id") == sid or s.get("id") == sid:
+                s["zoom_link"] = session.get("zoom_link") or ""
+                s["zoom_host_url"] = session.get("zoom_host_url") or ""
+                s["zoom_meeting_id"] = session.get("zoom_meeting_id") or ""
+                break
+        await _save_session_dual(request, session, sessions)
+        if recreated and _gcal_sync:
+            db = _get_db(request)
+            if db:
+                asyncio.create_task(_gcal_sync(db, session, action="update"))
+    except Exception as e:
+        _logger.warning("calendar zoom refresh skipped: %s", e)
+    return session
 
 
 def _ics_response(invite) -> Response:
@@ -1376,6 +1416,7 @@ async def download_session_calendar_ics(
         raise HTTPException(404, "Session not found")
     if not _user_can_access_session(user, session):
         raise HTTPException(403, "Access denied: you are not a participant in this session")
+    session = await _refresh_zoom_best_effort(request, session)
     coach = await _lookup_coach_display(_get_db(request), session.get("coach_id") or "")
     invite = invite_from_session(session, coach_name=coach.get("name") or "your coach")
     if not invite:
@@ -1396,6 +1437,7 @@ async def get_session_calendar_links(
         raise HTTPException(404, "Session not found")
     if not _user_can_access_session(user, session):
         raise HTTPException(403, "Access denied: you are not a participant in this session")
+    session = await _refresh_zoom_best_effort(request, session)
     coach = await _lookup_coach_display(_get_db(request), session.get("coach_id") or "")
     invite = invite_from_session(session, coach_name=coach.get("name") or "your coach")
     if not invite:
@@ -1424,6 +1466,7 @@ async def public_session_calendar_ics(request: Request, t: str = Query("")):
     sess_cid = str(session.get("client_id") or "")
     if token_cid and sess_cid and token_cid != sess_cid:
         raise HTTPException(403, "Calendar link does not match this session")
+    session = await _refresh_zoom_best_effort(request, session)
     coach = await _lookup_coach_display(_get_db(request), session.get("coach_id") or "")
     invite = invite_from_session(session, coach_name=coach.get("name") or "your coach")
     if not invite:
@@ -1563,6 +1606,94 @@ async def delete_zoom_meeting(session_id: str, request: Request):
             break
     await _save_session_dual(request, target, sessions)
     return {"ok": True, "message": "Zoom meeting deleted", "session": target}
+
+
+@router.post("/{session_id}/zoom/ensure")
+async def ensure_zoom_meeting(
+    session_id: str,
+    request: Request,
+    user: Dict = Depends(_require_auth),
+):
+    """Recreate a deleted Zoom meeting and mint a fresh host ZAK for Open Zoom."""
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
+
+    sessions = await _load_sessions_pf(request)
+    if not isinstance(sessions, list):
+        sessions = []
+
+    target = await _fetch_session_pg(request, session_id)
+    if not target:
+        for s in sessions:
+            if s.get("session_id") == session_id or s.get("id") == session_id:
+                target = s
+                break
+    if not target:
+        raise HTTPException(404, "Session not found")
+    if not _user_can_access_session(user, target):
+        raise HTTPException(403, "Access denied: you are not a participant in this session")
+
+    client_name = str(target.get("client_name") or "").strip() or "Client"
+    topic = f"Coaching Session — {client_name}"
+    try:
+        target, recreated = await mint_session_zoom(target, _make_zoom_client())
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try:
+            body = (e.response.text or "")[:2000]
+        except Exception:
+            body = ""
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "zoom_ensure_failed", "zoom_status": getattr(e.response, "status_code", None), "zoom_body": body},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "zoom_ensure_failed", "message": str(e)})
+
+    new_mid = str(target.get("zoom_meeting_id") or "")
+    if new_mid:
+        _update_zoom_meeting_map(
+            new_mid,
+            schedule_session_id=session_id,
+            client_id=str(target.get("client_id") or ""),
+            family_id=str(target.get("family_id") or ""),
+            topic=topic,
+        )
+
+    for s in sessions:
+        if s.get("session_id") == session_id or s.get("id") == session_id:
+            s["zoom_link"] = target.get("zoom_link") or ""
+            s["zoom_host_url"] = target.get("zoom_host_url") or ""
+            s["zoom_meeting_id"] = target.get("zoom_meeting_id") or ""
+            break
+    else:
+        sessions.append(target)
+
+    await _save_session_dual(request, target, sessions)
+
+    notify_result = None
+    if recreated:
+        try:
+            notify_result = await _send_session_link(request, target)
+        except Exception as e:
+            _logger.warning("ensure_zoom_meeting: client notify failed: %s", e)
+        if _gcal_sync:
+            db = _get_db(request)
+            if db:
+                asyncio.create_task(_gcal_sync(db, target, action="update"))
+
+    host_url = str(target.get("zoom_host_url") or "") if session_is_host(user, target) else ""
+    public = dict(target)
+    public["zoom_host_url"] = host_url
+    return {
+        "ok": True,
+        "recreated": recreated,
+        "zoom_meeting_id": target.get("zoom_meeting_id") or "",
+        "zoom_link": target.get("zoom_link") or "",
+        "zoom_host_url": host_url,
+        "session": public,
+        "notification": notify_result,
+    }
 
 
 @router.get("/{session_id}/zoom/recording_status")

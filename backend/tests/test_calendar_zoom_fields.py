@@ -43,3 +43,19 @@ def test_overlay_calendar_zoom_fills_empty_json_row():
     })
     assert schedule[0]["zoom_host_url"].startswith("https://zoom.us/s/")
     assert schedule[0]["zoom_meeting_id"] == "99793663383"
+
+
+def test_overlay_calendar_zoom_pg_replaces_stale_host():
+    schedule = [{
+        "session_id": "SES_20260706_CED8AC5C11AA",
+        "zoom_link": "https://zoom.us/j/96875254329",
+        "zoom_host_url": "https://zoom.us/s/96875254329?zak=stale",
+        "zoom_meeting_id": "96875254329",
+    }]
+    overlay_calendar_zoom(schedule, "SES_20260706_CED8AC5C11AA", {
+        "zoom_link": "https://zoom.us/j/11122233344",
+        "zoom_host_url": "https://zoom.us/s/11122233344?zak=fresh",
+        "zoom_meeting_id": "11122233344",
+    })
+    assert schedule[0]["zoom_meeting_id"] == "11122233344"
+    assert schedule[0]["zoom_host_url"].endswith("zak=fresh")

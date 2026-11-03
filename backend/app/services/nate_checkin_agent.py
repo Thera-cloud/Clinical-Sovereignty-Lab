@@ -714,6 +714,7 @@ class NateCheckInAgent:
                 upcoming = await conn.fetch(f"""
                     SELECT cs.id AS session_uuid, cs.session_id, cs.client_id, cs.coach_id,
                            cs.scheduled_start, cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
+                           cs.zoom_meeting_id, cs.session_data, cs.family_id, cs.notes,
                            u_client.username AS client_username,
                            u_client.profile_data AS client_profile,
                            u_coach.username AS coach_username,
@@ -754,6 +755,33 @@ class NateCheckInAgent:
                     zoom_link = safe_join_url(row["zoom_link"]) or join_from_host_path(
                         row.get("zoom_host_url") or ""
                     )
+                    try:
+                        from app.services.session_zoom_repair import (
+                            mint_and_persist,
+                            session_dict_from_row,
+                        )
+                        repaired, rec = await mint_and_persist(
+                            self.db_pool,
+                            session_dict_from_row(row, client_name=client_name),
+                        )
+                        zoom_link = safe_join_url(repaired.get("zoom_link")) or zoom_link
+                        if rec:
+                            try:
+                                from app.services.google_calendar_session_sync import (
+                                    sync_session_for_participants,
+                                )
+                                asyncio.create_task(
+                                    sync_session_for_participants(
+                                        self.db_pool, repaired, action="update"
+                                    )
+                                )
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.warning(
+                            "NateCheckInAgent: zoom repair before reminder %s: %s",
+                            session_id, e,
+                        )
 
                     client_start_str, client_tz = format_session_start_for_profile(
                         row["scheduled_start"], client_profile,

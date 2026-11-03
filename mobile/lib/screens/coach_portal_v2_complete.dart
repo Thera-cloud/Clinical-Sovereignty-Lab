@@ -15,6 +15,7 @@ import 'settings_screen.dart';
 import '../config/app_config.dart' as central_config;
 import '../main.dart' show ReConsentScreen;
 import '../widgets/conversation_log_view.dart';
+import '../utils/session_zoom_ensure.dart';
 
 // -----------------------------------------------------------------------------
 // CONFIGURATION
@@ -370,6 +371,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
               builder: (_) => PreSessionBriefScreen(
                 client: client,
                 socket: _socket,
+                authToken: (widget.currentUserProfile['token'] ?? '').toString(),
               ),
             ),
           );
@@ -415,25 +417,27 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
     );
   }
 
-  void _joinSession(Map<String, dynamic> session) async {
-    final zoomUrl = session['zoom_url'] ?? session['meeting_url'] ?? session['join_url'];
-    if (zoomUrl != null && zoomUrl.toString().isNotEmpty) {
-      final uri = Uri.parse(zoomUrl.toString());
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Could not open: $zoomUrl")),
-          );
-        }
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No meeting URL available for this session.")),
-        );
-      }
+  Future<void> _joinSession(Map<String, dynamic> session) async {
+    final sid = (session['session_id'] ?? session['id'] ?? '').toString();
+    final token = (widget.currentUserProfile['token'] ?? '').toString();
+    final fallbackJoin = (session['zoom_url'] ??
+            session['zoom_link'] ??
+            session['meeting_url'] ??
+            session['join_url'] ??
+            '')
+        .toString();
+    final fallbackHost = (session['zoom_host_url'] ?? '').toString();
+    final ok = await SessionZoomEnsure.launch(
+      sessionId: sid,
+      token: token,
+      fallbackJoin: fallbackJoin,
+      fallbackHost: fallbackHost,
+      asHost: true,
+    );
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No meeting URL available for this session.")),
+      );
     }
   }
 
@@ -738,11 +742,21 @@ class ClientsTab extends StatelessWidget {
               const SizedBox(height: 12),
               Builder(builder: (ctx) => Row(
                 children: [
-                  _buildActionButton(Icons.videocam, "Join Session", Colors.green, () {
-                    final link = client['zoom_link'] ?? client['meeting_url'] ?? '';
-                    if (link.toString().isNotEmpty) {
-                      launchUrl(Uri.parse(link.toString()));
-                    } else {
+                  _buildActionButton(Icons.videocam, "Join Session", Colors.green, () async {
+                    final sid = (client['next_session_id'] ??
+                            client['session_id'] ??
+                            client['upcoming_session_id'] ??
+                            '')
+                        .toString();
+                    final token = (widget.currentUserProfile['token'] ?? '').toString();
+                    final ok = await SessionZoomEnsure.launch(
+                      sessionId: sid,
+                      token: token,
+                      fallbackJoin: (client['zoom_link'] ?? client['meeting_url'] ?? '').toString(),
+                      fallbackHost: (client['zoom_host_url'] ?? '').toString(),
+                      asHost: true,
+                    );
+                    if (!ok) {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(content: Text('No session link available')),
                       );
@@ -2297,7 +2311,13 @@ class _AskNateTabState extends State<AskNateTab> {
 class PreSessionBriefScreen extends StatefulWidget {
   final Map<String, dynamic> client;
   final WebSocketChannel? socket;
-  const PreSessionBriefScreen({super.key, required this.client, required this.socket});
+  final String authToken;
+  const PreSessionBriefScreen({
+    super.key,
+    required this.client,
+    required this.socket,
+    this.authToken = '',
+  });
   @override
   State<PreSessionBriefScreen> createState() => _PreSessionBriefScreenState();
 }
@@ -2543,18 +2563,23 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
           Text(_briefData!['next_session'] ?? 'Unknown', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
         ])),
         ElevatedButton(onPressed: () async {
-          final zoomLink = _briefData?['zoom_link'] ?? _briefData?['meeting_url'] ?? '';
-          if (zoomLink.toString().isNotEmpty) {
-            final uri = Uri.parse(zoomLink.toString());
-            if (await canLaunchUrl(uri)) {
-              await launchUrl(uri, mode: LaunchMode.externalApplication);
-            }
-          } else {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('No Zoom link available for this session'), backgroundColor: Color(0xFF333333)),
-              );
-            }
+          final sid = (_briefData?['session_id'] ??
+                  _briefData?['next_session_id'] ??
+                  widget.client['next_session_id'] ??
+                  widget.client['session_id'] ??
+                  '')
+              .toString();
+          final ok = await SessionZoomEnsure.launch(
+            sessionId: sid,
+            token: widget.authToken,
+            fallbackJoin: (_briefData?['zoom_link'] ?? _briefData?['meeting_url'] ?? '').toString(),
+            fallbackHost: (_briefData?['zoom_host_url'] ?? '').toString(),
+            asHost: true,
+          );
+          if (!ok && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No Zoom link available for this session'), backgroundColor: Color(0xFF333333)),
+            );
           }
         }, style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), child: const Text("Join Zoom", style: TextStyle(fontSize: 11))),
       ]),

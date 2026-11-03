@@ -65,6 +65,7 @@ def test_vault_sync_false_redacts_title_description_attendees():
     assert payload is not None
     assert payload["summary"] == "Session — PS"
     assert not (payload.get("description") or "").strip()
+    assert payload.get("location") == "https://zoom.us/j/999"
     assert not payload.get("attendees")
     assert "Paula" not in payload["summary"]
     assert "guest@example.com" not in str(payload)

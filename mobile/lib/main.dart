@@ -38,6 +38,7 @@ import 'services/device_shield.dart';
 import 'services/nevedal_flutter.dart';
 import 'config/app_config.dart';
 import 'utils/session_calendar_links.dart';
+import 'utils/session_zoom_ensure.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'services/vault_entitlement.dart';
 import 'widgets/upload_progress_indicator.dart';
@@ -12988,7 +12989,12 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
           ? session['duration_minutes'] as int
           : int.tryParse('${session['duration_minutes'] ?? ''}') ?? 50,
     ));
-    final join = SessionCalendarLinks.safeJoinUrl((session['zoom_link'] ?? '').toString());
+    var join = SessionCalendarLinks.safeJoinUrl((session['zoom_link'] ?? '').toString());
+    if (sid.isNotEmpty && token.isNotEmpty) {
+      final ensured = await SessionZoomEnsure.fetch(sessionId: sid, token: token);
+      final live = SessionCalendarLinks.safeJoinUrl((ensured['zoom_link'] ?? '').toString());
+      if (live.isNotEmpty) join = live;
+    }
     final summary = 'Sanctuary session with $coachName';
     final details = join.isEmpty
         ? 'Coaching session with $coachName.\nAdd this event to your calendar. Do not use this link to start Zoom.'
@@ -13240,7 +13246,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
           ] else
             Row(
             children: [
-              if (zoomLink.isNotEmpty && status != 'pending_approval')
+              if (status != 'pending_approval')
                 Expanded(
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.videocam, size: 16),
@@ -13251,14 +13257,23 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: () async {
-                      final uri = Uri.parse(zoomLink);
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      final sid = (session['session_id'] ?? session['id'] ?? '').toString();
+                      final token = (widget.currentUserProfile?['token'] ?? '').toString();
+                      final ok = await SessionZoomEnsure.launch(
+                        sessionId: sid,
+                        token: token,
+                        fallbackJoin: zoomLink,
+                        asHost: false,
+                      );
+                      if (!ok && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Zoom link not ready yet')),
+                        );
                       }
                     },
                   ),
                 ),
-              if (zoomLink.isNotEmpty && status != 'pending_approval') const SizedBox(width: 8),
+              if (status != 'pending_approval') const SizedBox(width: 8),
               if (status == 'pending_approval')
                 Expanded(
                   child: Container(

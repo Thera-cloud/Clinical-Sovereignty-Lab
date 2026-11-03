@@ -1425,9 +1425,10 @@ class NotificationScheduler:
         sessions = await self.db.fetch(
             """
             SELECT 
-                cs.id, cs.session_id, cs.client_id,
+                cs.id, cs.session_id, cs.client_id, cs.coach_id,
                 COALESCE(cs.scheduled_start, cs.scheduled_at) AS scheduled_at,
                 cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
+                cs.zoom_meeting_id, cs.session_data, cs.family_id, cs.notes,
                 COALESCE(c.profile_data->>'email', '') as client_email,
                 COALESCE(c.profile_data->>'timezone', '') as client_timezone,
                 COALESCE(coach.profile_data->>'name', coach.username) as coach_name
@@ -1453,11 +1454,32 @@ class NotificationScheduler:
                 scheduled,
                 {"timezone": session.get("client_timezone")},
             )
+            join_url = session.get("zoom_link") or ""
+            try:
+                from app.services.calendar_invite import join_from_host_path, safe_join_url
+                from app.services.session_zoom_repair import mint_and_persist, session_dict_from_row
+                sess = dict(session)
+                sess["scheduled_start"] = scheduled
+                repaired, rec = await mint_and_persist(self.db, session_dict_from_row(sess))
+                join_url = safe_join_url(repaired.get("zoom_link")) or join_from_host_path(
+                    repaired.get("zoom_host_url") or ""
+                ) or join_url
+                if rec:
+                    try:
+                        from app.services.google_calendar_session_sync import sync_session_for_participants
+                        import asyncio
+                        asyncio.create_task(
+                            sync_session_for_participants(self.db, repaired, action="update")
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             await self.email.send_coaching_reminder(
                 session['client_email'],
                 time_str,
                 session['coach_name'],
-                join_url=session.get("zoom_link") or "",
+                join_url=join_url,
                 session_id=str(session.get("session_id") or ""),
                 scheduled_start=scheduled,
                 scheduled_end=session.get("scheduled_end"),
