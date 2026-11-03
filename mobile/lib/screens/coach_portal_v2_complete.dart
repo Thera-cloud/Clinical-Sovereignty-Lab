@@ -273,6 +273,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
         return ClientsTab(
           clients: _clients,
           onClientTap: _showClientActions,
+          authToken: (widget.currentUserProfile['token'] ?? '').toString(),
         );
       case 1:
         return CalendarTab(
@@ -621,11 +622,13 @@ class _TabItem {
 class ClientsTab extends StatelessWidget {
   final List<dynamic> clients;
   final Function(Map<String, dynamic>) onClientTap;
+  final String authToken;
 
   const ClientsTab({
     super.key,
     required this.clients,
     required this.onClientTap,
+    this.authToken = '',
   });
 
   @override
@@ -748,7 +751,7 @@ class ClientsTab extends StatelessWidget {
                             client['upcoming_session_id'] ??
                             '')
                         .toString();
-                    final token = (widget.currentUserProfile['token'] ?? '').toString();
+                    final token = authToken;
                     final ok = await SessionZoomEnsure.launch(
                       sessionId: sid,
                       token: token,
