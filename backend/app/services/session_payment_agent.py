@@ -147,6 +147,7 @@ class SessionPaymentAgent:
                    AND cs.payment_status = 'pending'
                    AND COALESCE(cs.price_cents, 0) > 0
                    AND COALESCE(cs.session_data->>'stripe_invoice_id', '') = ''
+                   AND COALESCE(cs.session_data->>'collect_later', '') NOT IN ('true','1','yes')
                    AND UPPER(cs.status) IN ('SCHEDULED', 'CONFIRMED', 'ACTIVE')
                    AND {_NOT_CANCELLED}""",
                 window_start, window_end,
@@ -516,6 +517,20 @@ class SessionPaymentAgent:
                     return False
                 pm_id = payment_methods.data[0].id
 
+            sd = session.get("session_data") or {}
+            if isinstance(sd, str):
+                try:
+                    sd = json.loads(sd) if sd else {}
+                except Exception:
+                    sd = {}
+            blocked_pm = str((sd or {}).get("charge_blocked_pm") or "").strip()
+            if blocked_pm and pm_id and blocked_pm == pm_id:
+                await self._log_event(
+                    conn, session_id, "charge_skipped", amount_cents,
+                    error="Same declined card — waiting for a new payment method",
+                )
+                return False
+
             connect_id = (session.get("coach_connect_id") or "").strip()
             app_fee = platform_fee_cents_from_session(session, amount_cents)
             if app_fee >= amount_cents:
@@ -624,6 +639,24 @@ class SessionPaymentAgent:
             )
             await self._log_event(conn, session_id, "charge_failed", amount_cents, error=str(e))
             self._queue_pm_blocked(session, str(e))
+            try:
+                fail_pm = ""
+                try:
+                    fail_pm = pm_id
+                except Exception:
+                    fail_pm = ""
+                if fail_pm:
+                    await conn.execute(
+                        """UPDATE coaching_sessions
+                              SET session_data = COALESCE(session_data, '{}'::jsonb)
+                                || jsonb_build_object('charge_blocked_pm', $2::text),
+                                  updated_at = NOW()
+                            WHERE id = $1""",
+                        session_id,
+                        fail_pm,
+                    )
+            except Exception:
+                pass
             return False
 
     async def _send_payment_reminder(self, conn, session, amount_cents: int):

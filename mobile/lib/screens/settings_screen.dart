@@ -7301,6 +7301,48 @@ class _PaymentHistoryWidgetState extends State<_PaymentHistoryWidget> {
     }
   }
 
+  Future<void> _payOpenInvoice(Map<String, dynamic> inv) async {
+    final invoiceId = (inv['id'] ?? inv['invoice_id'] ?? '').toString();
+    final token = widget.profile['token'] ?? '';
+    final uid = widget.profile['hardware_id'] ?? widget.profile['username'] ?? '';
+    try {
+      if (invoiceId.startsWith('in_')) {
+        final resp = await http.post(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/billing/invoices/refresh-pay-link'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'user_id': uid, 'invoice_id': invoiceId}),
+        ).timeout(const Duration(seconds: 20));
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (data['paid'] == true) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Payment received. Thank you.'),
+            ));
+            setState(() => _invoices = null);
+            await _load();
+            return;
+          }
+          final fresh = (data['hosted_url'] ?? '').toString();
+          if (fresh.startsWith('http')) {
+            await launchCheckoutUrl(fresh);
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+    for (final key in ['hosted_url', 'hosted_invoice_url', 'hostedInvoiceUrl']) {
+      final v = inv[key]?.toString() ?? '';
+      if (v.startsWith('http')) {
+        await launchCheckoutUrl(v);
+        return;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -7324,7 +7366,8 @@ class _PaymentHistoryWidgetState extends State<_PaymentHistoryWidget> {
             final paidAmt = inv['amount_paid'];
             final dueAmt = inv['amount_due'] ?? inv['amount'] ?? 0;
             final amount = (paidAmt is num && paidAmt > 0) ? paidAmt : dueAmt;
-            final status = (inv['status'] ?? '').toString();
+            final status = (inv['status'] ?? '').toString().toLowerCase();
+            final unpaid = status == 'open' || status == 'unpaid' || status == 'draft' || status == 'pending';
             final desc = (inv['description'] ?? inv['kind'] ?? 'Charge').toString();
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -7338,6 +7381,13 @@ class _PaymentHistoryWidgetState extends State<_PaymentHistoryWidget> {
                     Text('\$${(amount is num ? amount : 0).toStringAsFixed(2)}', style: const TextStyle(color: _Design.goldBright, fontSize: 12)),
                     const SizedBox(width: 8),
                     Text(status, style: TextStyle(color: status == 'paid' ? const Color(0xFF4ECDC4) : const Color(0xFF888888), fontSize: 11)),
+                    if (unpaid) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => _payOpenInvoice(inv),
+                        child: const Text('Pay now', style: TextStyle(color: Color(0xFFC9A962), fontSize: 11)),
+                      ),
+                    ],
                   ]),
                 ],
               ),

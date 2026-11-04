@@ -2112,7 +2112,34 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     return null;
   }
 
-  void _payInvoice(Map<String, dynamic> inv) {
+  Future<void> _payInvoice(Map<String, dynamic> inv) async {
+    final invoiceId = (inv['id'] ?? inv['invoice_id'] ?? '').toString();
+    try {
+      if (invoiceId.startsWith('in_')) {
+        final resp = await http.post(
+          Uri.parse('$defaultApiBaseUrl/api/billing/invoices/refresh-pay-link'),
+          headers: _authHeaders(widget.currentUserProfile, json: true),
+          body: jsonEncode({'user_id': _userId, 'invoice_id': invoiceId}),
+        );
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (data['paid'] == true) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Payment received. Thank you.'),
+              backgroundColor: _D.green,
+            ));
+            await _loadInvoices();
+            return;
+          }
+          final fresh = (data['hosted_url'] ?? '').toString();
+          if (fresh.startsWith('http')) {
+            launchCheckoutUrl(fresh);
+            return;
+          }
+        }
+      }
+    } catch (_) {}
     final hosted = _hostedPayUrl(inv);
     if (hosted != null) {
       launchCheckoutUrl(hosted);
@@ -2122,7 +2149,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'Invoice link is missing. Refresh Invoices, or use the Stripe invoice in your email.',
+          'Invoice link is missing. Refresh Invoices, or add a card then tap Pay now again.',
         ),
         backgroundColor: _D.red,
       ),

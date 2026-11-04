@@ -206,6 +206,11 @@ async def promote_checkout_setup(db, session: Dict[str, Any]) -> bool:
             stripe_customer_id=str(customer or "") or None,
         )
         await clear_notices(db, user_key)
+        try:
+            from app.services.session_collect_later import try_charge_overdue_for_user
+            await try_charge_overdue_for_user(db, user_key)
+        except Exception as e:
+            logger.warning("promote_checkout_setup overdue charge: %s", e)
         return True
     except Exception as e:
         logger.warning("promote_checkout_setup: %s", e)

@@ -833,30 +833,52 @@ async def pay_open_invoice(req: PayInvoiceRequest, request: Request):
         raise HTTPException(400, "invoice_id required")
     pool = getattr(request.app.state, "db_pool", None)
     try:
-        inv = stripe.Invoice.pay(req.invoice_id)
-        from app.services.session_invoice_ledger import mark_session_paid_from_invoice
+        from app.services.session_invoice_repay import pay_or_revive_open_invoice
 
-        if pool:
-            payload = inv.to_dict() if hasattr(inv, "to_dict") else {
-                "id": inv.id,
-                "amount_paid": getattr(inv, "amount_paid", 0),
-                "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
-                "metadata": dict(getattr(inv, "metadata", None) or {}),
-            }
-            await mark_session_paid_from_invoice(pool, payload)
-            try:
-                from app.services.session_collect_later import on_session_invoice_paid
-                await on_session_invoice_paid(pool, payload)
-            except Exception as e:
-                logger.warning("pay_open_invoice: collect-later follow-up: %s", e)
+        result = await pay_or_revive_open_invoice(
+            pool, invoice_id=req.invoice_id, charge=True,
+        )
         return {
-            "status": getattr(inv, "status", None),
-            "invoice_id": inv.id,
-            "hosted_url": getattr(inv, "hosted_invoice_url", None),
-            "paid": getattr(inv, "status", None) == "paid",
+            "status": "paid" if result.get("paid") else "open",
+            "invoice_id": result.get("invoice_id") or req.invoice_id,
+            "hosted_url": result.get("hosted_url"),
+            "paid": bool(result.get("paid")),
+            "revived": bool(result.get("revived")),
+            "error": result.get("error"),
         }
     except stripe.error.StripeError as e:
         raise HTTPException(400, str(e))
+
+
+class RefreshPayLinkRequest(BaseModel):
+    user_id: Optional[str] = None
+    invoice_id: Optional[str] = None
+
+
+@router.post("/invoices/refresh-pay-link")
+async def refresh_invoice_pay_link(req: RefreshPayLinkRequest, request: Request):
+    """Mint a live hosted invoice URL after a declined/canceled PaymentIntent.
+
+    Charges the customer's current default card when it is not the declined one.
+    """
+    if not STRIPE_AVAILABLE or not stripe.api_key:
+        raise HTTPException(503, "Stripe not available")
+    if not req.invoice_id or not str(req.invoice_id).startswith("in_"):
+        raise HTTPException(400, "invoice_id required")
+    pool = getattr(request.app.state, "db_pool", None)
+    from app.services.session_invoice_repay import pay_or_revive_open_invoice
+
+    result = await pay_or_revive_open_invoice(
+        pool, invoice_id=req.invoice_id, charge=True,
+    )
+    return {
+        "status": "paid" if result.get("paid") else "open",
+        "invoice_id": result.get("invoice_id") or req.invoice_id,
+        "hosted_url": result.get("hosted_url"),
+        "paid": bool(result.get("paid")),
+        "revived": bool(result.get("revived")),
+        "error": result.get("error"),
+    }
 
 
 # =========================================================================
@@ -1503,6 +1525,12 @@ async def set_default_payment_method(req: SetDefaultPaymentMethodRequest, reques
             payment_method_id=req.payment_method_id,
             stripe_customer_id=customer_id,
         )
+        charged = 0
+        try:
+            from app.services.session_collect_later import try_charge_overdue_for_user
+            charged = await try_charge_overdue_for_user(pool, req.user_id)
+        except Exception as e:
+            logger.warning("set_default_payment_method: overdue charge: %s", e)
         try:
             from app.services.payment_method_notices import clear_notices
             await clear_notices(pool, req.user_id)
@@ -1512,6 +1540,7 @@ async def set_default_payment_method(req: SetDefaultPaymentMethodRequest, reques
             "default_payment_method": req.payment_method_id,
             "updated": True,
             "default_mirrored": mirrored,
+            "overdue_charged": charged,
         }
     except stripe.error.StripeError as e:
         raise HTTPException(400, str(e))

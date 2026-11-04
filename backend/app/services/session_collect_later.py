@@ -281,46 +281,24 @@ async def _customer_has_pm(customer_id: str) -> bool:
         return False
 
 
-async def _pay_invoice(inv_id: str) -> bool:
+async def _pay_invoice(inv_id: str, db=None, payment_method_id: str = "") -> bool:
     if not inv_id or not str(inv_id).startswith("in_"):
         return False
-    try:
-        import stripe
+    from app.services.session_invoice_repay import pay_or_revive_open_invoice
 
-        stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-        if not stripe.api_key:
-            return False
-        inv = stripe.Invoice.pay(inv_id)
-        return str(getattr(inv, "status", "") or "").lower() == "paid"
-    except Exception as e:
-        logger.info("collect_later Invoice.pay %s: %s", inv_id, e)
-        return False
+    result = await pay_or_revive_open_invoice(
+        db, invoice_id=inv_id, payment_method_id=payment_method_id, charge=True,
+    )
+    return bool(result.get("paid"))
 
 
 async def try_charge_overdue_for_user(db, user_id: str) -> int:
-    """Pay open collect-later invoices after a payment method is attached."""
-    if not db or not user_id:
-        return 0
-    paid = 0
-    try:
-        async with db.acquire() as conn:
-            rows = await conn.fetch(
-                """SELECT cs.session_id, cs.session_data
-                     FROM coaching_sessions cs
-                    WHERE cs.client_id = $1
-                      AND cs.payment_status = 'pending'
-                      AND COALESCE(cs.session_data->>'collect_later','') IN ('true','1','yes')
-                      AND COALESCE(cs.session_data->>'stripe_invoice_id','') <> ''""",
-                user_id,
-            )
-            for row in rows:
-                data = _session_data(dict(row))
-                inv_id = str(data.get("stripe_invoice_id") or "")
-                if await _pay_invoice(inv_id):
-                    paid += 1
-    except Exception as e:
-        logger.warning("try_charge_overdue_for_user: %s", e)
-    return paid
+    """Pay open invoices after a payment method is attached or starred."""
+    from app.services.session_invoice_repay import (
+        try_charge_overdue_for_user as _charge_open,
+    )
+
+    return await _charge_open(db, user_id)
 
 
 async def _pause_membership(conn, client_id: str) -> None:
@@ -502,20 +480,25 @@ async def run_collect_later_cycle(db_pool, app_state=None) -> int:
                     "pay_url": hosted or "https://app.sovereignsanctuary.net",
                 }
                 if inv_id and row.get("stripe_customer_id"):
-                    if await _customer_has_pm(row["stripe_customer_id"]):
-                        if await _pay_invoice(inv_id):
-                            from app.services.session_invoice_ledger import (
-                                mark_session_paid_from_invoice,
-                            )
-                            await mark_session_paid_from_invoice(conn, {
-                                "id": inv_id,
-                                "amount_paid": int(row.get("price_cents") or 0),
-                                "hosted_invoice_url": hosted,
-                                "metadata": {
-                                    "session_id": row.get("session_id"),
-                                    "collect_later": "true",
-                                },
-                            })
+                    from app.services.session_invoice_repay import (
+                        customer_default_pm,
+                        pay_or_revive_open_invoice,
+                    )
+
+                    pm = customer_default_pm(row["stripe_customer_id"])
+                    if pm:
+                        pay_result = await pay_or_revive_open_invoice(
+                            db_pool,
+                            invoice_id=inv_id,
+                            payment_method_id=pm,
+                            charge=True,
+                        )
+                        if pay_result.get("hosted_url"):
+                            hosted = pay_result["hosted_url"]
+                            data["hosted_invoice_url"] = hosted
+                            data["stripe_invoice_id"] = pay_result.get("invoice_id") or inv_id
+                            inv_id = data["stripe_invoice_id"]
+                        if pay_result.get("paid"):
                             await _release_hold_if_clear(
                                 conn, str(client_id or ""), None, email, name,
                             )
@@ -552,6 +535,8 @@ async def run_collect_later_cycle(db_pool, app_state=None) -> int:
                             "collect_later_notice_24h",
                             "collect_later_last_nudge_at",
                             "collect_later_paused_at",
+                            "hosted_invoice_url",
+                            "stripe_invoice_id",
                         ) if data.get(k)
                     }),
                 )
