@@ -2215,6 +2215,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             m['is_default'] = m['id'] == pmId;
           }
         });
+        await _loadInvoices();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Default payment method updated'), backgroundColor: _D.bgElevated),

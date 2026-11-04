@@ -3680,25 +3680,45 @@ async def sync_promo_to_stripe(promo_id: str, request: Request):
 
 
 @router.post("/billing/retry-payment")
-async def retry_payment(req: RetryPaymentRequest):
+async def retry_payment(req: RetryPaymentRequest, request: Request):
     """Retry a failed Stripe payment."""
     if not _STRIPE_AVAILABLE:
         raise HTTPException(503, "Stripe is not configured")
 
     try:
-        # If it's an invoice, retry collection
         if req.payment_id.startswith("in_"):
-            invoice = _stripe.Invoice.retrieve(req.payment_id)
-            _stripe.Invoice.pay(invoice.id)
-            return {"status": "retried", "payment_id": req.payment_id}
+            pool = getattr(request.app.state, "db_pool", None)
+            from app.services.session_invoice_repay import pay_or_revive_open_invoice
+            result = await pay_or_revive_open_invoice(
+                pool, invoice_id=req.payment_id, charge=True,
+            )
+            if result.get("paid"):
+                return {
+                    "status": "retried",
+                    "paid": True,
+                    "payment_id": result.get("invoice_id") or req.payment_id,
+                }
+            if result.get("hosted_url"):
+                return {
+                    "status": "revived",
+                    "paid": False,
+                    "hosted_url": result.get("hosted_url"),
+                    "error": result.get("error"),
+                }
+            raise HTTPException(400, result.get("error") or "Retry failed")
 
-        # If it's a payment intent, confirm
         if req.payment_id.startswith("pi_"):
             pi = _stripe.PaymentIntent.retrieve(req.payment_id)
+            if str(getattr(pi, "status", "") or "").lower() in (
+                "canceled", "cancelled", "succeeded",
+            ):
+                raise HTTPException(400, f"PaymentIntent is {pi.status} — cannot confirm")
             _stripe.PaymentIntent.confirm(pi.id)
             return {"status": "retried", "payment_id": req.payment_id}
 
         raise HTTPException(400, "Unsupported payment ID format")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(400, f"Retry failed: {e}")
 

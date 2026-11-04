@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.services.session_invoice_repay import (
     invoice_needs_revive,
+    is_session_invoice,
     last_charged_pm_id,
     should_skip_auto_pay,
 )
@@ -53,3 +54,21 @@ def test_72h_charge_query_skips_collect_later():
     src = open(SessionPaymentAgent._run_one_cycle.__code__.co_filename, encoding="utf-8").read()
     assert "session_data->>'collect_later'" in src
     assert "charge_blocked_pm" in src
+    assert "heal_open_session_invoices" in src
+
+
+def test_is_session_invoice_not_subscription():
+    assert is_session_invoice(SimpleNamespace(metadata={"type": "session_fee"})) is True
+    assert is_session_invoice(SimpleNamespace(metadata={"session_id": "SES_1"})) is True
+    assert is_session_invoice(SimpleNamespace(metadata={"collect_later": "true"})) is True
+    assert is_session_invoice(SimpleNamespace(metadata={"type": "subscription"})) is False
+
+
+def test_admin_retry_and_portal_webhook_use_revive():
+    from pathlib import Path
+    root = Path(SessionPaymentAgent._run_one_cycle.__code__.co_filename).parents[1]
+    admin = (root / "routers" / "admin.py").read_text(encoding="utf-8")
+    stripe_src = (root / "services" / "stripe_integration.py").read_text(encoding="utf-8")
+    assert "pay_or_revive_open_invoice" in admin
+    assert "_stripe.Invoice.pay(invoice.id)" not in admin
+    assert "setup_intent.succeeded" in stripe_src

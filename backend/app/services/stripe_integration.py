@@ -1793,6 +1793,7 @@ class StripeWebhookHandler:
             'invoice.payment_failed': self._handle_payment_failed,
             'customer.subscription.updated': self._handle_subscription_updated,
             'customer.subscription.deleted': self._handle_subscription_deleted,
+            'setup_intent.succeeded': self._handle_setup_intent_succeeded,
         }
 
         handler = handlers.get(event_type)
@@ -1830,6 +1831,29 @@ class StripeWebhookHandler:
 
         return {"status": "processed", "event_type": event_type}
     
+    async def _handle_setup_intent_succeeded(self, si: Dict, event_id: str = ""):
+        """Billing Portal / Elements card save — charge any open session invoices."""
+        customer = si.get("customer")
+        if isinstance(customer, dict):
+            customer = customer.get("id")
+        if not customer:
+            return
+        try:
+            row = await self.db.fetchrow(
+                """SELECT hardware_id, username FROM users
+                    WHERE stripe_customer_id = $1
+                       OR profile_data->>'stripe_customer_id' = $1
+                    LIMIT 1""",
+                str(customer),
+            )
+            if not row:
+                return
+            uid = row["hardware_id"] or row["username"]
+            from app.services.session_collect_later import try_charge_overdue_for_user
+            await try_charge_overdue_for_user(self.db, uid)
+        except Exception:
+            _logger.exception("setup_intent.succeeded overdue charge")
+
     async def _handle_checkout_completed(self, session: Dict, event_id: str = ""):
         """Handle successful checkout."""
         

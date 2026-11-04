@@ -372,6 +372,15 @@ class SessionPaymentAgent:
             logger.warning("SessionPaymentAgent: collect-later cycle skipped: %s", e)
 
         try:
+            from app.services.session_invoice_repay import heal_open_session_invoices
+
+            n = await heal_open_session_invoices(self.db_pool)
+            if n:
+                logger.info("SessionPaymentAgent: healed %d open session invoices", n)
+        except Exception as e:
+            logger.warning("SessionPaymentAgent: open-invoice heal skipped: %s", e)
+
+        try:
             from app.services.payment_method_notices import run_payment_method_notice_cycle
 
             n = await run_payment_method_notice_cycle(self.db_pool, self.app_state)

@@ -322,6 +322,39 @@ async def pay_or_revive_open_invoice(
     return out
 
 
+def is_session_invoice(inv) -> bool:
+    """True for coaching-session invoices — never membership/subscription invoices."""
+    meta = _obj_get(inv, "metadata") or {}
+    if hasattr(meta, "to_dict"):
+        meta = meta.to_dict()
+    meta = dict(meta or {})
+    if str(meta.get("type") or "") == "session_fee":
+        return True
+    if str(meta.get("collect_later") or "").lower() in ("true", "1", "yes"):
+        return True
+    return str(meta.get("session_id") or "").startswith("SES_")
+
+
+async def heal_open_session_invoices(db) -> int:
+    """30-min safety net: revive+charge open session invoices when a usable default PM exists."""
+    if not db:
+        return 0
+    stripe = _ensure_stripe()
+    if not stripe.api_key:
+        return 0
+    paid = 0
+    try:
+        for inv in stripe.Invoice.list(status="open", limit=40).auto_paging_iter():
+            if not is_session_invoice(inv):
+                continue
+            result = await pay_or_revive_open_invoice(db, invoice_id=inv.id, charge=True)
+            if result.get("paid"):
+                paid += 1
+    except Exception as e:
+        logger.warning("heal_open_session_invoices: %s", e)
+    return paid
+
+
 async def try_charge_overdue_for_user(db, user_id: str) -> int:
     """After a card is saved/starred: revive stuck invoices and charge the new PM."""
     if not db or not user_id:
