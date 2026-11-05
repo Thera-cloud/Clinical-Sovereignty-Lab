@@ -165,7 +165,7 @@ def session_dict_from_row(row: Any, *, client_name: str = "") -> Dict[str, Any]:
     if not isinstance(sd, dict):
         sd = {}
     sid = str(d.get("session_id") or "")
-    return {
+    out = {
         "session_id": sid,
         "id": sid,
         "client_id": d.get("client_id") or "",
@@ -182,6 +182,12 @@ def session_dict_from_row(row: Any, *, client_name: str = "") -> Dict[str, Any]:
         "status": d.get("status") or "scheduled",
         "consultation_email": d.get("consultation_email") or "",
     }
+    # Billing columns ride along so a Zoom repair re-upsert can never reset a
+    # paid session to pending (2026-11-05 Blake Barnes quadruple charge).
+    for col in ("payment_status", "price_cents", "stripe_payment_intent_id"):
+        if d.get(col) not in (None, ""):
+            out[col] = d[col]
+    return out
 
 
 async def mint_session_zoom(

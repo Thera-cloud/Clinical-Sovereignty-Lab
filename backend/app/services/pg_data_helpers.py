@@ -287,6 +287,15 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
         for _consult_key in ("consultation_email", "consultation_name", "consultation_subject"):
             if session.get(_consult_key):
                 extra[_consult_key] = session[_consult_key]
+        # Billing guard: a caller echoing the row's own session_data back must not
+        # nest it (session_data.session_data…), and must never erase collected markers.
+        from app.services.session_charge_guard import (
+            PAYMENT_STATUS_GUARD_SQL,
+            SESSION_DATA_GUARD_SQL,
+            flatten_session_data_extra,
+        )
+        extra = flatten_session_data_extra(extra)
+        extra.pop("charge_claim_at", None)
         payment_status = str(session.get("payment_status") or "pending")[:32]
         try:
             price_cents = int(session.get("price_cents") or 0)
@@ -298,7 +307,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
 
         async with db_pool.acquire() as conn:
             await conn.execute(
-                """INSERT INTO coaching_sessions
+                f"""INSERT INTO coaching_sessions
                     (session_id, client_id, coach_id, family_id, client_name,
                      session_type, status, scheduled_start, scheduled_end,
                      scheduled_at, payment_due_at, cancellation_deadline,
@@ -334,11 +343,12 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      mood_at_end = EXCLUDED.mood_at_end,
                      nate_summary = EXCLUDED.nate_summary,
                      recording_url = EXCLUDED.recording_url,
-                     payment_status = EXCLUDED.payment_status,
+                     payment_status = {PAYMENT_STATUS_GUARD_SQL},
                      price_cents = COALESCE(NULLIF(EXCLUDED.price_cents, 0), coaching_sessions.price_cents, 0),
                      intake_note = EXCLUDED.intake_note,
-                     session_data = COALESCE(coaching_sessions.session_data, '{}'::jsonb)
-                                    || COALESCE(EXCLUDED.session_data, '{}'::jsonb)""",
+                     session_data = COALESCE(coaching_sessions.session_data, '{{}}'::jsonb)
+                                    || COALESCE(EXCLUDED.session_data, '{{}}'::jsonb)
+                                    || {SESSION_DATA_GUARD_SQL}""",
                 session.get("session_id"),
                 session.get("client_id", ""),
                 session.get("coach_id", ""),

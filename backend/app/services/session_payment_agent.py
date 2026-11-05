@@ -14,6 +14,17 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from app.utils.timezone_resolver import format_session_start_for_profile
+from app.services.session_charge_guard import (
+    NOT_COLLECTED_SQL,
+    amount_within_ceiling,
+    claim_charge,
+    collected_reason,
+    collection_state,
+    idempotency_key,
+    record_payment_history,
+    release_claim,
+    stripe_existing_charge,
+)
 
 logger = logging.getLogger("nate.session_payment_agent")
 
@@ -145,6 +156,7 @@ class SessionPaymentAgent:
                       OR cu.hardware_id = cs.coach_id::text
                    WHERE {_APPT_TIME} BETWEEN $1 AND $2
                    AND cs.payment_status = 'pending'
+                   AND {NOT_COLLECTED_SQL}
                    AND COALESCE(cs.price_cents, 0) > 0
                    AND COALESCE(cs.session_data->>'stripe_invoice_id', '') = ''
                    AND COALESCE(cs.session_data->>'collect_later', '') NOT IN ('true','1','yes')
@@ -166,14 +178,24 @@ class SessionPaymentAgent:
 
                 if charge_amount <= 0:
                     continue
+                if not amount_within_ceiling(charge_amount):
+                    logger.error(
+                        "SessionPaymentAgent: %s charge %s cents exceeds ceiling — refusing",
+                        session["session_id_str"], charge_amount,
+                    )
+                    await self._log_event(conn, session_id, "charge_skipped", charge_amount,
+                                          note=f"amount {charge_amount} over ceiling")
+                    continue
 
                 if stripe_customer:
+                    # Tri-state: True charged, False card failed (remind + invoice),
+                    # None = already collected / could not verify → do nothing.
                     success = await self._charge_card(
                         conn, session, stripe_customer, charge_amount
                     )
-                    if success:
+                    if success is True:
                         charged += 1
-                    else:
+                    elif success is False:
                         await self._send_payment_reminder(conn, session, charge_amount)
                         await self._ensure_open_invoice(conn, session, charge_amount)
                         reminded += 1
@@ -483,10 +505,63 @@ class SessionPaymentAgent:
         except Exception:
             pass
 
-    async def _charge_card(self, conn, session, stripe_customer_id: str, amount_cents: int) -> bool:
-        """Charge client default PM; Connect destination + app fee when coach linked; receipt email."""
+    async def _reconcile_existing_intent(self, conn, session, intent, amount_cents: int) -> None:
+        """Stripe already holds a succeeded PaymentIntent for this session but our row
+        says pending — repair the row instead of charging again."""
+        session_id = session["id"]
+        pi_id = str(getattr(intent, "id", None) or (intent.get("id") if isinstance(intent, dict) else "") or "")
+        try:
+            pi_amount = int(getattr(intent, "amount", None) or (intent.get("amount") if isinstance(intent, dict) else 0) or amount_cents)
+        except (TypeError, ValueError):
+            pi_amount = amount_cents
+        latest_charge = getattr(intent, "latest_charge", None) or (intent.get("latest_charge") if isinstance(intent, dict) else None)
+        charge_id = latest_charge if isinstance(latest_charge, str) else getattr(latest_charge, "id", None)
+        logger.error(
+            "SessionPaymentAgent: %s already collected in Stripe (%s) but row was pending — "
+            "reconciling, NOT charging again",
+            session.get("session_id_str"), pi_id,
+        )
+        await conn.execute(
+            """UPDATE coaching_sessions
+                  SET payment_status = 'paid',
+                      payment_amount_cents = COALESCE(payment_amount_cents, $2),
+                      stripe_payment_intent_id = $3,
+                      session_data = (COALESCE(session_data, '{}'::jsonb) - 'charge_claim_at')
+                                     || jsonb_build_object('billing_obligation', 'collected',
+                                                           'stripe_payment_intent_id', $3::text,
+                                                           'reconciled_from_stripe_at', NOW()::text),
+                      updated_at = NOW()
+                WHERE id = $1""",
+            session_id, pi_amount, pi_id,
+        )
+        await self._log_event(
+            conn, session_id, "charge_reconciled", pi_amount, stripe_id=pi_id,
+            note="row said pending; Stripe already succeeded — duplicate charge prevented",
+        )
+        await record_payment_history(
+            conn,
+            client_key=str(session.get("client_id") or ""),
+            intent_id=pi_id,
+            charge_id=charge_id,
+            amount_cents=pi_amount,
+            receipt_url=None,
+            metadata={"session_id": session.get("session_id_str"), "session_uuid": str(session_id),
+                      "coach_id": str(session.get("coach_id") or ""),
+                      "source": "session_payment_agent.reconcile"},
+        )
+
+    async def _charge_card(self, conn, session, stripe_customer_id: str, amount_cents: int) -> Optional[bool]:
+        """Charge client default PM; Connect destination + app fee when coach linked; receipt email.
+
+        Returns True when charged, False when the card could not be charged (caller
+        sends reminder + invoice), None when the session is already collected or
+        collection cannot be verified (caller must do nothing — never remind,
+        never invoice, never charge).
+        """
         session_id = session["id"]
         session_id_str = session.get("session_id_str") or str(session_id)
+        pm_id = ""
+        claimed = False
         try:
             import stripe
             from app.services.session_financial_records import (
@@ -499,6 +574,31 @@ class SessionPaymentAgent:
             if not stripe.api_key:
                 logger.warning("SessionPaymentAgent: STRIPE_SECRET_KEY not set")
                 return False
+
+            # Guard 1 — fresh DB truth (payment_status / PI id / obligation / ledger).
+            state = await collection_state(conn, session_id)
+            reason = collected_reason(state)
+            if reason:
+                await self._log_event(conn, session_id, "charge_skipped", amount_cents,
+                                      note=f"already collected: {reason}")
+                return None
+
+            # Guard 2 — Stripe truth, independent of our DB. Fail closed.
+            try:
+                existing = await asyncio.to_thread(
+                    stripe_existing_charge, stripe, session_id, session_id_str
+                )
+            except Exception as se:
+                logger.error(
+                    "SessionPaymentAgent: cannot verify Stripe for %s (%s) — skipping this cycle",
+                    session_id_str, se,
+                )
+                await self._log_event(conn, session_id, "charge_skipped", amount_cents,
+                                      note=f"stripe verification failed: {se}")
+                return None
+            if existing is not None:
+                await self._reconcile_existing_intent(conn, session, existing, amount_cents)
+                return None
 
             pm_id = (session.get("client_default_pm") or "").strip()
             if not pm_id:
@@ -569,7 +669,18 @@ class SessionPaymentAgent:
                 pi_kwargs["application_fee_amount"] = app_fee
                 pi_kwargs["transfer_data"] = {"destination": connect_id}
 
-            intent = stripe.PaymentIntent.create(**pi_kwargs)
+            # Guard 3 — atomic claim: only one caller per session can reach Stripe.
+            claimed = await claim_charge(conn, session_id)
+            if not claimed:
+                await self._log_event(conn, session_id, "charge_skipped", amount_cents,
+                                      note="charge claim not won — in flight elsewhere or already collected")
+                return None
+
+            # Guard 4 — Stripe idempotency: a retry can never mint a second PaymentIntent.
+            intent = stripe.PaymentIntent.create(
+                **pi_kwargs,
+                idempotency_key=idempotency_key(session_id, amount_cents, pm_id),
+            )
 
             if intent.status == "succeeded":
                 receipt_url = None
@@ -584,7 +695,8 @@ class SessionPaymentAgent:
                     """UPDATE coaching_sessions
                        SET payment_status = 'paid', payment_amount_cents = $1,
                            stripe_payment_intent_id = $2,
-                           session_data = COALESCE(session_data, '{}'::jsonb) || $4::jsonb,
+                           session_data = (COALESCE(session_data, '{}'::jsonb) - 'charge_claim_at')
+                                          || $4::jsonb,
                            updated_at = NOW()
                        WHERE id = $3""",
                     amount_cents,
@@ -632,10 +744,27 @@ class SessionPaymentAgent:
                     )
                 except Exception as le:
                     logger.warning("SessionPaymentAgent: ledger collected update failed: %s", le)
+                # Billing → History mirror (payment_history) so the charge is visible
+                # everywhere refunds/receipts are reviewed.
+                latest_charge = getattr(intent, "latest_charge", None)
+                await record_payment_history(
+                    conn,
+                    client_key=str(session.get("client_id") or ""),
+                    intent_id=intent.id,
+                    charge_id=latest_charge if isinstance(latest_charge, str) else getattr(latest_charge, "id", None),
+                    amount_cents=amount_cents,
+                    receipt_url=receipt_url,
+                    metadata={"session_id": session_id_str, "session_uuid": str(session_id),
+                              "coach_id": str(session.get("coach_id") or ""),
+                              "application_fee_cents": app_fee if connect_id else 0,
+                              "source": "session_payment_agent"},
+                )
                 return True
             else:
+                await release_claim(conn, session_id)
                 await self._log_event(
                     conn, session_id, "charge_failed", amount_cents,
+                    stripe_id=getattr(intent, "id", None),
                     error=f"Status: {intent.status}",
                 )
                 self._queue_pm_blocked(session, f"Status: {intent.status}")
@@ -646,6 +775,8 @@ class SessionPaymentAgent:
                 "SessionPaymentAgent: Stripe charge failed for session %s: %s",
                 session_id, e,
             )
+            if claimed:
+                await release_claim(conn, session_id)
             await self._log_event(conn, session_id, "charge_failed", amount_cents, error=str(e))
             self._queue_pm_blocked(session, str(e))
             try:
@@ -820,7 +951,7 @@ so it is the default.</p>
                       stripe_payment_intent_id, error_message, metadata)
                    VALUES ($1, $2, $3, $4, $5, $6::jsonb)""",
                 session_id, event_type, amount_cents, stripe_id, error,
-                f'{{"note": "{note or ""}"}}',
+                json.dumps({"note": str(note or "")[:1000]}),
             )
         except Exception as e:
             logger.warning("SessionPaymentAgent: failed to log event: %s", e)

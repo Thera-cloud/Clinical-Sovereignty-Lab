@@ -715,6 +715,15 @@ class NateCheckInAgent:
                     SELECT cs.id AS session_uuid, cs.session_id, cs.client_id, cs.coach_id,
                            cs.scheduled_start, cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
                            cs.zoom_meeting_id, cs.session_data, cs.family_id, cs.notes,
+                           cs.payment_status, cs.price_cents, cs.stripe_payment_intent_id,
+                           EXISTS (SELECT 1 FROM session_notifications sn
+                                    WHERE sn.session_id = cs.id
+                                      AND sn.notification_type = '{notif_type}'
+                                      AND sn.recipient_id = cs.client_id) AS client_reminded,
+                           EXISTS (SELECT 1 FROM session_notifications sn
+                                    WHERE sn.session_id = cs.id
+                                      AND sn.notification_type = '{notif_type}'
+                                      AND sn.recipient_id = cs.coach_id) AS coach_reminded,
                            u_client.username AS client_username,
                            u_client.profile_data AS client_profile,
                            u_coach.username AS coach_username,
@@ -755,6 +764,14 @@ class NateCheckInAgent:
                     zoom_link = safe_join_url(row["zoom_link"]) or join_from_host_path(
                         row.get("zoom_host_url") or ""
                     )
+                    # Zoom repair re-writes the session row. Only do it when a
+                    # reminder will actually go out this cycle — repeating it every
+                    # 30 min reset a paid session to pending (Blake Barnes, 2026-11-05).
+                    will_send = self._reminder_pending_for(
+                        row, client_email, client_profile, coach_email, coach_profile,
+                    )
+                    if not will_send:
+                        continue
                     try:
                         from app.services.session_zoom_repair import (
                             mint_and_persist,
@@ -860,6 +877,22 @@ class NateCheckInAgent:
         if profile.get("session_reminders") is False:
             return False
         return True
+
+    def _reminder_pending_for(self, row, client_email, client_profile,
+                              coach_email, coach_profile) -> bool:
+        """True when at least one reminder email will be sent for this row this
+        cycle — mirrors the send gates below. Used to skip side effects
+        (Zoom repair re-upsert) on already-notified sessions."""
+        def _flag(key):
+            try:
+                return bool(row[key])
+            except (KeyError, IndexError, TypeError):
+                return False
+        client_due = bool(client_email) and self._session_reminders_enabled(client_profile) \
+            and not _flag("client_reminded")
+        coach_due = bool(coach_email) and bool(self.notification_system) \
+            and self._session_reminders_enabled(coach_profile) and not _flag("coach_reminded")
+        return client_due or coach_due
 
     @staticmethod
     async def _claim_session_notification(

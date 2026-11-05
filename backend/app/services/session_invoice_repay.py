@@ -166,6 +166,34 @@ async def _persist_invoice(db, invoice, extra: Optional[Dict[str, Any]] = None) 
         await _run(db)
 
 
+async def _session_already_collected(db, invoice) -> Optional[str]:
+    """Reason string when the invoice's session is already paid via another
+    PaymentIntent, else None. DB unavailable → None (invoice path keeps its
+    own Stripe-side 'paid' idempotency)."""
+    if not db:
+        return None
+    meta = _obj_get(invoice, "metadata") or {}
+    if hasattr(meta, "to_dict"):
+        meta = meta.to_dict()
+    sid = str((meta or {}).get("session_id") or "")
+    if not sid:
+        return None
+    this_pi = _as_id(_obj_get(invoice, "payment_intent"))
+    from app.services.session_charge_guard import session_collected_elsewhere
+
+    async def _run(conn):
+        return await session_collected_elsewhere(conn, sid, this_pi)
+
+    try:
+        if hasattr(db, "acquire"):
+            async with db.acquire() as conn:
+                return await _run(conn)
+        return await _run(db)
+    except Exception as e:
+        logger.warning("_session_already_collected %s: %s", sid, e)
+        return None
+
+
 async def _mark_paid(db, invoice) -> None:
     if not db:
         return
@@ -291,6 +319,16 @@ async def pay_or_revive_open_invoice(
             stripe.Invoice.modify(_as_id(inv), default_payment_method=pm)
         except Exception as e:
             logger.info("Invoice.modify default PM %s: %s", _as_id(inv), e)
+
+    # Double-collection guard: if the linked session was already paid by a
+    # different PaymentIntent (card charge), never auto-pay this invoice too.
+    if charge and pm:
+        blocked = await _session_already_collected(db, inv)
+        if blocked:
+            out["error"] = f"double collection blocked: {blocked}"[:180]
+            out["double_collection_blocked"] = True
+            logger.error("pay_or_revive %s: %s — NOT charging", _as_id(inv), blocked)
+            charge = False
 
     if charge and pm:
         try:

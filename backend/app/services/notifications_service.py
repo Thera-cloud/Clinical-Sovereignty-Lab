@@ -1429,6 +1429,7 @@ class NotificationScheduler:
                 COALESCE(cs.scheduled_start, cs.scheduled_at) AS scheduled_at,
                 cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
                 cs.zoom_meeting_id, cs.session_data, cs.family_id, cs.notes,
+                cs.payment_status, cs.price_cents, cs.stripe_payment_intent_id,
                 COALESCE(c.profile_data->>'email', '') as client_email,
                 COALESCE(c.profile_data->>'timezone', '') as client_timezone,
                 COALESCE(coach.profile_data->>'name', coach.username) as coach_name
