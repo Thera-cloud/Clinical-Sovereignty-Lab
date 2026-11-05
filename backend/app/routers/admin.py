@@ -5768,7 +5768,7 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT user_id, character_manifest, narrative_text, biome, generated_at, panel_tone, "
-            "panel_metadata FROM sse_panel_log WHERE panel_id = $1", panel_id)
+            "panel_metadata, crystal_domains_used FROM sse_panel_log WHERE panel_id = $1", panel_id)
         if not row or row["user_id"] not in ids:
             raise HTTPException(404, "panel not found")
         owner = row["user_id"]
@@ -5776,8 +5776,8 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
             "SELECT cultural_context, spiritual_framework, archetype_hint "
             "FROM sse_identity_forge WHERE user_id = $1", owner)
         jrow = await conn.fetchrow(
-            "SELECT last_panel_npcs, last_panel_summary, panel_sequence, current_biome, neuro_scores "
-            "FROM sse_user_journeys WHERE user_id = $1", owner)
+            "SELECT last_panel_npcs, last_panel_summary, panel_sequence, current_biome, neuro_scores, "
+            "journey_metadata FROM sse_user_journeys WHERE user_id = $1", owner)
         prior_rows = await conn.fetch(
             "SELECT panel_id::text AS panel_id, character_manifest, narrative_text, biome, generated_at "
             "FROM sse_panel_log WHERE user_id = $1 AND panel_id::text <> $2 "
@@ -5857,20 +5857,136 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
         user_scores=raw_scores,
         insight=(meta.get("change_line") or ""),
     )
+    # QUANTUM-CRYSTAL-ARCH — APHL: a hypothesis figure that appeared in THIS panel
+    # gets its own Legend entry (tier "inferred", client actions) in place of the
+    # generic codex row. Opt-in state rides along so the Legend can offer the switch.
+    legend_rows = list(bundle["legend"])
+    hyp_enabled = False
+    hyp_opt_in = False
+    try:
+        from app.sse import parts_hypothesis as _ph
+        hyp_enabled = _ph.feature_enabled()
+        jmeta = _ph._load_jmeta({"journey_metadata": jrow["journey_metadata"]}) if jrow else {}
+        hyp_opt_in = jmeta.get("parts_hypothesis_opt_in") is True
+        cdu = row["crystal_domains_used"]
+        if isinstance(cdu, str):
+            cdu = json.loads(cdu)
+        hyp_refs = cdu.get("hypothesis_npcs") if isinstance(cdu, dict) else []
+        registry = jmeta.get("hypothesis_registry") or {}
+        for ref in hyp_refs or []:
+            hyp = registry.get(str((ref or {}).get("hypothesis_id") or ""))
+            if not hyp:
+                continue
+            npc = _ph.npc_from_hypothesis(hyp, hyp.get("form") or {})
+            npc["name"] = ref.get("name") or npc["name"]
+            entry = _ph.legend_entry(npc)
+            entry["status"] = hyp.get("status")
+            lname = str(entry["display_name"]).strip().lower()
+            idx = next((i for i, e in enumerate(legend_rows)
+                        if str((e or {}).get("display_name", "")).strip().lower() == lname), None)
+            if idx is None:
+                legend_rows.append(entry)
+            else:
+                legend_rows[idx] = {**legend_rows[idx], **entry}
+    except Exception as _hyp_err:  # noqa: BLE001
+        logger.warning("APHL: legend merge skipped for panel %s: %s", panel_id, _hyp_err)
     return {
         "panel_id": panel_id,
-        "legend": bundle["legend"],
+        "legend": legend_rows,
         "journey_thread": bundle["journey_thread"],
         "panel_sequence": bundle["panel_sequence"],
         "biome": bundle["biome"],
         "biome_label": bundle.get("biome_label") or bundle["biome"],
         "region": bundle.get("region") or "origin",
         "character": bundle["character"],
+        "hypothesis_enabled": hyp_enabled,
+        "hypothesis_opt_in": hyp_opt_in,
         "prior_panels": [
             {"biome": p["biome"], "character": p["character_manifest"], "generated_at": p["generated_at"]}
             for p in prior_panels
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# QUANTUM-CRYSTAL-ARCH — APHL client surface: Little Nate's wondering figures.
+# Flag-gated (ENABLE_PARTS_HYPOTHESIS) and per-client opt-in; the gate inside
+# parts_hypothesis enforces Sensitive Bridge guardrails on every manifestation.
+# ---------------------------------------------------------------------------
+
+_HYP_NATE_LINES = {
+    "confirmed": "Thank you for telling me that fits. I'll hold this figure with you — and your coach can see it now too.",
+    "banished": "Understood — that's not you. I'll set this figure down and won't bring it back for a while.",
+    "engaged": "I'll keep wondering alongside you. Watch for this figure again in a few panels.",
+}
+
+
+def _hyp_identity(_user: dict):
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or ""
+    return uid, uname
+
+
+@sse_client_router.get("/hypothesis/current")
+async def sse_client_hypothesis_current(request: Request, _user: dict = Depends(_sse_auth)):
+    """The one figure Nate is currently wondering about for this client (if any),
+    shaped as a Legend entry, plus the client's opt-in state."""
+    pool = request.app.state.db_pool
+    uid, uname = _hyp_identity(_user)
+    from app.sse import parts_hypothesis as ph
+    _, ids = await ph._resolve_identity(pool, uid, uname)
+    juid, jmeta = await ph._load_journey_row(pool, ids)
+    figure = None
+    hyp = ph.current_hypothesis(jmeta)
+    if hyp:
+        figure = ph.legend_entry(ph.npc_from_hypothesis(hyp, hyp.get("form") or {}))
+        figure["status"] = hyp.get("status")
+        figure["appearances"] = int(hyp.get("appearances") or 0)
+    return {
+        "enabled": ph.feature_enabled(),
+        "opt_in": jmeta.get("parts_hypothesis_opt_in") is True,
+        "has_journey": juid is not None,
+        "figure": figure,
+    }
+
+
+@sse_client_router.post("/hypothesis/opt-in")
+async def sse_client_hypothesis_opt_in(request: Request, _user: dict = Depends(_sse_auth)):
+    """Client consent switch: {"opt_in": true|false}. Requires an active journey."""
+    pool = request.app.state.db_pool
+    uid, uname = _hyp_identity(_user)
+    body = await request.json()
+    value = bool(body.get("opt_in", True))
+    from app.sse import parts_hypothesis as ph
+    res = await ph.set_opt_in(pool, uid, value, username=uname)
+    if not res.get("ok"):
+        if res.get("reason") == "no_journey":
+            raise HTTPException(409, "Begin your Thera-World journey before letting Nate wonder")
+        raise HTTPException(503, "Could not save your choice right now")
+    res["enabled"] = ph.feature_enabled()
+    return res
+
+
+@sse_client_router.post("/hypothesis/engage")
+async def sse_client_hypothesis_engage(request: Request, _user: dict = Depends(_sse_auth)):
+    """Legend actions: {"hypothesis_id": ..., "kind": "confirm"|"banish"|"curious"}.
+    'confirm' promotes to the Sensitive Bridge registry (PENDING_APPROVAL, consent-gated)
+    and forges a user-scoped crystal; 'banish' starts the 30-day category cooldown."""
+    pool = request.app.state.db_pool
+    uid, uname = _hyp_identity(_user)
+    body = await request.json()
+    hypothesis_id = str(body.get("hypothesis_id") or "").strip()
+    raw_kind = str(body.get("kind") or "").strip().lower()
+    from app.sse import parts_hypothesis as ph
+    kind = ph.ENGAGEMENT_ALIASES.get(raw_kind, raw_kind)
+    if not hypothesis_id or kind not in ("confirmed", "banished", "engaged"):
+        raise HTTPException(422, "hypothesis_id and kind (confirm | banish | curious) are required")
+    res = await ph.record_engagement(uid, hypothesis_id, kind, pool,
+                                     note=str(body.get("note") or "")[:280], username=uname)
+    if not res.get("ok"):
+        raise HTTPException(404, "that figure is not in your story")
+    res["nate_line"] = _HYP_NATE_LINES.get(kind, "")
+    return res
 
 @sse_client_router.get("/codex/symbols")
 async def sse_client_codex_symbols(request: Request, _user: dict = Depends(_sse_auth)):

@@ -868,10 +868,14 @@ async def compose_journey_narrative(
 
     # FIX #6: recurring NPC companions forged from crystal clusters
     npc_block = ""
-    if todays_npcs:
+    # QUANTUM-CRYSTAL-ARCH — APHL: hypothesis figures get their own tentative block,
+    # never the "RECURRING COMPANIONS" framing (they are Nate's wondering, not a known presence).
+    _hyp_npcs = [n for n in (todays_npcs or []) if n.get("provenance") == "inferred"]
+    _companion_npcs = [n for n in (todays_npcs or []) if n.get("provenance") != "inferred"]
+    if _companion_npcs:
         npc_lines = "\n".join(
             f"- {n['name']} ({n['role']}): {n['visual_prompt_fragment']}"
-            for n in todays_npcs if n.get("name")
+            for n in _companion_npcs if n.get("name")
         )
         npc_block = (
             "RECURRING COMPANIONS (these named figures travel with the protagonist and MUST "
@@ -879,6 +883,12 @@ async def compose_journey_narrative(
             f"{npc_lines}\n"
             "Refer to them by name in the narrative. They are familiar presences, not strangers.\n"
         )
+    if _hyp_npcs:
+        try:
+            from app.sse.parts_hypothesis import hypothesis_block as _hyp_block
+            npc_block += _hyp_block(_hyp_npcs)
+        except Exception as _hyp_err:  # noqa: BLE001
+            logger.warning("APHL: hypothesis block skipped for %s: %s", user_id, _hyp_err)
 
     # Phase 6: family context enrichment
     family_block = ""
@@ -1137,6 +1147,13 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     deep_ctx = await _fetch_deep_crystal_context(user_id, profile, db_pool)
     chapter = await _get_chapter_summary(user_id, journey, profile, db_pool)
     crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
+    # QUANTUM-CRYSTAL-ARCH — APHL hook (preview path): flag + per-user opt-in gated inside
+    if os.getenv("ENABLE_PARTS_HYPOTHESIS", "false").lower() == "true":
+        try:
+            from app.sse.parts_hypothesis import derive_hypothesis_npcs as _derive_hyp
+            crystal_npcs = list(crystal_npcs) + await _derive_hyp(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
+        except Exception as _hyp_err:  # noqa: BLE001
+            logger.warning("APHL preview hook skipped for %s: %s", user_id, _hyp_err)
 
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     narrative = await compose_journey_narrative(
@@ -1331,6 +1348,13 @@ async def generate_journey_panel(user_id: str, db_pool, *, replace_today: bool =
     crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
     if neuro_ctx:
         crystal_npcs = list(neuro_ctx["npcs"])  # visiting champions replace Origin NPC cast today
+    # QUANTUM-CRYSTAL-ARCH — APHL hook (live path): flag + per-user opt-in gated inside; Origin only
+    if not neuro_ctx and os.getenv("ENABLE_PARTS_HYPOTHESIS", "false").lower() == "true":
+        try:
+            from app.sse.parts_hypothesis import derive_hypothesis_npcs as _derive_hyp
+            crystal_npcs = list(crystal_npcs) + await _derive_hyp(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
+        except Exception as _hyp_err:  # noqa: BLE001
+            logger.warning("APHL live hook skipped for %s: %s", user_id, _hyp_err)
 
     recent_nar = await _fetch_recent_delivery_narratives(user_id, db_pool)  # FIX-NARRATIVE-DIVERSITY
     neuro_bible = ""
@@ -1509,6 +1533,11 @@ async def generate_journey_panel(user_id: str, db_pool, *, replace_today: bool =
                 json.dumps({
                     "domains": profile.get("top_domains", []),
                     "themes": profile.get("top_themes", []),
+                    # QUANTUM-CRYSTAL-ARCH — APHL provenance (empty unless a hypothesis figure appeared)
+                    "hypothesis_npcs": [
+                        {"name": n.get("name"), "hypothesis_id": n.get("hypothesis_id"),
+                         "category": n.get("category"), "confidence": n.get("confidence")}
+                        for n in (crystal_npcs or []) if n.get("provenance") == "inferred"],
                 }))
             _panel_saved = True
             await conn.execute(

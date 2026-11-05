@@ -2452,6 +2452,25 @@ async def update_part(
                 user_id,
             )
 
+    # QUANTUM-CRYSTAL-ARCH — APHL: a coach decision on a Thera-World wondering
+    # (origin thera_world_hypothesis) flows back to the hypothesis it came from.
+    thera_world_sync: Optional[Dict[str, Any]] = None
+    if "coaching_status" in updates:
+        try:
+            async with db_pool.acquire() as conn:
+                origin = await conn.fetchval(
+                    "SELECT origin FROM user_parts_registry WHERE id = $1 AND user_id = $2",
+                    part_id, user_id,
+                )
+            if origin == "thera_world_hypothesis":
+                from app.sse.parts_hypothesis import sync_coach_decision
+                thera_world_sync = await sync_coach_decision(
+                    db_pool, user_id, part_id, str(body.coaching_status or ""),
+                    notes=str(body.coaching_status_notes or ""),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("sensitive_profile: thera-world sync skipped for %s/%s: %s", user_id, part_id, e)
+
     await _emit_profile_mutation_audit(
         db_pool,
         target_user_id=user_id,
@@ -2463,7 +2482,60 @@ async def update_part(
             "fields_patched": sorted(updates.keys()),
         },
     )
-    return {"ok": True, "id": part_id}
+    out: Dict[str, Any] = {"ok": True, "id": part_id}
+    if thera_world_sync is not None:
+        out["thera_world_sync"] = thera_world_sync
+    return out
+
+
+@coach_router.get("/{user_id}/thera-world-wonderings")
+async def list_thera_world_wonderings(
+    user_id: str,
+    request: Request,
+    principal: Dict = Depends(require_clinician_for_user),
+):
+    """QUANTUM-CRYSTAL-ARCH — APHL coach view: every figure Little Nate has wondered
+    about for this client in Thera-World, with the coach-only clinical translation,
+    its lifecycle status, and the registry part it was promoted to (if confirmed)."""
+    db_pool = request.app.state.db_pool
+    if db_pool is None:
+        raise HTTPException(503, detail={"reason": "database_unavailable"})
+    from app.sse import parts_hypothesis as ph
+    _, ids = await ph._resolve_identity(db_pool, user_id, user_id)
+    juid, jmeta = await ph._load_journey_row(db_pool, ids)
+    registry = jmeta.get("hypothesis_registry") or {}
+    items: List[Dict[str, Any]] = []
+    for hid, hyp in registry.items():
+        if not isinstance(hyp, dict):
+            continue
+        entry = ph.legend_entry(ph.npc_from_hypothesis(hyp, hyp.get("form") or {}), coach_view=True)
+        items.append({
+            "hypothesis_id": hid,
+            "name": entry["display_name"],
+            "status": hyp.get("status"),
+            "question": hyp.get("question", ""),
+            "figure_in_panel": entry.get("figure_in_panel", ""),
+            "clinical_translation": entry.get("clinical_translation") or {},
+            "evidence_channels": hyp.get("channels") or hyp.get("evidence_channels"),
+            "appearances": int(hyp.get("appearances") or 0),
+            "registry_part_id": hyp.get("registry_part_id"),
+            "coach_status": hyp.get("coach_status"),
+            "created_at": hyp.get("created_at"),
+            "confirmed_at": hyp.get("confirmed_at"),
+            "banished_at": hyp.get("banished_at"),
+            "held_at": hyp.get("held_at"),
+        })
+    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "enabled": ph.feature_enabled(),
+        "opt_in": jmeta.get("parts_hypothesis_opt_in") is True,
+        "has_journey": juid is not None,
+        "count": len(items),
+        "wonderings": items,
+        "ledger": list(jmeta.get("hypothesis_ledger") or [])[-20:],
+    }
 
 
 @coach_router.delete("/{user_id}/parts-registry/{part_id}")

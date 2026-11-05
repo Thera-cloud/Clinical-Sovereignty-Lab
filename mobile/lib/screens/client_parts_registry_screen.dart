@@ -414,37 +414,56 @@ class _ClientPartsRegistryScreenState extends State<ClientPartsRegistryScreen> {
                     final p = _visibleParts[idx];
                     final origin = p['origin']?.toString() ?? 'sensitive_bridge';
                     final status = p['coaching_status']?.toString() ?? 'APPROVED';
+                    // APHL: a figure Little Nate wondered about in Thera-World that the
+                    // client confirmed ("that fits"). Coach decides whether the chat voice may use it.
+                    final isTheraWorld = origin == 'thera_world_hypothesis';
+                    final originLabel = isTheraWorld ? "Nate's wondering (Thera-World)" : origin;
                     return Card(
                       color: const Color(0xFF111111),
                       child: ListTile(
+                        leading: isTheraWorld
+                            ? const Tooltip(
+                                message:
+                                    'Inferred by Little Nate in Thera-World and confirmed by the client. '
+                                    'Approve to let the chat voice use it; Hold to pause; Not a fit to retire.',
+                                child: Icon(Icons.auto_awesome, color: Color(0xFF4ECDC4)),
+                              )
+                            : null,
                         title: Text(
                           '${p['part_name']}',
                           style: const TextStyle(color: Color(0xFFC9A962)),
                         ),
                         subtitle: Text(
                           '${p['part_category']} · IFS ${p['ifs_role'] ?? p['part_category']} · '
-                          '#${p['part_number']} · $origin · $status',
+                          '#${p['part_number']} · $originLabel · $status',
                           style: TextStyle(
                             color: status == 'PENDING_APPROVAL'
                                 ? Colors.orangeAccent
-                                : Colors.white54,
+                                : (isTheraWorld ? const Color(0xFF4ECDC4) : Colors.white54),
                           ),
                         ),
                         trailing: Wrap(
                           spacing: 4,
                           children: [
-                            if (origin == 'training_ground' &&
-                                status == 'PENDING_APPROVAL') ...[
+                            if ((origin == 'training_ground' || isTheraWorld) &&
+                                (status == 'PENDING_APPROVAL' || status == 'HOLD')) ...[
                               IconButton(
                                 tooltip: 'Approve',
                                 icon: const Icon(Icons.check, color: Colors.greenAccent),
                                 onPressed: () => _patchCoachingStatus(p, 'APPROVED'),
                               ),
-                              IconButton(
-                                tooltip: 'Hold',
-                                icon: const Icon(Icons.pause, color: Colors.orangeAccent),
-                                onPressed: () => _patchCoachingStatus(p, 'HOLD'),
-                              ),
+                              if (status != 'HOLD')
+                                IconButton(
+                                  tooltip: 'Hold',
+                                  icon: const Icon(Icons.pause, color: Colors.orangeAccent),
+                                  onPressed: () => _patchCoachingStatus(p, 'HOLD'),
+                                ),
+                              if (isTheraWorld)
+                                IconButton(
+                                  tooltip: 'Not a fit (retire, 30-day cooldown in Thera-World)',
+                                  icon: const Icon(Icons.block, color: Colors.redAccent),
+                                  onPressed: () => _patchCoachingStatus(p, 'REJECTED'),
+                                ),
                             ],
                             IconButton(
                               tooltip: 'Edit part',
