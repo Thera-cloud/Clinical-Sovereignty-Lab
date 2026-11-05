@@ -2530,7 +2530,10 @@ async def list_thera_world_wonderings(
         "ok": True,
         "user_id": user_id,
         "enabled": ph.feature_enabled(),
-        "opt_in": jmeta.get("parts_hypothesis_opt_in") is True,
+        # Client visibility switch (ON by default). False = client hid Nate's wondering
+        # from their imagery; Nate still considers and these rows still reach the coach.
+        "opt_in": ph.imagery_visible(jmeta),
+        "client_visibility": "on" if ph.imagery_visible(jmeta) else "off",
         "has_journey": juid is not None,
         "count": len(items),
         "wonderings": items,

@@ -1147,7 +1147,8 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
     deep_ctx = await _fetch_deep_crystal_context(user_id, profile, db_pool)
     chapter = await _get_chapter_summary(user_id, journey, profile, db_pool)
     crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
-    # QUANTUM-CRYSTAL-ARCH — APHL hook (preview path): flag + per-user opt-in gated inside
+    # QUANTUM-CRYSTAL-ARCH — APHL hook (preview path): flag + safety gate inside; client Legend
+    # switch (default ON) only hides the figure from imagery — Nate still considers when off
     if os.getenv("ENABLE_PARTS_HYPOTHESIS", "false").lower() == "true":
         try:
             from app.sse.parts_hypothesis import derive_hypothesis_npcs as _derive_hyp
@@ -1348,7 +1349,8 @@ async def generate_journey_panel(user_id: str, db_pool, *, replace_today: bool =
     crystal_npcs = await _derive_crystal_npcs(user_id, profile, journey, db_pool, panel_sequence=panel_seq)
     if neuro_ctx:
         crystal_npcs = list(neuro_ctx["npcs"])  # visiting champions replace Origin NPC cast today
-    # QUANTUM-CRYSTAL-ARCH — APHL hook (live path): flag + per-user opt-in gated inside; Origin only
+    # QUANTUM-CRYSTAL-ARCH — APHL hook (live path): flag + safety gate inside; client Legend switch
+    # (default ON) only hides the figure from imagery — Nate still considers when off; Origin only
     if not neuro_ctx and os.getenv("ENABLE_PARTS_HYPOTHESIS", "false").lower() == "true":
         try:
             from app.sse.parts_hypothesis import derive_hypothesis_npcs as _derive_hyp

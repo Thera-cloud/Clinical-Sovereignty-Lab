@@ -5867,7 +5867,7 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
         from app.sse import parts_hypothesis as _ph
         hyp_enabled = _ph.feature_enabled()
         jmeta = _ph._load_jmeta({"journey_metadata": jrow["journey_metadata"]}) if jrow else {}
-        hyp_opt_in = jmeta.get("parts_hypothesis_opt_in") is True
+        hyp_opt_in = _ph.imagery_visible(jmeta)  # default ON; False only if the client flipped it off
         cdu = row["crystal_domains_used"]
         if isinstance(cdu, str):
             cdu = json.loads(cdu)
@@ -5930,21 +5930,26 @@ def _hyp_identity(_user: dict):
 @sse_client_router.get("/hypothesis/current")
 async def sse_client_hypothesis_current(request: Request, _user: dict = Depends(_sse_auth)):
     """The one figure Nate is currently wondering about for this client (if any),
-    shaped as a Legend entry, plus the client's opt-in state."""
+    shaped as a Legend entry, plus the client's visibility switch. Visibility is
+    ON by default; when the client flipped it off Nate still considers
+    (``considering`` = True) but ``figure`` is withheld from the client surface."""
     pool = request.app.state.db_pool
     uid, uname = _hyp_identity(_user)
     from app.sse import parts_hypothesis as ph
     _, ids = await ph._resolve_identity(pool, uid, uname)
     juid, jmeta = await ph._load_journey_row(pool, ids)
+    visible = ph.imagery_visible(jmeta)
     figure = None
     hyp = ph.current_hypothesis(jmeta)
-    if hyp:
+    if hyp and visible:
         figure = ph.legend_entry(ph.npc_from_hypothesis(hyp, hyp.get("form") or {}))
         figure["status"] = hyp.get("status")
         figure["appearances"] = int(hyp.get("appearances") or 0)
     return {
         "enabled": ph.feature_enabled(),
-        "opt_in": jmeta.get("parts_hypothesis_opt_in") is True,
+        "opt_in": visible,
+        "show_in_panels": visible,
+        "considering": hyp is not None,
         "has_journey": juid is not None,
         "figure": figure,
     }
@@ -5952,7 +5957,9 @@ async def sse_client_hypothesis_current(request: Request, _user: dict = Depends(
 
 @sse_client_router.post("/hypothesis/opt-in")
 async def sse_client_hypothesis_opt_in(request: Request, _user: dict = Depends(_sse_auth)):
-    """Client consent switch: {"opt_in": true|false}. Requires an active journey."""
+    """Client visibility switch: {"opt_in": true|false} (ON by default). ``false``
+    hides Nate's wondering from Thera-World imagery; Nate keeps considering and the
+    coach keeps full authority. Requires an active journey."""
     pool = request.app.state.db_pool
     uid, uname = _hyp_identity(_user)
     body = await request.json()
@@ -5961,9 +5968,10 @@ async def sse_client_hypothesis_opt_in(request: Request, _user: dict = Depends(_
     res = await ph.set_opt_in(pool, uid, value, username=uname)
     if not res.get("ok"):
         if res.get("reason") == "no_journey":
-            raise HTTPException(409, "Begin your Thera-World journey before letting Nate wonder")
+            raise HTTPException(409, "Begin your Thera-World journey before changing how Nate wonders")
         raise HTTPException(503, "Could not save your choice right now")
     res["enabled"] = ph.feature_enabled()
+    res["show_in_panels"] = bool(value)
     return res
 
 

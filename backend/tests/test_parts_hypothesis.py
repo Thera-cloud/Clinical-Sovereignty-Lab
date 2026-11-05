@@ -36,12 +36,54 @@ def test_crystal_texts_do_not_inflate_sessions():
     assert ev["sessions_by_category"].get("protector_watch", []) == []
 
 
-def test_gate_requires_flag_and_opt_in():
+def test_gate_requires_flag_not_client_switch():
     ev = ph.mine_parts_evidence(_synthetic_sessions())
     assert ph.eligibility_gate({}, {}, ev, flag_enabled=False)["reason"] == "feature_flag_off"
-    assert ph.eligibility_gate({}, {}, ev, flag_enabled=True)["reason"] == "user_not_opted_in"
-    ok = ph.eligibility_gate({}, {"parts_hypothesis_opt_in": True}, ev, flag_enabled=True)
-    assert ok.allowed and ok["mode"] == "full"
+    # Visibility is ON by default and is never a gate: Nate considers even when hidden.
+    for jm in ({}, {"parts_hypothesis_opt_in": True}, {"parts_hypothesis_opt_in": False}):
+        ok = ph.eligibility_gate({}, jm, ev, flag_enabled=True)
+        assert ok.allowed and ok["mode"] == "full"
+    assert ph.imagery_visible({}) is True
+    assert ph.imagery_visible(None) is True
+    assert ph.imagery_visible({"parts_hypothesis_opt_in": True}) is True
+    assert ph.imagery_visible({"parts_hypothesis_opt_in": False}) is False
+
+
+def test_run_loop_hidden_still_considers_but_never_manifests():
+    bundle = {
+        "texts": _synthetic_sessions(),
+        "c_emo": [{"c_emo": 0.8, "session_id": "s1"}, {"c_emo": 0.5, "session_id": "s1"},
+                  {"c_emo": 0.7, "session_id": "s3"}, {"c_emo": 0.4, "session_id": "s3"}],
+        "behavior": [], "presenting_concern": "I get anxious and can't trust that people will stay",
+        "enrollment": None, "parts_registry": [],
+    }
+    # Client flipped the Legend switch off → hypothesis is formed + kept, but no NPC / no appearance.
+    hidden = asyncio.run(ph.run_loop("u1", {}, {"parts_hypothesis_opt_in": False}, bundle,
+                                     panel_sequence=4, llm=None, posture={}, flag_enabled=True))
+    assert hidden["gate"]["allowed"] and hidden["manifest"] is False
+    assert hidden["npc"] is None and hidden["reason"] == "client_visibility_off"
+    hid = hidden["formed"]
+    kept = hidden["registry"][hid]
+    assert kept["status"] == "proposed" and kept["appearances"] == 0 and "last_shown_seq" not in kept
+    assert kept["form"]  # form chosen once so the coach sees the same figure the client later will
+    # Next panel, still hidden → same wondering is held, nothing new synthesised, still no NPC.
+    jm_off = {"parts_hypothesis_opt_in": False, "hypothesis_registry": hidden["registry"]}
+    again = asyncio.run(ph.run_loop("u1", {}, jm_off, bundle, panel_sequence=5, llm=None, posture={}, flag_enabled=True))
+    assert again["npc"] is None and again["reason"] == "client_visibility_off"
+    assert "formed" not in again and list(again["registry"]) == [hid]
+    # Client flips it back on → the kept wondering manifests immediately (never shown before), same id/form.
+    jm_on = {"parts_hypothesis_opt_in": True, "hypothesis_registry": again["registry"]}
+    shown = asyncio.run(ph.run_loop("u1", {}, jm_on, bundle, panel_sequence=6, llm=None, posture={}, flag_enabled=True))
+    assert shown["npc"] and shown["npc"]["hypothesis_id"] == hid and shown["manifest"] is True
+    assert shown["registry"][hid]["appearances"] == 1 and shown["registry"][hid]["last_shown_seq"] == 6
+    assert shown["npc"]["name"] == kept["form"]["name"]
+    # Absent key == default ON.
+    dflt = asyncio.run(ph.run_loop("u2", {}, {}, bundle, panel_sequence=4, llm=None, posture={}, flag_enabled=True))
+    assert dflt["manifest"] is True and dflt["npc"] is not None
+    # Coach authority still silences everything, hidden or not.
+    held = asyncio.run(ph.run_loop("u1", {"_coaching_calibration": {"coach_hold_active": True}}, jm_off, bundle,
+                                   panel_sequence=7, llm=None, posture={}, flag_enabled=True))
+    assert held["npc"] is None and held["gate"]["reason"] == "coach_hold_active" and "registry" not in held
 
 
 def test_gate_clinical_denials():
@@ -479,3 +521,49 @@ def test_run_loop_defers_on_safety_bundle():
     trace = asyncio.run(ph.run_loop("u1", {}, {"parts_hypothesis_opt_in": True}, bundle,
                                     panel_sequence=4, llm=None, posture={}, flag_enabled=True))
     assert trace["npc"] is None and trace["gate"]["reason"] == "safe_silence_active"
+
+
+def test_engine_hook_hidden_persists_wondering_but_injects_nothing(monkeypatch):
+    """Client switch off → derive_hypothesis_npcs returns [] (nothing in the panel)
+    yet persists the formed wondering so the coach can see/act on it; switched on →
+    the same wondering manifests (no re-synthesis) and gets its first appearance."""
+    bundle = {
+        "texts": _synthetic_sessions(),
+        "c_emo": [{"c_emo": 0.8, "session_id": "s1"}, {"c_emo": 0.5, "session_id": "s1"},
+                  {"c_emo": 0.7, "session_id": "s3"}, {"c_emo": 0.4, "session_id": "s3"}],
+        "behavior": [], "presenting_concern": "I get anxious and can't trust that people will stay",
+        "enrollment": None, "parts_registry": [], "safety": {},
+    }
+
+    async def fake_collect(user_id, db_pool, username=""):
+        return dict(bundle)
+
+    async def _no_llm(*_a, **_k):          # offline: template synthesis path
+        return None
+
+    monkeypatch.setenv(ph.FEATURE_FLAG, "true")
+    monkeypatch.setattr(ph, "collect_evidence", fake_collect)
+    pool = _FakePool([])
+    journey_off = {"journey_metadata": _json.dumps({"parts_hypothesis_opt_in": False})}
+    npcs = asyncio.run(ph.derive_hypothesis_npcs("CLIENT_JANE_ID", {"username": "jane"}, journey_off, pool,
+                                                 panel_sequence=4, llm=_no_llm))
+    assert npcs == []
+    persist = [c for c in pool.conn.calls if c[0] == "execute" and "UPDATE sse_user_journeys" in c[1]]
+    assert len(persist) == 1
+    saved = _json.loads(persist[0][2][0])
+    (hid, kept), = saved["hypothesis_registry"].items()
+    assert kept["status"] == "proposed" and kept["appearances"] == 0 and kept["form"]["name"]
+    # Flip back on with that persisted registry → manifests, same id, appearance counted.
+    pool_on = _FakePool([])
+    journey_on = {"journey_metadata": _json.dumps({"parts_hypothesis_opt_in": True,
+                                                   "hypothesis_registry": saved["hypothesis_registry"]})}
+    shown = asyncio.run(ph.derive_hypothesis_npcs("CLIENT_JANE_ID", {"username": "jane"}, journey_on, pool_on,
+                                                  panel_sequence=5, llm=_no_llm))
+    assert len(shown) == 1 and shown[0]["hypothesis_id"] == hid and shown[0]["name"] == kept["form"]["name"]
+    saved_on = _json.loads([c for c in pool_on.conn.calls if "UPDATE sse_user_journeys" in c[1]][0][2][0])
+    assert saved_on["hypothesis_registry"][hid]["appearances"] == 1
+    # Default (key absent) == ON: injects on first eligible panel.
+    pool_dflt = _FakePool([])
+    dflt = asyncio.run(ph.derive_hypothesis_npcs("CLIENT_JANE_ID", {"username": "jane"}, {"journey_metadata": "{}"}, pool_dflt,
+                                                 panel_sequence=4, llm=_no_llm))
+    assert len(dflt) == 1 and dflt[0]["provenance"] == "inferred"

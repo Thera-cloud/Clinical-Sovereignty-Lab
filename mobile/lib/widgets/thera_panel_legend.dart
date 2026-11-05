@@ -269,14 +269,19 @@ void showTheraPanelLegend({
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                     activeColor: const Color(0xFF4ECDC4),
                     value: hypOptIn,
-                    title: const Text(
-                      'Let Nate wonder about figures in your story',
-                      style: TextStyle(color: Colors.white, fontSize: 13),
+                    title: Text(
+                      hypOptIn
+                          ? 'Show the figures Nate wonders about'
+                          : 'Nate is wondering quietly',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
                     ),
-                    subtitle: const Text(
-                      'Every few panels Nate may add one figure he is curious about. '
-                      'You can always say "that\'s not me".',
-                      style: TextStyle(color: Color(0xFF888888), fontSize: 11, height: 1.35),
+                    subtitle: Text(
+                      hypOptIn
+                          ? 'Every few panels Nate may add one figure he is curious about. '
+                              'You can always say "that\'s not me", or switch this off.'
+                          : 'Nothing new appears in your panels while this is off. '
+                              'Switch it back on whenever you want to see what Nate is wondering.',
+                      style: const TextStyle(color: Color(0xFF888888), fontSize: 11, height: 1.35),
                     ),
                     onChanged: optInBusy
                         ? null

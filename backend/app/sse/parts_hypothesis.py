@@ -10,8 +10,12 @@ intake or named it in chat.
 
 Design constraints (all enforced here, not by the LLM):
 
-* Feature flag ``ENABLE_PARTS_HYPOTHESIS`` (default off) AND per-user opt-in
-  ``journey_metadata.parts_hypothesis_opt_in == true``.
+* Feature flag ``ENABLE_PARTS_HYPOTHESIS`` (default off) gates the whole loop.
+  Per-client visibility ``journey_metadata.parts_hypothesis_opt_in`` is ON by
+  default; only an explicit ``false`` (the client flipped the Legend switch off)
+  hides Nate's wondering. Hidden ≠ stopped: Nate still considers, forms and
+  keeps hypotheses (coach sees them) — nothing enters panel imagery until the
+  client flips it back on. Coach HOLD / REJECTED / APPROVED keep full authority.
 * A hypothesis needs >= 2 evidence channels and >= 3 distinct sessions.
   Confidence is capped at 0.49 — it is never promoted to a "known" truth here.
 * Provenance is always ``inferred``; registry lives in
@@ -54,6 +58,15 @@ MAX_ACTIVE_HYPOTHESES = 1
 
 def feature_enabled() -> bool:
     return os.getenv(FEATURE_FLAG, "false").strip().lower() in ("1", "true", "yes", "on")
+
+
+def imagery_visible(journey_meta: Optional[dict]) -> bool:
+    """Client-side visibility switch — ON unless the client explicitly flipped it
+    off (``parts_hypothesis_opt_in == False``). Governs manifestation only
+    (panel prompt injection, Legend card, ``/hypothesis/current`` figure); the
+    considering loop runs either way."""
+    jm = journey_meta if isinstance(journey_meta, dict) else {}
+    return jm.get("parts_hypothesis_opt_in") is not False
 
 
 # ---------------------------------------------------------------------------
@@ -324,9 +337,8 @@ def eligibility_gate(profile: dict, journey_meta: dict, evidence: dict,
     enabled = feature_enabled() if flag_enabled is None else flag_enabled
     if not enabled:
         return GateDecision(allowed=False, reason="feature_flag_off", mode=None)
-    jm = journey_meta if isinstance(journey_meta, dict) else {}
-    if jm.get("parts_hypothesis_opt_in") is not True:
-        return GateDecision(allowed=False, reason="user_not_opted_in", mode=None)
+    # NOTE: the client's Legend switch (imagery_visible) is deliberately NOT a gate —
+    # it only decides whether a formed hypothesis manifests (see run_loop ``manifest``).
 
     coach = profile.get("_coaching_calibration") or {}
     if coach.get("coach_hold_active"):
@@ -1171,11 +1183,20 @@ async def _persist_registry(user_id: str, db_pool, registry: Dict[str, dict], le
 async def run_loop(user_id: str, profile: dict, journey_meta: dict, bundle: dict,
                    panel_sequence: int = 0, llm: Optional[Callable] = None,
                    posture: Optional[Dict[str, str]] = None,
-                   flag_enabled: Optional[bool] = None) -> Dict[str, Any]:
+                   flag_enabled: Optional[bool] = None,
+                   manifest: Optional[bool] = None) -> Dict[str, Any]:
     """Pure-ish orchestration (no DB): bundle → gate → evidence → candidate →
     hypothesis → form → NPC. Returns a trace dict; ``npc`` is None when nothing
-    manifests. Used by the engine hook and by the offline replay harness."""
+    manifests. Used by the engine hook and by the offline replay harness.
+
+    ``manifest`` (default: :func:`imagery_visible` of ``journey_meta``) — when
+    False the loop still considers: it forms/keeps the hypothesis in
+    ``trace["registry"]`` (``trace["formed"]`` set on a new one) but returns no
+    NPC and does not count an appearance, so nothing reaches panel imagery."""
     trace: Dict[str, Any] = {"user_id": user_id, "npc": None}
+    if manifest is None:
+        manifest = imagery_visible(journey_meta)
+    trace["manifest"] = bool(manifest)
     evidence = mine_parts_evidence(bundle.get("texts") or [])
     trace["evidence"] = {k: v for k, v in evidence.items() if k != "hits"}
     trace["evidence"]["hit_count"] = len(evidence.get("hits") or [])
@@ -1218,9 +1239,20 @@ async def run_loop(user_id: str, profile: dict, journey_meta: dict, bundle: dict
                 return trace
         form = select_form(hyp, posture=posture, variety_seed=panel_sequence)
         hyp["form"] = form
+        hyp.setdefault("appearances", 0)
         registry[hyp["hypothesis_id"]] = hyp
+        trace["formed"] = hyp["hypothesis_id"]
         today = hyp
     form = today.get("form") or select_form(today, posture=posture, variety_seed=panel_sequence)
+    if not manifest:
+        # Client flipped the Legend switch off: Nate keeps the wondering (coach can
+        # see/act on it) but it never enters imagery and no appearance is counted.
+        trace["reason"] = "client_visibility_off"
+        trace["hypothesis"] = {k: v for k, v in today.items() if k != "form"}
+        trace["form"] = form
+        trace["registry"] = registry
+        trace["ledger"] = ledger
+        return trace
     npc = npc_from_hypothesis(today, form)
     today["appearances"] = int(today.get("appearances", 0)) + 1
     today["last_shown_seq"] = panel_sequence
@@ -1235,14 +1267,15 @@ async def run_loop(user_id: str, profile: dict, journey_meta: dict, bundle: dict
 
 async def derive_hypothesis_npcs(user_id: str, profile: dict, journey: dict, db_pool,
                                  panel_sequence: int = 0, llm: Optional[Callable] = None) -> List[dict]:
-    """Engine hook. Returns [] unless the flag is on, the user opted in, the gate
-    passes and a hypothesis is eligible today. Never raises."""
+    """Engine hook. Returns [] unless the flag is on, the gate passes, a hypothesis
+    is eligible today AND the client has not flipped visibility off. With
+    visibility off the loop still runs and persists what Nate is wondering
+    (``formed``) — it just never reaches the panel. Never raises."""
     try:
         if not feature_enabled():
             return []
         jmeta = _load_jmeta(journey)
-        if jmeta.get("parts_hypothesis_opt_in") is not True:
-            return []
+        visible = imagery_visible(jmeta)
         bundle = await collect_evidence(user_id, db_pool, username=str(profile.get("username") or ""))
         posture: Optional[Dict[str, str]] = None
         try:
@@ -1257,8 +1290,14 @@ async def derive_hypothesis_npcs(user_id: str, profile: dict, journey: dict, db_
             except Exception:  # noqa: BLE001
                 llm = None
         trace = await run_loop(user_id, profile, jmeta, bundle, panel_sequence=panel_sequence,
-                               llm=llm, posture=posture)
+                               llm=llm, posture=posture, manifest=visible)
         npc = trace.get("npc")
+        if trace.get("formed") and not npc:
+            # Considered-but-hidden: keep the wondering so the coach can see it and it
+            # can manifest later without re-synthesis once the client flips it back on.
+            await _persist_registry(user_id, db_pool, trace.get("registry") or {}, trace.get("ledger") or [])
+            logger.info("APHL: wondering formed quietly for %s — %s (client visibility off)",
+                        user_id, (trace.get("hypothesis") or {}).get("hypothesis_id"))
         if not npc:
             logger.info("APHL: no figure for %s (%s)", user_id, trace.get("reason") or trace.get("gate", {}).get("reason"))
             return []
@@ -1320,9 +1359,10 @@ def current_hypothesis(jmeta: dict) -> Optional[dict]:
 
 
 async def set_opt_in(db_pool, user_id: str, value: bool, username: str = "") -> Dict[str, Any]:
-    """Per-client consent switch for Nate's wondering. Lives in journey_metadata so
-    the engine hooks (which already read it) need no change. Requires an existing
-    journey — we never create journeys here."""
+    """Per-client visibility switch for Nate's wondering (ON by default; ``False``
+    hides it from imagery without stopping the considering loop). Lives in
+    journey_metadata so the engine hooks (which already read it) need no change.
+    Requires an existing journey — we never create journeys here."""
     uname, ids = await _resolve_identity(db_pool, user_id, username)
     juid, _ = await _load_journey_row(db_pool, ids)
     if juid is None:
