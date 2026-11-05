@@ -20619,6 +20619,9 @@ async def handle_client(websocket, path=None):
                                 if not cid or cid in seen:
                                     continue
                                 p = registry_clients_by_id.get(cid) or {}
+                                # QUANTUM-CRYSTAL-ARCH: do not resurrect tombstoned users from sessions.json
+                                if not p or p.get("account_status") == "DELETED":
+                                    continue
                                 meta = session_client_meta.get(cid) or {}
                                 name = (p.get("name") or meta.get("client_name") or cid).strip()
                                 fam = (p.get("family_id") or meta.get("family_id") or "").strip()
