@@ -536,7 +536,9 @@ async def try_place_session_summary_in_coach_folder(
             file_id,
             len(pdf_bytes),
         )
-        asyncio.create_task(_crystallize_summary(db_pool, client_hw, client_name, body, session_id))
+        asyncio.create_task(_crystallize_summary(
+            db_pool, client_hw, client_name, body, session_id,
+        ))
 
     return file_id
 
@@ -549,19 +551,19 @@ async def _crystallize_summary(
     session_id: str,
 ) -> None:
     try:
-        from app.websocket.crystal_recall_bridge import crystallize_from_conversation
+        from app.services.zoom_household_learning import share_live_session_learning
 
-        await crystallize_from_conversation(
+        n = await share_live_session_learning(
             db_pool,
             client_hardware_id,
-            summary_text[:2000],
+            client_name or "",
+            (summary_text or "")[:4000],
             "Zoom session AI summary archived for coach review.",
-            user_name=client_name or "",
-            domain="coaching",
-            min_score=3,
             origin_surface="zoom_session_summary",
+            session_id=session_id,
+            min_score=0,
         )
-        logger.info("[ZoomFolder] Crystal queued for session %s", session_id)
+        logger.info("[ZoomFolder] Household crystals for session %s: %s", session_id, n)
     except Exception as e:
         logger.warning("[ZoomFolder] crystallize failed for %s: %s", session_id, e)
 
@@ -662,6 +664,14 @@ async def get_folder_session_summaries_context_pg(
         entity_ids = [e for e in (username, client_id) if e]
         if not entity_ids:
             return ""
+        try:
+            from app.services.zoom_household_learning import learning_subject_ids
+
+            for extra in await learning_subject_ids(db_pool, client_id):
+                if extra not in entity_ids:
+                    entity_ids.append(extra)
+        except Exception:
+            pass
 
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(

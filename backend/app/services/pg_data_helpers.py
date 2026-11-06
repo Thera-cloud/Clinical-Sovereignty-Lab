@@ -369,8 +369,8 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 session.get("zoom_host_url", ""),
                 session.get("notes", ""),
                 session.get("coach_notes", ""),
-                json.dumps(session.get("topics_covered") or []),
-                json.dumps(session.get("homework_assigned") or []),
+                json.dumps(session.get("topics_covered") or [], default=str),
+                json.dumps(session.get("homework_assigned") or [], default=str),
                 session.get("mood_at_start", ""),
                 session.get("mood_at_end", ""),
                 session.get("nate_summary", ""),
@@ -378,7 +378,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 payment_status,
                 price_cents,
                 session.get("intake_note", ""),
-                json.dumps(extra),
+                json.dumps(extra, default=str),
                 _parse_ts(session.get("created_at")) or datetime.now(timezone.utc),
             )
             _ctz = ""
@@ -903,6 +903,14 @@ async def get_classroom_context_for_client_pg(db_pool, client_id: str, limit: in
                 entity_ids.append(username)
         except Exception:
             pass
+        try:
+            from app.services.zoom_household_learning import learning_subject_ids
+
+            for extra in await learning_subject_ids(db_pool, client_id):
+                if extra not in entity_ids:
+                    entity_ids.append(extra)
+        except Exception:
+            pass
 
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -961,6 +969,16 @@ async def get_classroom_context_for_client_pg(db_pool, client_id: str, limit: in
         if transcript_ctx:
             parts.append(transcript_ctx)
 
+        try:
+            from app.services.zoom_household_learning import live_session_awareness_context
+
+            aware = await live_session_awareness_context(db_pool, client_id, limit=2)
+        except Exception as _aw_err:
+            logger.debug("live session awareness: %s", _aw_err)
+            aware = ""
+        if aware:
+            parts.append(aware)
+
         return "\n".join(parts)
     except Exception as e:
         logger.warning("get_classroom_context_for_client_pg failed: %s", e)
@@ -975,8 +993,15 @@ async def get_classroom_lived_wisdom_pg(db_pool, coach_id: str, client_id: Optio
         conds, params = ["coach_id = $1"], [coach_id]
         idx = 2
         if client_id:
-            conds.append(f"client_id = ${idx}")
-            params.append(client_id)
+            subject_ids = [client_id]
+            try:
+                from app.services.zoom_household_learning import learning_subject_ids
+
+                subject_ids = await learning_subject_ids(db_pool, client_id) or subject_ids
+            except Exception:
+                pass
+            conds.append(f"client_id = ANY(${idx}::text[])")
+            params.append(subject_ids)
             idx += 1
         params.append(limit)
         async with db_pool.acquire() as conn:

@@ -266,7 +266,9 @@ async def zoom_webhook(
     # Attach internal mapping if possible
     meeting_id = ""
     try:
-        meeting_id = str((((payload.get("payload") or {}).get("object") or {}).get("id")) or "")
+        from app.services.zoom_household_learning import canonical_zoom_meeting_id
+
+        meeting_id = canonical_zoom_meeting_id(payload)
     except Exception:
         meeting_id = ""
 
@@ -292,7 +294,11 @@ async def zoom_webhook(
     # On recording.completed or phone.recording_completed, spawn background
     # task to download transcript and feed through MetricsEngine.
     # =========================================================================
-    if event in ("recording.completed", "phone.recording_completed"):
+    if event in (
+        "recording.completed",
+        "phone.recording_completed",
+        "recording.transcript_completed",
+    ):
         dedup_key = f"{meeting_id}_{event}"
         if dedup_key in _processed_zoom_events:
             return {"status": "already_processed"}
@@ -316,8 +322,18 @@ async def zoom_webhook(
                 "detail": str(e),
             })
 
+    if event in ("meeting.started", "meeting.ended", "recording.started", "recording.stopped") and meeting_id:
+        try:
+            asyncio.create_task(_process_live_session_marker(event, payload, meeting_id))
+        except Exception as e:
+            logger.warning("[Zoom] live-session marker failed: %s", e)
+
     # AI Companion summary ready → coach FOLDER (no manual paste)
-    if event in ("meeting.summary_shared", "meeting.summary_recovered") and meeting_id:
+    if event in (
+        "meeting.summary_shared",
+        "meeting.summary_recovered",
+        "meeting.summary_completed",
+    ) and meeting_id:
         dedup_key = f"{meeting_id}_{event}"
         if dedup_key not in _processed_zoom_events:
             _processed_zoom_events.add(dedup_key)
@@ -792,6 +808,19 @@ async def _archive_transcript_and_classroom_for_pg_session(
                 logger.info(
                     "[Zoom] Cross-reference crystal queued for session %s", session_id
                 )
+                from app.services.zoom_household_learning import share_live_session_learning
+
+                await share_live_session_learning(
+                    db_pool,
+                    client_id,
+                    client_name or "",
+                    cross_ref,
+                    "Cross-modal session intelligence",
+                    origin_surface="zoom_cross_reference",
+                    session_id=session_id,
+                    min_score=0,
+                    include_primary=False,
+                )
             except Exception as _xrr:
                 logger.debug("[Zoom] Cross-reference crystal failed: %s", _xrr)
 
@@ -865,29 +894,75 @@ async def _archive_transcript_and_classroom_for_pg_session(
             pass
 
 
+async def _process_live_session_marker(event: str, payload: Dict[str, Any], meeting_id: str) -> None:
+    """Stamp attendance times and cloud-video state. Does not touch payment."""
+    db_pool = _get_app_db_pool()
+    if not db_pool or not meeting_id:
+        return
+    obj = (payload.get("payload") or {}).get("object") or {}
+    try:
+        from app.services.zoom_household_learning import (
+            apply_meeting_ended,
+            apply_meeting_started,
+            mark_cloud_recording,
+        )
+
+        if event == "meeting.started":
+            await apply_meeting_started(db_pool, meeting_id, str(obj.get("start_time") or ""))
+        elif event == "meeting.ended":
+            dur = int(obj.get("duration") or 0)
+            await apply_meeting_ended(
+                db_pool, meeting_id, str(obj.get("end_time") or ""), dur
+            )
+        elif event == "recording.started":
+            await mark_cloud_recording(
+                db_pool, meeting_id, started=True, at_iso=str(obj.get("start_time") or "")
+            )
+        elif event == "recording.stopped":
+            await mark_cloud_recording(
+                db_pool, meeting_id, started=False, at_iso=str(obj.get("end_time") or obj.get("start_time") or "")
+            )
+    except Exception as e:
+        logger.warning("[Zoom] live-session marker %s for %s: %s", event, meeting_id, e)
+
+
 async def _process_summary_webhook(payload: Dict[str, Any], meeting_id: str) -> None:
     """Place AI Companion summary in coach folder when Zoom summary webhook fires."""
     db_pool = _get_app_db_pool()
     if not db_pool or not meeting_id:
         return
     obj = (payload.get("payload") or {}).get("object") or {}
-    meeting_uuid = str(obj.get("uuid") or "").strip()
+    meeting_uuid = str(obj.get("uuid") or obj.get("meeting_uuid") or "").strip()
+    summary_text = ""
     try:
+        from app.services.zoom_household_learning import (
+            stamp_family_from_client,
+            summary_text_from_webhook,
+        )
+
+        summary_text = summary_text_from_webhook(payload)
+        await stamp_family_from_client(db_pool, meeting_id)
         async with db_pool.acquire() as conn:
             pg_row = await _fetch_coaching_session_by_zoom(conn, meeting_id)
             if not pg_row:
                 return
             pg_row = dict(pg_row)
+            patch = {}
             if meeting_uuid:
-                await _patch_coaching_session_data(
-                    conn, pg_row["session_id"], {"zoom_meeting_uuid": meeting_uuid}
-                )
+                patch["zoom_meeting_uuid"] = meeting_uuid
+            if summary_text:
+                patch["zoom_ai_summary_text"] = summary_text[:50000]
+                patch["zoom_summary_source"] = "zoom_webhook"
+            if patch:
+                await _patch_coaching_session_data(conn, pg_row["session_id"], patch)
                 sd = _session_data_dict(pg_row)
-                sd["zoom_meeting_uuid"] = meeting_uuid
+                sd.update(patch)
                 pg_row["session_data"] = sd
         from app.services.zoom_session_folder import try_place_session_summary_in_coach_folder
 
-        await try_place_session_summary_in_coach_folder(db_pool, pg_row, str(meeting_id))
+        await try_place_session_summary_in_coach_folder(
+            db_pool, pg_row, str(meeting_id), summary_text=summary_text or None
+        )
     except Exception as e:
         logger.warning("[Zoom] summary webhook placement for %s: %s", meeting_id, e)
 
@@ -909,10 +984,14 @@ async def poll_pending_zoom_classroom_transcripts(db_pool) -> int:
                 WHERE COALESCE(zoom_meeting_id, '') <> ''
                   AND COALESCE(session_data->>'transcript_location', '') = ''
                   AND (
-                    (session_data->>'transcript_pending') = 'true'
+                    (session_data->>'transcript_pending') IN ('true', '1')
                     OR (
-                      COALESCE(session_data->>'zoom_summary_source', '') = 'zoom_api'
-                      AND scheduled_start >= NOW() - INTERVAL '96 hours'
+                      COALESCE(session_data->>'recording_cloud', '') IN ('true', '1')
+                      AND COALESCE(actual_end, scheduled_start) >= NOW() - INTERVAL '7 days'
+                    )
+                    OR (
+                      COALESCE(session_data->>'zoom_summary_source', '') IN ('zoom_api', 'zoom_webhook')
+                      AND COALESCE(actual_end, scheduled_start) >= NOW() - INTERVAL '96 hours'
                     )
                   )
                 ORDER BY updated_at DESC NULLS LAST

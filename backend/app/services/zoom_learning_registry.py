@@ -65,24 +65,25 @@ async def queue_transcript_crystal(
         return False
     try:
         from app.services.zoom_transcript_context import vtt_to_dialogue_excerpt
-        from app.websocket.crystal_recall_bridge import crystallize_from_conversation
 
         excerpt = vtt_to_dialogue_excerpt(vtt_text, max_chars=max_excerpt)
         if len(excerpt.strip()) < 80:
             return False
         user_text = f"Session {session_id} transcript excerpt:\n{excerpt[:max_excerpt]}"
-        await crystallize_from_conversation(
+        from app.services.zoom_household_learning import share_live_session_learning
+
+        n = await share_live_session_learning(
             db_pool,
             client_id,
+            client_name or "",
             user_text,
             "Archived live session dialogue for therapeutic recall.",
-            user_name=client_name or "",
-            domain="clinical",
-            min_score=0,
             origin_surface="zoom_session_transcript",
+            session_id=session_id,
+            min_score=0,
         )
-        logger.info("[Zoom] Transcript crystal queued for session %s", session_id)
-        return True
+        logger.info("[Zoom] Transcript crystals for session %s: %s", session_id, n)
+        return n > 0
     except Exception as e:
         logger.warning("[Zoom] Transcript crystal failed for %s: %s", session_id, e)
         return False
@@ -100,7 +101,6 @@ async def queue_cross_reference_crystal(
         return False
     try:
         from app.routers.sessions import CLASSROOM_AVAILABLE, _classroom_analyzer
-        from app.websocket.crystal_recall_bridge import crystallize_from_conversation
 
         nate_summary = ""
         if CLASSROOM_AVAILABLE and _classroom_analyzer:
@@ -121,17 +121,19 @@ async def queue_cross_reference_crystal(
             f"Zoom AI observed: {zoom_summary_text[:500]}\n"
             f"Little Nate observed: {nate_summary[:500]}"
         )
-        await crystallize_from_conversation(
+        from app.services.zoom_household_learning import share_live_session_learning
+
+        n = await share_live_session_learning(
             db_pool,
             client_id,
+            client_name or "",
             cross_ref,
             "Cross-modal session intelligence",
-            user_name=client_name or "",
-            domain="clinical",
-            min_score=0,
             origin_surface="zoom_cross_reference",
+            session_id=session_id,
+            min_score=0,
         )
-        return True
+        return n > 0
     except Exception as e:
         logger.warning("queue_cross_reference_crystal(%s): %s", session_id, e)
         return False
@@ -184,6 +186,14 @@ async def build_coach_nate_zoom_context(
             blocks.append(tx_ctx)
     except Exception as e:
         logger.debug("coach nate transcript ctx: %s", e)
+    try:
+        from app.services.zoom_household_learning import live_session_awareness_context
+
+        aware = await live_session_awareness_context(db_pool, client_id, limit=2)
+        if aware:
+            blocks.append(aware)
+    except Exception as e:
+        logger.debug("coach nate household ctx: %s", e)
     if coach_id:
         try:
             from app.services.pg_data_helpers import get_classroom_lived_wisdom_pg

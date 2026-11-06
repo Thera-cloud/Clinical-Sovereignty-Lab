@@ -242,6 +242,14 @@ async def get_sessions_with_transcripts_pg(
     if not entity_ids:
         return []
     try:
+        from app.services.zoom_household_learning import learning_subject_ids
+
+        for extra in await learning_subject_ids(db_pool, client_id):
+            if extra not in entity_ids:
+                entity_ids.append(extra)
+    except Exception:
+        pass
+    try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
