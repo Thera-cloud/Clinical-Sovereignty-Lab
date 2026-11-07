@@ -137,12 +137,51 @@ async def _replay(pool, events) -> None:
             )
             if file_id:
                 counts["summaries"] += 1
+    counts["household"] = await _share_household(pool)
+    current = asyncio.current_task()
+    pending = [task for task in asyncio.all_tasks() if task is not current]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     print(
         "backfill "
         f"started={counts['started']} ended={counts['ended']} "
         f"recording={counts['recording']} summaries={counts['summaries']} "
-        f"summary_no_session={counts['summary_no_session']}"
+        f"summary_no_session={counts['summary_no_session']} "
+        f"household={counts['household']}"
     )
+
+
+async def _share_household(pool) -> int:
+    """Forge household crystals where a summary exists and the flag was never set."""
+    from app.services.zoom_household_learning import share_live_session_learning
+
+    written = 0
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT session_id, client_id, client_name,
+                   LEFT(COALESCE(session_data->>'zoom_ai_summary_text', ''), 4000) AS summary
+            FROM coaching_sessions
+            WHERE COALESCE(session_data->>'zoom_ai_summary_text', '') <> ''
+              AND COALESCE(session_data->>'household_learning', '') = ''
+              AND COALESCE(actual_end, scheduled_start) >= TIMESTAMPTZ '2026-09-01'
+            """
+        )
+    for row in rows:
+        summary = (row["summary"] or "").strip()
+        if len(summary) < 40:
+            continue
+        written += await share_live_session_learning(
+            pool,
+            row["client_id"],
+            row["client_name"] or "",
+            summary,
+            "Zoom session AI summary archived for coach review.",
+            origin_surface="zoom_session_summary",
+            session_id=row["session_id"],
+            min_score=0,
+        )
+    return written
 
 
 async def main() -> None:

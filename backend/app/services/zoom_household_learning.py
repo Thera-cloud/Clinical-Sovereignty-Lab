@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -22,9 +23,25 @@ HOUSEHOLD_TIERS = frozenset({
 _COLLECTED = frozenset({
     "paid", "waived", "complimentary", "refunded", "no_charge", "comp",
 })
-_FROZEN_STATUS = frozenset({
-    "cancelled", "canceled", "rescheduled", "no_show", "completed",
+_CLOSED_STATUS = frozenset({
+    "cancelled", "canceled", "rescheduled", "completed",
 })
+
+
+def parse_zoom_time(value: str):
+    """Zoom sends ISO strings. asyncpg timestamptz binds need a datetime."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def canonical_zoom_meeting_id(payload: Optional[Dict[str, Any]]) -> str:
@@ -50,16 +67,21 @@ def summary_text_from_webhook(payload: Optional[Dict[str, Any]]) -> str:
 
 def status_after_start(current: str) -> str:
     cur = (current or "").strip().lower()
-    if cur in ("scheduled", "confirmed", ""):
+    if cur in ("scheduled", "confirmed", "", "no_show"):
         return "active"
     return (current or "active").strip() or "active"
 
 
-def status_after_end(current: str, payment_status: str) -> str:
-    """Complete only after money is settled. Pending stays chargeable (active)."""
+def status_after_end(current: str, payment_status: str, has_end: bool = True) -> str:
+    """Complete only after money is settled. Pending stays chargeable (active).
+
+    A Zoom meeting.ended event corrects a false no_show when an end time exists.
+    """
     cur = (current or "").strip().lower()
-    if cur in _FROZEN_STATUS:
+    if cur in _CLOSED_STATUS:
         return cur or "completed"
+    if cur == "no_show" and not has_end:
+        return "no_show"
     pay = (payment_status or "").strip().lower()
     if pay in _COLLECTED:
         return "completed"
@@ -324,7 +346,7 @@ async def apply_meeting_started(db_pool, meeting_id: str, start_iso: str = "") -
             )
             for row in rows:
                 cur = (row["status"] or "").strip().lower()
-                if cur in _FROZEN_STATUS:
+                if cur in _CLOSED_STATUS:
                     continue
                 await conn.execute(
                     """
@@ -335,7 +357,7 @@ async def apply_meeting_started(db_pool, meeting_id: str, start_iso: str = "") -
                     WHERE session_id = $1
                     """,
                     row["session_id"],
-                    start_iso or None,
+                    parse_zoom_time(start_iso),
                     status_after_start(row["status"] or ""),
                 )
                 n += 1
@@ -358,7 +380,9 @@ async def apply_meeting_ended(
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT session_id, status, payment_status, duration_minutes
+                SELECT session_id, status, payment_status, duration_minutes,
+                       COALESCE(session_data->>'recording_cloud', '') AS recording_cloud,
+                       COALESCE(length(session_data->>'zoom_ai_summary_text'), 0) AS summary_len
                 FROM coaching_sessions
                 WHERE zoom_meeting_id = $1
                 """,
@@ -368,10 +392,23 @@ async def apply_meeting_ended(
                 cur = (row["status"] or "").strip().lower()
                 if cur in ("cancelled", "canceled", "rescheduled"):
                     continue
-                new_status = status_after_end(row["status"] or "", row["payment_status"] or "")
+                end_at = parse_zoom_time(end_iso)
                 dur = int(duration_minutes or 0)
                 if dur <= 0:
                     dur = int(row["duration_minutes"] or 0)
+                evidence = (
+                    dur >= 15
+                    or (row["recording_cloud"] or "") in ("true", "1")
+                    or int(row["summary_len"] or 0) > 40
+                )
+                if cur == "no_show" and not evidence:
+                    new_status = "no_show"
+                else:
+                    new_status = status_after_end(
+                        row["status"] or "",
+                        row["payment_status"] or "",
+                        has_end=end_at is not None or evidence,
+                    )
                 await conn.execute(
                     """
                     UPDATE coaching_sessions
@@ -385,7 +422,7 @@ async def apply_meeting_ended(
                     WHERE session_id = $1
                     """,
                     row["session_id"],
-                    end_iso or None,
+                    end_at,
                     new_status,
                     dur,
                 )

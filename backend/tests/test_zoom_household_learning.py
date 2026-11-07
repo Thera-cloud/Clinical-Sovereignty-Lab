@@ -36,11 +36,23 @@ def test_numeric_object_id_still_wins():
 
 def test_paid_session_completes_pending_stays_chargeable():
     assert status_after_start("scheduled") == "active"
+    assert status_after_start("no_show") == "active"
     assert status_after_start("active") == "active"
     assert status_after_end("active", "paid") == "completed"
+    assert status_after_end("no_show", "paid", has_end=True) == "completed"
+    assert status_after_end("no_show", "paid", has_end=False) == "no_show"
     assert status_after_end("scheduled", "pending") == "active"
     assert status_after_end("cancelled", "pending") == "cancelled"
     assert status_after_end("completed", "paid") == "completed"
+
+
+def test_parse_zoom_time():
+    from app.services.zoom_household_learning import parse_zoom_time
+
+    parsed = parse_zoom_time("2026-11-06T17:15:53Z")
+    assert parsed is not None
+    assert parsed.year == 2026
+    assert parse_zoom_time("") is None
 
 
 def test_uuid_session_extra_serializes():
