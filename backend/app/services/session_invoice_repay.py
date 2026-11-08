@@ -35,6 +35,17 @@ def _as_id(raw: Any) -> str:
     return str(getattr(raw, "id", "") or "")
 
 
+def invoice_customer_id(inv: Any) -> str:
+    return _as_id(_obj_get(inv, "customer"))
+
+
+def invoice_owned_by_customer(inv: Any, customer_id: str) -> bool:
+    """True only when the Stripe invoice belongs to this customer id."""
+    want = (customer_id or "").strip()
+    got = invoice_customer_id(inv)
+    return bool(want) and bool(got) and want == got
+
+
 def pi_status(inv: Any) -> str:
     pi = _obj_get(inv, "payment_intent")
     if not pi:

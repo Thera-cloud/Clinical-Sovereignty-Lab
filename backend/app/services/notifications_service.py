@@ -800,7 +800,7 @@ TEMPLATES = {
 <html><body style="font-family:sans-serif;background:#050505;color:#e5e5e5;padding:24px;">
 <div style="max-width:720px;margin:auto;background:#111;border:1px solid #C9A962;border-radius:8px;padding:24px;">
   <h2 style="color:#C9A962;margin-top:0;">Next-day schedule review</h2>
-  <p>Accountant pass for the next 48 hours. Unpaid sessions are <strong>not</strong> billed until a charge succeeds. Paid-confirmed means Stripe already collected.</p>
+  <p>Accountant pass for the next 48 hours. Unpaid sessions are <strong>not</strong> billed until a charge succeeds. Paid-confirmed means Stripe already collected. Unconfirmed means the client has not tapped the 48-hour confirm link.</p>
   {{ digest_html }}
   <p style="color:#64748b;font-size:12px;">Sent by Sovereign Sanctuary · Session Ops Reconcile Agent.</p>
 </div></body></html>

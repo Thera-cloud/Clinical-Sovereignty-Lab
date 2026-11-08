@@ -394,6 +394,31 @@ def _parse_start(session: Dict[str, Any]) -> Optional[datetime]:
         return None
 
 
+def create_session_refund(stripe, intent_id: str, amount_cents: Optional[int] = None):
+    """Refund a session PaymentIntent and reverse the Connect transfer.
+
+    Destination charges leave funds on the connected account unless
+    reverse_transfer=True. refund_application_fee returns the platform share
+    so the client gets a full refund. Charges without a transfer fall back
+    to a plain refund.
+    """
+    kwargs: Dict[str, Any] = {
+        "payment_intent": intent_id,
+        "reverse_transfer": True,
+        "refund_application_fee": True,
+    }
+    if amount_cents and int(amount_cents) > 0:
+        kwargs["amount"] = int(amount_cents)
+    try:
+        return stripe.Refund.create(**kwargs)
+    except Exception as e:
+        logger.info("create_session_refund reverse_transfer fallback: %s", e)
+        fallback = {"payment_intent": intent_id}
+        if amount_cents and int(amount_cents) > 0:
+            fallback["amount"] = int(amount_cents)
+        return stripe.Refund.create(**fallback)
+
+
 async def _issue_session_refund(
     db_pool,
     session: Dict[str, Any],
@@ -433,7 +458,7 @@ async def _issue_session_refund(
         stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
         if not stripe.api_key:
             return "error", "STRIPE_SECRET_KEY missing"
-        refund = stripe.Refund.create(payment_intent=intent_id)
+        refund = create_session_refund(stripe, intent_id)
         if db_pool:
             async with db_pool.acquire() as conn:
                 await conn.execute(

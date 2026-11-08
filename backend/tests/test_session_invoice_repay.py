@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.services.session_invoice_repay import (
     invoice_needs_revive,
+    invoice_owned_by_customer,
     is_session_invoice,
     last_charged_pm_id,
     should_skip_auto_pay,
@@ -55,6 +56,15 @@ def test_72h_charge_query_skips_collect_later():
     assert "session_data->>'collect_later'" in src
     assert "charge_blocked_pm" in src
     assert "heal_open_session_invoices" in src
+    assert "issue_confirm_token" in src
+    assert "confirm_request_48h" in src
+    assert "sync_default_pm_from_stripe" in src
+
+
+def test_invoice_owned_by_customer_gate():
+    inv = SimpleNamespace(customer="cus_bill")
+    assert invoice_owned_by_customer(inv, "cus_bill") is True
+    assert invoice_owned_by_customer(inv, "cus_other") is False
 
 
 def test_is_session_invoice_not_subscription():
@@ -72,3 +82,9 @@ def test_admin_retry_and_portal_webhook_use_revive():
     assert "pay_or_revive_open_invoice" in admin
     assert "_stripe.Invoice.pay(invoice.id)" not in admin
     assert "setup_intent.succeeded" in stripe_src
+    assert "mirror_default_payment_method" in stripe_src
+    billing = (root / "routers" / "billing.py").read_text(encoding="utf-8")
+    assert "/session-confirm" in billing
+    assert "_assert_invoice_owner" in billing
+    booking = (root / "services" / "session_booking_billing.py").read_text(encoding="utf-8")
+    assert "reverse_transfer" in booking

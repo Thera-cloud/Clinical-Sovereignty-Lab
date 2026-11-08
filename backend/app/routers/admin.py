@@ -2525,6 +2525,8 @@ class RefundRequest(BaseModel):
     user_id: str
     amount: float
     reason: str = ""
+    session_id: str = ""
+    payment_intent_id: str = ""
 
 
 class CouponRequest(BaseModel):
@@ -2874,20 +2876,49 @@ async def process_refund(req: RefundRequest, request: Request):
         "stripe_refund": False,
     }
 
-    # Try Stripe refund
-    if _STRIPE_AVAILABLE and stripe_customer:
+    # Try Stripe refund — session PI only. Never refund the customer's latest
+    # unrelated charge.
+    intent_id = (req.payment_intent_id or "").strip()
+    session_id = (req.session_id or "").strip()
+    if not intent_id and pool and session_id:
         try:
-            # Find the most recent charge for this customer
-            charges = _stripe.Charge.list(customer=stripe_customer, limit=1)
-            if charges.data:
-                _stripe.Refund.create(
-                    charge=charges.data[0].id,
-                    amount=int(req.amount * 100),
-                    reason="requested_by_customer",
+            async with pool.acquire() as conn:
+                intent_id = (
+                    await conn.fetchval(
+                        """SELECT stripe_payment_intent_id
+                           FROM coaching_sessions WHERE session_id = $1 LIMIT 1""",
+                        session_id,
+                    )
+                    or ""
                 )
-                refund_record["stripe_refund"] = True
+        except Exception as e:
+            logger.warning("process_refund: session PI lookup failed: %s", e)
+    if _STRIPE_AVAILABLE and intent_id:
+        try:
+            from app.services.session_booking_billing import create_session_refund
+
+            amount_cents = int(round(float(req.amount) * 100)) if req.amount else 0
+            refund_obj = create_session_refund(
+                _stripe, intent_id, amount_cents=amount_cents or None,
+            )
+            refund_record["stripe_refund"] = True
+            refund_record["refund_id"] = getattr(refund_obj, "id", None)
+            refund_record["payment_intent_id"] = intent_id
+            if pool and session_id:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """UPDATE coaching_sessions
+                              SET payment_status = 'refunded', updated_at = NOW()
+                            WHERE session_id = $1
+                              AND LOWER(COALESCE(payment_status,'')) = 'paid'""",
+                        session_id,
+                    )
         except Exception as e:
             refund_record["stripe_error"] = str(e)
+    elif _STRIPE_AVAILABLE and not intent_id:
+        refund_record["stripe_error"] = (
+            "session_id or payment_intent_id required — will not refund the latest customer charge"
+        )
 
     # PG-first: write refund to payment_history
     # Schema: (user_id UUID NOT NULL FK, amount_cents INT NOT NULL, currency NOT NULL,

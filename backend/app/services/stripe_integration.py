@@ -1849,6 +1849,22 @@ class StripeWebhookHandler:
             if not row:
                 return
             uid = row["hardware_id"] or row["username"]
+            pm = si.get("payment_method")
+            if isinstance(pm, dict):
+                pm = pm.get("id")
+            if pm:
+                try:
+                    from app.services.session_financial_records import (
+                        mirror_default_payment_method,
+                    )
+                    await mirror_default_payment_method(
+                        self.db,
+                        user_key=uid,
+                        payment_method_id=str(pm),
+                        stripe_customer_id=str(customer),
+                    )
+                except Exception:
+                    _logger.exception("setup_intent.succeeded PM mirror")
             from app.services.session_collect_later import try_charge_overdue_for_user
             await try_charge_overdue_for_user(self.db, uid)
         except Exception:

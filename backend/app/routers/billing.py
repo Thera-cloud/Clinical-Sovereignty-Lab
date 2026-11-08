@@ -6,7 +6,8 @@ Endpoints include: plans, subscription management (subscribe, upgrade, downgrade
 coaching sessions and packs, payment methods, invoices, and token usage.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 
@@ -457,7 +458,9 @@ async def _get_stripe_customer(user_id: str, db_pool=None) -> Optional[str]:
                 row = await conn.fetchrow(
                     """SELECT stripe_customer_id,
                               profile_data->>'stripe_customer_id' as stripe_cid
-                       FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1""",
+                       FROM users
+                       WHERE (hardware_id = $1 OR username = $1)
+                         AND deleted_at IS NULL LIMIT 1""",
                     user_id,
                 )
                 if row:
@@ -824,13 +827,44 @@ class PayInvoiceRequest(BaseModel):
     invoice_id: Optional[str] = None
 
 
+async def _assert_invoice_owner(
+    request: Request,
+    user_id: str,
+    invoice_id: str,
+    auth_user_id: str,
+) -> None:
+    """Caller must own the account and the Stripe invoice customer must match."""
+    _verify_ownership(user_id, auth_user_id)
+    pool = getattr(request.app.state, "db_pool", None)
+    customer = await _get_stripe_customer(user_id, db_pool=pool)
+    if not customer and auth_user_id != user_id:
+        customer = await _get_stripe_customer(auth_user_id, db_pool=pool)
+    if not customer:
+        raise HTTPException(403, "No billing customer on this account")
+    from app.services.session_invoice_repay import (
+        invoice_owned_by_customer,
+        retrieve_invoice,
+    )
+    try:
+        inv = retrieve_invoice(invoice_id)
+    except Exception:
+        raise HTTPException(404, "Invoice not found")
+    if not invoice_owned_by_customer(inv, customer):
+        raise HTTPException(403, "Invoice does not belong to this account")
+
+
 @router.post("/invoices/pay")
-async def pay_open_invoice(req: PayInvoiceRequest, request: Request):
+async def pay_open_invoice(
+    req: PayInvoiceRequest,
+    request: Request,
+    auth_user_id: str = Depends(get_current_user_id),
+):
     """Charge the default card on an open Stripe invoice (no duplicate session PI)."""
     if not STRIPE_AVAILABLE or not stripe.api_key:
         raise HTTPException(503, "Stripe not available")
     if not req.invoice_id or not str(req.invoice_id).startswith("in_"):
         raise HTTPException(400, "invoice_id required")
+    await _assert_invoice_owner(request, req.user_id, req.invoice_id, auth_user_id)
     pool = getattr(request.app.state, "db_pool", None)
     try:
         from app.services.session_invoice_repay import pay_or_revive_open_invoice
@@ -856,7 +890,11 @@ class RefreshPayLinkRequest(BaseModel):
 
 
 @router.post("/invoices/refresh-pay-link")
-async def refresh_invoice_pay_link(req: RefreshPayLinkRequest, request: Request):
+async def refresh_invoice_pay_link(
+    req: RefreshPayLinkRequest,
+    request: Request,
+    auth_user_id: str = Depends(get_current_user_id),
+):
     """Mint a live hosted invoice URL after a declined/canceled PaymentIntent.
 
     Charges the customer's current default card when it is not the declined one.
@@ -865,6 +903,10 @@ async def refresh_invoice_pay_link(req: RefreshPayLinkRequest, request: Request)
         raise HTTPException(503, "Stripe not available")
     if not req.invoice_id or not str(req.invoice_id).startswith("in_"):
         raise HTTPException(400, "invoice_id required")
+    owner_id = (req.user_id or auth_user_id or "").strip()
+    if not owner_id:
+        raise HTTPException(400, "user_id required")
+    await _assert_invoice_owner(request, owner_id, req.invoice_id, auth_user_id)
     pool = getattr(request.app.state, "db_pool", None)
     from app.services.session_invoice_repay import pay_or_revive_open_invoice
 
@@ -1508,10 +1550,15 @@ async def set_default_payment_method(req: SetDefaultPaymentMethodRequest, reques
     if pool:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT stripe_customer_id FROM users WHERE hardware_id = $1", req.user_id
+                """SELECT COALESCE(NULLIF(stripe_customer_id, ''),
+                                   profile_data->>'stripe_customer_id') AS cid
+                   FROM users
+                   WHERE hardware_id = $1 OR username = $1
+                   LIMIT 1""",
+                req.user_id,
             )
             if row:
-                customer_id = row["stripe_customer_id"]
+                customer_id = row["cid"]
 
     if not customer_id:
         raise HTTPException(400, "No Stripe customer found")
@@ -2722,3 +2769,47 @@ async def verify_discount_code(code: str, request: Request,
             }
 
     raise HTTPException(404, "Invalid or expired code")
+
+
+@public_router.get("/session-confirm", response_class=HTMLResponse)
+async def session_confirm_tap(
+    request: Request,
+    t: str = Query(..., min_length=16, max_length=128),
+):
+    """Public tap-to-confirm for the 48h appointment email. Not a charge."""
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_check_ip(f"confirm:{client_ip}"):
+        raise HTTPException(429, "Too many confirmation attempts")
+    pool = getattr(request.app.state, "db_pool", None)
+    from app.services.session_confirm import confirm_html, consume_confirm_token
+
+    if not pool:
+        return HTMLResponse(confirm_html(ok=False), status_code=503)
+    async with pool.acquire() as conn:
+        result = await consume_confirm_token(conn, t)
+    if result.get("ok"):
+        coach_email = (result.get("coach_email") or "").strip()
+        if coach_email:
+            try:
+                notify = getattr(request.app.state, "notification_system", None)
+                if notify and hasattr(notify, "_send_email"):
+                    cname = result.get("client_name") or "Client"
+                    when = result.get("when") or "the scheduled time"
+                    await notify._send_email(
+                        coach_email,
+                        f"Client confirmed — {cname}",
+                        f"<p>{cname} confirmed they will attend the session at "
+                        f"<strong>{when}</strong>.</p>",
+                    )
+            except Exception as e:
+                logger.warning("session-confirm coach email: %s", e)
+        return HTMLResponse(
+            confirm_html(
+                ok=True,
+                when=str(result.get("when") or ""),
+                already=bool(result.get("already")),
+            )
+        )
+    if result.get("expired"):
+        return HTMLResponse(confirm_html(ok=False, expired=True), status_code=400)
+    return HTMLResponse(confirm_html(ok=False), status_code=400)

@@ -331,6 +331,34 @@ async def test_charge_card_happy_path_uses_idempotency_key_and_ledger(monkeypatc
     assert any("- 'charge_claim_at'" in s for s in sqls)  # claim cleared on success
 
 
+@pytest.mark.asyncio
+async def test_charge_card_prefers_stripe_pm_over_stale_profile(monkeypatch):
+    stripe_mod = _fake_stripe()
+    monkeypatch.setitem(sys.modules, "stripe", stripe_mod)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+
+    async def _stripe_pm(*_a, **_k):
+        return "pm_stripe"
+
+    monkeypatch.setattr(
+        "app.services.session_pm_sync.sync_default_pm_from_stripe", _stripe_pm,
+    )
+    fin = types.ModuleType("app.services.session_financial_records")
+    fin.platform_fee_cents_from_session = lambda s, a: 2700
+    fin.mark_coach_ledger_collected = AsyncMock()
+    monkeypatch.setitem(sys.modules, "app.services.session_financial_records", fin)
+    agent = SessionPaymentAgent(db_pool=MagicMock(), app_state=None)
+    conn = _conn_with_state(
+        {"payment_status": "pending", "stripe_payment_intent_id": "",
+         "billing_obligation": None, "charge_claim_at": None, "charges": 0}
+    )
+    res = await agent._charge_card(
+        conn, _session(client_default_pm="pm_stale"), "cus_1", 9000,
+    )
+    assert res is True
+    assert stripe_mod._created[0]["payment_method"] == "pm_stripe"
+
+
 # ── Layer 4: check-in agent only repairs when a reminder will actually send ──
 
 def test_reminder_pending_for_mirrors_send_gates():

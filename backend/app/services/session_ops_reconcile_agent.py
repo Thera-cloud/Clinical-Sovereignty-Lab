@@ -119,6 +119,14 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
     if (
         future
         and start
+        and start <= now + timedelta(hours=UNPAID_RISK_HOURS)
+        and status in ACTIVE_STATUSES
+        and not row.get("client_confirmed_at")
+    ):
+        actions.append("unconfirmed")
+    if (
+        future
+        and start
         and start <= now + timedelta(hours=PAID_REVIEW_HOURS)
         and status in ACTIVE_STATUSES
         and pay == "paid"
@@ -225,7 +233,7 @@ class SessionOpsReconcileAgent:
                 a in actions
                 for a in (
                     "unpaid_risk", "paid_confirmed", "billing_mismatch",
-                    "charge_blocked", "missing_profile_pm",
+                    "charge_blocked", "missing_profile_pm", "unconfirmed",
                 )
             ):
                 flags.append(item)
@@ -246,6 +254,7 @@ class SessionOpsReconcileAgent:
                        cs.scheduled_start, cs.scheduled_end, cs.session_data,
                        COALESCE(u.profile_data->>'default_payment_method_id','')
                            AS client_default_pm,
+                       cs.client_confirmed_at,
                        EXISTS (
                            SELECT 1 FROM session_payment_events e
                            WHERE e.session_id = cs.id
@@ -402,6 +411,8 @@ class SessionOpsReconcileAgent:
             acts = item.get("actions") or []
             ready = "paid_confirmed" in acts and "unpaid_risk" not in acts
             label = "PAID — session is charged" if ready else "NOT READY — do not treat as billed"
+            if "unconfirmed" in acts:
+                label += "<br>CLIENT HAS NOT TAPPED CONFIRM"
             rows_html.append(
                 "<tr>"
                 f"<td style='padding:6px 12px;'>{item.get('client_name') or ''}</td>"

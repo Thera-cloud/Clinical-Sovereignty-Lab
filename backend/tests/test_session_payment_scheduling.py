@@ -183,9 +183,12 @@ async def test_refund_on_client_cancel_ge_24h_paid(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_s3")
     stripe_mod = types.ModuleType("stripe")
 
+    captured = {}
+
     class _Refund:
         @staticmethod
-        def create(**_kw):
+        def create(**kw):
+            captured.update(kw)
             return types.SimpleNamespace(amount=5000, id="re_s3")
 
     stripe_mod.Refund = _Refund
@@ -202,6 +205,8 @@ async def test_refund_on_client_cancel_ge_24h_paid(monkeypatch):
     )
     assert outcome == "refunded"
     assert detail == "re_s3"
+    assert captured.get("reverse_transfer") is True
+    assert captured.get("refund_application_fee") is True
 
 
 @pytest.mark.asyncio

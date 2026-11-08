@@ -63,6 +63,7 @@ def test_classify_paid_billable():
             "scheduled_start": FUTURE.isoformat(),
             "payment_status": "paid",
             "price_cents": 12500,
+            "client_confirmed_at": FUTURE.isoformat(),
         },
         NOW,
     )
@@ -110,6 +111,7 @@ def test_classify_unpaid_with_verify_fail_is_blocked():
     assert "unpaid_risk" in actions
     assert "charge_blocked" in actions
     assert "missing_profile_pm" in actions
+    assert "unconfirmed" in actions
 
 
 def test_classify_cancelled_pending_voids_orphan_invoice():
@@ -154,6 +156,35 @@ def test_classify_paid_beyond_36h_is_not_billable_flag():
         NOW,
     )
     assert "paid_confirmed" not in actions
+
+
+def test_classify_paid_unconfirmed_inside_48h():
+    actions = classify_session(
+        {
+            "status": "scheduled",
+            "scheduled_start": FUTURE.isoformat(),
+            "payment_status": "paid",
+            "price_cents": 9000,
+            "client_confirmed_at": None,
+        },
+        NOW,
+    )
+    assert "unconfirmed" in actions
+    assert "paid_confirmed" in actions
+
+
+def test_classify_tapped_confirm_is_not_unconfirmed():
+    actions = classify_session(
+        {
+            "status": "scheduled",
+            "scheduled_start": FUTURE.isoformat(),
+            "payment_status": "paid",
+            "price_cents": 9000,
+            "client_confirmed_at": FUTURE.isoformat(),
+        },
+        NOW,
+    )
+    assert "unconfirmed" not in actions
 
 
 def test_classify_hidden_four_days_out_still_cancels():

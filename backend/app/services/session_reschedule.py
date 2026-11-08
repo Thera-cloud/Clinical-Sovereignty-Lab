@@ -15,6 +15,7 @@ REMINDER_TYPES = (
     "reminder_72h",
     "reminder_48h",
     "48h_reminder",
+    "confirm_request_48h",
 )
 
 
@@ -167,6 +168,18 @@ async def void_session_reminders(db_pool, session_uuid) -> int:
                 session_uuid,
                 list(REMINDER_TYPES),
             )
+            try:
+                await conn.execute(
+                    """UPDATE coaching_sessions
+                          SET confirm_token_hash = NULL,
+                              confirm_token_expires_at = NULL,
+                              client_confirmed_at = NULL,
+                              updated_at = NOW()
+                        WHERE id = $1""",
+                    session_uuid,
+                )
+            except Exception:
+                pass
         parts = str(result or "").split()
         return int(parts[-1]) if parts and parts[-1].isdigit() else 0
     except Exception:

@@ -303,6 +303,35 @@ class SessionPaymentAgent:
                 await self._send_48h_reminder(conn, s)
                 reminded += 1
 
+            # Backfill tap-to-confirm for sessions that missed the 47-49h window
+            # (agent down, or old 48h email with no token).
+            try:
+                pending_confirm = await conn.fetch(
+                    f"""SELECT cs.id, cs.session_id, cs.coach_id, cs.client_id,
+                              {_APPT_TIME} AS scheduled_at,
+                              cs.scheduled_end, cs.zoom_link, cs.zoom_host_url,
+                              cs.payment_status,
+                              u.profile_data->>'name' as client_name,
+                              u.profile_data->>'email' as client_email,
+                              u.profile_data->>'timezone' as client_timezone,
+                              cu.profile_data->>'name' as coach_name,
+                              cu.profile_data->>'email' as coach_email
+                       FROM coaching_sessions cs
+                       LEFT JOIN users u ON u.id::text = cs.client_id::text
+                          OR u.hardware_id = cs.client_id::text
+                       LEFT JOIN users cu ON cu.id::text = cs.coach_id::text
+                          OR cu.hardware_id = cs.coach_id::text
+                       WHERE {_APPT_TIME} BETWEEN $1 AND $2
+                       AND {_NOT_CANCELLED}
+                       AND cs.client_confirmed_at IS NULL
+                       AND cs.confirm_token_hash IS NULL""",
+                    now + timedelta(hours=12), now + timedelta(hours=72),
+                )
+                for s in pending_confirm:
+                    await self._send_48h_reminder(conn, s, notif_type="confirm_request_48h")
+            except Exception as e:
+                logger.warning("SessionPaymentAgent: confirm-token backfill skipped: %s", e)
+
             # Confirmation notifications for newly paid sessions
             newly_paid = await conn.fetch(
                 f"""SELECT cs.id, cs.session_id, cs.client_id, cs.coach_id,
@@ -611,7 +640,16 @@ class SessionPaymentAgent:
                 await self._reconcile_existing_intent(conn, session, existing, amount_cents)
                 return None
 
-            pm_id = (session.get("client_default_pm") or "").strip()
+            pm_id = ""
+            try:
+                from app.services.session_pm_sync import sync_default_pm_from_stripe
+                pm_id = await sync_default_pm_from_stripe(
+                    self.db_pool,
+                    user_key=str(session.get("client_id") or ""),
+                    customer_id=stripe_customer_id,
+                )
+            except Exception:
+                pm_id = ""
             if not pm_id:
                 try:
                     cu = stripe.Customer.retrieve(stripe_customer_id)
@@ -625,6 +663,8 @@ class SessionPaymentAgent:
                         pm_id = getattr(pm_id, "id", "") or ""
                 except Exception:
                     pm_id = ""
+            if not pm_id:
+                pm_id = (session.get("client_default_pm") or "").strip()
             if not pm_id:
                 payment_methods = stripe.PaymentMethod.list(
                     customer=stripe_customer_id, type="card", limit=1
@@ -854,13 +894,13 @@ so it is the default.</p>
 
         await self._log_event(conn, session_id, "reminder_sent", amount_cents, note="72h payment reminder")
 
-    async def _send_48h_reminder(self, conn, session):
-        """Send 48-hour session reminder with cancellation window notice."""
+    async def _send_48h_reminder(self, conn, session, notif_type: str = "reminder_48h"):
+        """Send 48-hour session reminder with a tap-to-confirm token."""
         session_id = session["id"]
         already = await conn.fetchval(
             """SELECT EXISTS(SELECT 1 FROM session_notifications
-               WHERE session_id = $1 AND notification_type = 'reminder_48h')""",
-            session_id,
+               WHERE session_id = $1 AND notification_type = $2)""",
+            session_id, notif_type,
         )
         if already:
             return
@@ -870,26 +910,53 @@ so it is the default.</p>
         client_name = session["client_name"] or "Client"
         session_date = _format_scheduled_for_session(session)
         payment_status = session["payment_status"] or "pending"
+        confirm_url = ""
+        try:
+            from app.services.session_confirm import confirm_url as _confirm_url, issue_confirm_token
+            raw = await issue_confirm_token(conn, session_id, session.get("scheduled_at"))
+            if raw:
+                confirm_url = _confirm_url(raw)
+        except Exception as e:
+            logger.warning("SessionPaymentAgent: confirm token mint failed: %s", e)
 
         if client_email and notify and hasattr(notify, "_send_email"):
             try:
                 payment_note = ""
                 if payment_status != "paid":
                     payment_note = (
-                        "<p><strong>Please confirm this appointment</strong> by keeping it "
-                        "on your Schedule. If you have not confirmed, your card on file is "
-                        "still charged about 24 hours before the session. The session is "
-                        "cancelled only if that charge does not succeed.</p>"
+                        "<p>Your card on file is still charged about 24 hours before "
+                        "the session. The session is cancelled only if that charge "
+                        "does not succeed.</p>"
                         "<p>Pay now on Billing → Invoices, or update the card under "
                         "Settings → Payments and tap the star so it is the default.</p>"
+                    )
+                confirm_note = ""
+                if confirm_url:
+                    confirm_note = (
+                        "<p style='text-align:center;margin:24px 0;'>"
+                        f"<a href='{confirm_url}' style='display:inline-block;background:#C9A962;"
+                        "color:#050505;font-weight:bold;padding:12px 28px;border-radius:6px;"
+                        "text-decoration:none;'>Confirm this appointment</a></p>"
+                        "<p>Tap the gold button to confirm you will attend. This is not a charge. "
+                        "The link is unique to this session.</p>"
+                    )
+                else:
+                    confirm_note = (
+                        "<p><strong>Please confirm this appointment</strong> from Schedule "
+                        "in the app if the button is missing.</p>"
                     )
 
                 from app.services.calendar_invite import html_cta_fragment, invite_from_session
 
                 invite = invite_from_session(session, coach_name=session.get("coach_name") or "your coach")
-                subject = "Session Reminder — 48 Hours"
+                subject = (
+                    "Please confirm your session"
+                    if notif_type == "confirm_request_48h"
+                    else "Session Reminder — 48 Hours"
+                )
                 body = f"""<p>Hello {client_name},</p>
 <p>This is a reminder that your coaching session is scheduled for <strong>{session_date}</strong>.</p>
+{confirm_note}
 {payment_note}
 <p><strong>Cancellation policy:</strong> Cancel 24 hours or more before the session to void the invoice / receive a refund. Cancel inside 24 hours and payment is still due because that slot cannot be filled.</p>
 {html_cta_fragment(invite, include_join=True)}
@@ -898,8 +965,8 @@ so it is the default.</p>
                 await notify._send_email(client_email, subject, body)
                 await conn.execute(
                     """INSERT INTO session_notifications (session_id, notification_type, channel, recipient_id)
-                       VALUES ($1, 'reminder_48h', 'email', $2) ON CONFLICT DO NOTHING""",
-                    session_id, session["client_id"],
+                       VALUES ($1, $2, 'email', $3) ON CONFLICT DO NOTHING""",
+                    session_id, notif_type, session["client_id"],
                 )
             except Exception as e:
                 logger.warning("SessionPaymentAgent: 48h email reminder failed: %s", e)
