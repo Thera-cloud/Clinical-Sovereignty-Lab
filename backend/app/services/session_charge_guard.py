@@ -168,12 +168,28 @@ async def release_claim(conn, session_uuid) -> None:
         logger.warning("release_claim %s: %s", session_uuid, e)
 
 
-def stripe_search_query(session_uuid, session_id_str: str = "") -> str:
-    parts = [f"metadata['session_uuid']:'{session_uuid}'"]
+def stripe_search_queries(session_uuid, session_id_str: str = "") -> list:
+    """Stripe Search rejects a query that mixes AND and OR.
+
+    Each clause is AND-only. Callers search them separately.
+    """
+    queries = [f"metadata['session_uuid']:'{session_uuid}' AND status:'succeeded'"]
     sid = str(session_id_str or "").strip()
-    if sid:
-        parts.append(f"metadata['session_id']:'{sid}'")
-    return "(" + " OR ".join(parts) + ") AND status:'succeeded'"
+    if sid and sid != str(session_uuid):
+        queries.append(f"metadata['session_id']:'{sid}' AND status:'succeeded'")
+    return queries
+
+
+def stripe_search_query(session_uuid, session_id_str: str = "") -> str:
+    """First AND-only search. Kept for callers that expect one string."""
+    return stripe_search_queries(session_uuid, session_id_str)[0]
+
+
+def _pi_succeeded(pi) -> bool:
+    status = getattr(pi, "status", None)
+    if status is None and isinstance(pi, dict):
+        status = pi.get("status")
+    return str(status or "") == "succeeded"
 
 
 def stripe_existing_charge(stripe_mod, session_uuid, session_id_str: str = ""):
@@ -182,13 +198,12 @@ def stripe_existing_charge(stripe_mod, session_uuid, session_id_str: str = ""):
     Raises on API failure — callers must treat that as "cannot verify" and skip
     the charge for this cycle (fail closed). Returns the PaymentIntent or None.
     """
-    res = stripe_mod.PaymentIntent.search(
-        query=stripe_search_query(session_uuid, session_id_str), limit=5
-    )
-    data = getattr(res, "data", None) or (res.get("data") if isinstance(res, dict) else None) or []
-    for pi in data:
-        if str(getattr(pi, "status", None) or (pi.get("status") if isinstance(pi, dict) else "")) == "succeeded":
-            return pi
+    for query in stripe_search_queries(session_uuid, session_id_str):
+        res = stripe_mod.PaymentIntent.search(query=query, limit=5)
+        data = getattr(res, "data", None) or (res.get("data") if isinstance(res, dict) else None) or []
+        for pi in data:
+            if _pi_succeeded(pi):
+                return pi
     return None
 
 

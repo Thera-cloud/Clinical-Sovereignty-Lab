@@ -118,6 +118,45 @@ def test_collected_reason_allows_clean_pending():
     ) is None
 
 
+def test_stripe_search_queries_are_and_only():
+    both = guard.stripe_search_queries("11111111-1111-1111-1111-111111111111", "SES_1")
+    assert len(both) == 2
+    for query in both:
+        assert " AND " in query
+        assert " OR " not in query
+    assert "session_uuid" in both[0]
+    assert "session_id" in both[1] and "SES_1" in both[1]
+    assert guard.stripe_search_queries("same", "") == [
+        "metadata['session_uuid']:'same' AND status:'succeeded'"
+    ]
+
+
+def test_stripe_existing_charge_searches_each_clause(monkeypatch):
+    calls = []
+
+    class _PI:
+        def __init__(self, status):
+            self.status = status
+
+    class _Res:
+        def __init__(self, data):
+            self.data = data
+
+    class _Stripe:
+        class PaymentIntent:
+            @staticmethod
+            def search(query, limit=5):
+                calls.append(query)
+                if "session_id" in query:
+                    return _Res([_PI("succeeded")])
+                return _Res([])
+
+    found = guard.stripe_existing_charge(_Stripe, "uuid-1", "SES_1")
+    assert found is not None and found.status == "succeeded"
+    assert len(calls) == 2
+    assert all(" OR " not in q for q in calls)
+
+
 def test_idempotency_key_stable_and_distinct():
     k1 = guard.idempotency_key("u-1", 9000, "pm_a")
     assert k1 == guard.idempotency_key("u-1", 9000, "pm_a")

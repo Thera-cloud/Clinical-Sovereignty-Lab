@@ -168,6 +168,9 @@ class SessionPaymentAgent:
             charged = 0
             reminded = 0
             cancelled = 0
+            # Charge skipped because Stripe could not be verified. Do not cancel
+            # those sessions this cycle — a search/API failure is not non-payment.
+            unverified_session_ids = set()
 
             for session in sessions_to_charge:
                 session_id = session["id"]
@@ -193,7 +196,9 @@ class SessionPaymentAgent:
                     success = await self._charge_card(
                         conn, session, stripe_customer, charge_amount
                     )
-                    if success is True:
+                    if success is None:
+                        unverified_session_ids.add(session["id"])
+                    elif success is True:
                         charged += 1
                     elif success is False:
                         await self._send_payment_reminder(conn, session, charge_amount)
@@ -220,6 +225,12 @@ class SessionPaymentAgent:
             )
 
             for s in overdue:
+                if s["id"] in unverified_session_ids:
+                    logger.warning(
+                        "SessionPaymentAgent: skip 24h cancel for %s — charge was not verified this cycle",
+                        s.get("session_id"),
+                    )
+                    continue
                 await conn.execute(
                     """UPDATE coaching_sessions
                        SET status = 'cancelled', payment_status = 'cancelled',
@@ -865,10 +876,12 @@ so it is the default.</p>
                 payment_note = ""
                 if payment_status != "paid":
                     payment_note = (
-                        "<p><strong>Payment reminder:</strong> Pay now on Billing → Invoices. "
-                        "Your card is also charged in the 72 hours before the session. "
-                        "If unpaid 24 hours before the start, the session is cancelled "
-                        "(non-payment is consent to cancel).</p>"
+                        "<p><strong>Please confirm this appointment</strong> by keeping it "
+                        "on your Schedule. If you have not confirmed, your card on file is "
+                        "still charged about 24 hours before the session. The session is "
+                        "cancelled only if that charge does not succeed.</p>"
+                        "<p>Pay now on Billing → Invoices, or update the card under "
+                        "Settings → Payments and tap the star so it is the default.</p>"
                     )
 
                 from app.services.calendar_invite import html_cta_fragment, invite_from_session
