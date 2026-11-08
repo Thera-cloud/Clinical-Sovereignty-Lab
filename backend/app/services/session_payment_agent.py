@@ -957,14 +957,27 @@ so it is the default.</p>
 
     async def _log_event(self, conn, session_id, event_type: str, amount_cents: int,
                          stripe_id: str = None, error: str = None, note: str = None):
-        """Log a payment event."""
+        """Log a payment event.
+
+        session_payment_events.event_type is a closed CHECK list. charge_skipped
+        is not on it — remap so a failed Stripe verify is visible to ops.
+        """
+        allowed = {
+            "charge_attempted", "charge_succeeded", "charge_failed", "refund",
+            "cancellation", "reminder_sent", "test_charge_simulated",
+            "obligation_created", "receipt_issued",
+        }
+        stored_type = event_type if event_type in allowed else "charge_failed"
+        stored_error = error
+        if stored_type != event_type:
+            stored_error = f"{event_type}: {error or note or ''}"[:180]
         try:
             await conn.execute(
                 """INSERT INTO session_payment_events (session_id, event_type, amount_cents,
                       stripe_payment_intent_id, error_message, metadata)
                    VALUES ($1, $2, $3, $4, $5, $6::jsonb)""",
-                session_id, event_type, amount_cents, stripe_id, error,
-                json.dumps({"note": str(note or "")[:1000]}),
+                session_id, stored_type, amount_cents, stripe_id, stored_error,
+                json.dumps({"note": str(note or "")[:1000], "requested_type": event_type}),
             )
         except Exception as e:
             logger.warning("SessionPaymentAgent: failed to log event: %s", e)

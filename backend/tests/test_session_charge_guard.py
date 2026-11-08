@@ -250,9 +250,10 @@ async def test_charge_card_skips_when_db_says_collected(monkeypatch):
     res = await agent._charge_card(conn, _session(), "cus_1", 9000)
     assert res is None
     assert stripe_mod._created == []
-    # charge_skipped logged (session_payment_events: $1 session_id, $2 event_type)
+    # charge_skipped remaps to charge_failed (CHECK list has no charge_skipped)
     kinds = [c.args[2] for c in conn.execute.await_args_list if len(c.args) > 2]
-    assert "charge_skipped" in kinds
+    assert "charge_failed" in kinds
+    assert any("charge_skipped" in str(c.args) for c in conn.execute.await_args_list)
 
 
 @pytest.mark.asyncio

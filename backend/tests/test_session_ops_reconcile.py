@@ -66,7 +66,50 @@ def test_classify_paid_billable():
         },
         NOW,
     )
-    assert actions == ["billable"]
+    assert actions == ["paid_confirmed"]
+
+
+def test_classify_unpaid_inside_48h():
+    actions = classify_session(
+        {
+            "status": "scheduled",
+            "scheduled_start": (NOW + timedelta(hours=30)).isoformat(),
+            "payment_status": "pending",
+            "price_cents": 9000,
+        },
+        NOW,
+    )
+    assert "unpaid_risk" in actions
+
+
+def test_classify_unpaid_beyond_48h_is_quiet():
+    actions = classify_session(
+        {
+            "status": "scheduled",
+            "scheduled_start": (NOW + timedelta(hours=50)).isoformat(),
+            "payment_status": "pending",
+            "price_cents": 9000,
+        },
+        NOW,
+    )
+    assert "unpaid_risk" not in actions
+
+
+def test_classify_unpaid_with_verify_fail_is_blocked():
+    actions = classify_session(
+        {
+            "status": "scheduled",
+            "scheduled_start": FUTURE.isoformat(),
+            "payment_status": "pending",
+            "price_cents": 9000,
+            "charge_verify_failed": True,
+            "client_default_pm": "",
+        },
+        NOW,
+    )
+    assert "unpaid_risk" in actions
+    assert "charge_blocked" in actions
+    assert "missing_profile_pm" in actions
 
 
 def test_classify_cancelled_pending_voids_orphan_invoice():
@@ -110,7 +153,7 @@ def test_classify_paid_beyond_36h_is_not_billable_flag():
         },
         NOW,
     )
-    assert "billable" not in actions
+    assert "paid_confirmed" not in actions
 
 
 def test_classify_hidden_four_days_out_still_cancels():

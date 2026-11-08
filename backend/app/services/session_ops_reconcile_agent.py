@@ -1,7 +1,8 @@
 """Next-day session operations reconciler.
 
 Accountant / admin pass: heal leftover Google/hidden cancels 14 days out;
-flag unpaid/billable inside 36 hours.
+flag unpaid sessions inside 48 hours (confirm window) and paid sessions
+inside 36 hours. Never email "ready to bill" for an unpaid session.
   - PG cancelled (or future hide-as-reference) while Google still has the event
     → delete Google
   - Google cancelled while PG still scheduled → cancel PG
@@ -30,6 +31,8 @@ DEAD_STATUSES = frozenset(
 ACTIVE_STATUSES = frozenset({"scheduled", "active", "pending_approval"})
 OPS_EMAIL = os.getenv("SESSION_OPS_EMAIL", "support@sovereignsanctuary.net")
 DIGEST_HOURS_ET = frozenset({6, 20})
+UNPAID_RISK_HOURS = 48
+PAID_REVIEW_HOURS = 36
 
 
 def _is_clone_node() -> bool:
@@ -103,20 +106,24 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
     if (
         future
         and start
-        and start <= now + timedelta(hours=24)
+        and start <= now + timedelta(hours=UNPAID_RISK_HOURS)
         and pay in ("pending", "unpaid")
         and status in ACTIVE_STATUSES
         and (int(row.get("price_cents") or 0) > 0)
     ):
         actions.append("unpaid_risk")
+        if row.get("charge_verify_failed"):
+            actions.append("charge_blocked")
+        if not str(row.get("client_default_pm") or "").strip():
+            actions.append("missing_profile_pm")
     if (
         future
         and start
-        and start <= now + timedelta(hours=36)
+        and start <= now + timedelta(hours=PAID_REVIEW_HOURS)
         and status in ACTIVE_STATUSES
         and pay == "paid"
     ):
-        actions.append("billable")
+        actions.append("paid_confirmed")
     sd = row.get("session_data") or {}
     if isinstance(sd, str):
         try:
@@ -214,7 +221,13 @@ class SessionOpsReconcileAgent:
                 await self._void_orphan_invoice(row)
                 item["healed"] = "voided_orphan_invoice"
                 healed.append(item)
-            if "unpaid_risk" in actions or "billable" in actions or "billing_mismatch" in actions:
+            if any(
+                a in actions
+                for a in (
+                    "unpaid_risk", "paid_confirmed", "billing_mismatch",
+                    "charge_blocked", "missing_profile_pm",
+                )
+            ):
                 flags.append(item)
         digest = {"healed": healed, "flags": flags, "scanned": len(rows)}
         await self._maybe_digest(digest, now)
@@ -228,21 +241,32 @@ class SessionOpsReconcileAgent:
         async with self.db_pool.acquire() as conn:
             recs = await conn.fetch(
                 """
-                SELECT session_id, client_id, coach_id, client_name, status,
-                       payment_status, price_cents, google_event_id, sync_state,
-                       scheduled_start, scheduled_end, session_data
-                FROM coaching_sessions
+                SELECT cs.session_id, cs.client_id, cs.coach_id, cs.client_name, cs.status,
+                       cs.payment_status, cs.price_cents, cs.google_event_id, cs.sync_state,
+                       cs.scheduled_start, cs.scheduled_end, cs.session_data,
+                       COALESCE(u.profile_data->>'default_payment_method_id','')
+                           AS client_default_pm,
+                       EXISTS (
+                           SELECT 1 FROM session_payment_events e
+                           WHERE e.session_id = cs.id
+                             AND e.event_type = 'charge_failed'
+                             AND COALESCE(e.error_message,'') ILIKE '%verif%'
+                             AND e.created_at > NOW() - INTERVAL '12 hours'
+                       ) AS charge_verify_failed
+                FROM coaching_sessions cs
+                LEFT JOIN users u ON u.hardware_id = cs.client_id
+                    OR u.id::text = cs.client_id::text
                 WHERE (
-                        COALESCE(scheduled_start, scheduled_at) >= $1
-                    AND COALESCE(scheduled_start, scheduled_at) < $2
+                        COALESCE(cs.scheduled_start, cs.scheduled_at) >= $1
+                    AND COALESCE(cs.scheduled_start, cs.scheduled_at) < $2
                     )
                    OR (
-                        UPPER(COALESCE(status,'')) IN
+                        UPPER(COALESCE(cs.status,'')) IN
                           ('CANCELLED','CANCELED','CANCELLED_BY_GOOGLE','RESCHEDULED')
-                    AND LOWER(COALESCE(payment_status,'')) IN ('pending','unpaid')
-                    AND COALESCE(scheduled_start, scheduled_at) > NOW() - INTERVAL '90 days'
+                    AND LOWER(COALESCE(cs.payment_status,'')) IN ('pending','unpaid')
+                    AND COALESCE(cs.scheduled_start, cs.scheduled_at) > NOW() - INTERVAL '90 days'
                     )
-                ORDER BY scheduled_start ASC
+                ORDER BY cs.scheduled_start ASC
                 LIMIT 500
                 """,
                 start, end,
@@ -364,9 +388,7 @@ class SessionOpsReconcileAgent:
         key = et.strftime("%Y-%m-%d-%H")
         if key == self._last_digest_key:
             return
-        issues = (digest.get("healed") or []) + [
-            f for f in (digest.get("flags") or []) if "unpaid_risk" in (f.get("actions") or [])
-        ]
+        issues = (digest.get("healed") or []) + list(digest.get("flags") or [])
         self._last_digest_key = key
         await self._send_digest(digest, issues, et)
 
@@ -377,13 +399,17 @@ class SessionOpsReconcileAgent:
             return
         rows_html = []
         for item in issues or digest.get("flags") or []:
+            acts = item.get("actions") or []
+            ready = "paid_confirmed" in acts and "unpaid_risk" not in acts
+            label = "PAID — session is charged" if ready else "NOT READY — do not treat as billed"
             rows_html.append(
                 "<tr>"
                 f"<td style='padding:6px 12px;'>{item.get('client_name') or ''}</td>"
                 f"<td style='padding:6px 12px;'>{item.get('scheduled_start') or ''}</td>"
                 f"<td style='padding:6px 12px;'>{item.get('status') or ''} / "
                 f"{item.get('payment_status') or ''}</td>"
-                f"<td style='padding:6px 12px;'>{', '.join(item.get('actions') or [])}</td>"
+                f"<td style='padding:6px 12px;'>{label}<br>"
+                f"{', '.join(acts)}</td>"
                 "</tr>"
             )
         table = (

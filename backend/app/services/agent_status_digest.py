@@ -388,6 +388,33 @@ class AgentStatusDigest:
         status, detail = self._check_agent(account_recon, "Account Event Reconciler")
         rows.append((status, "Account Event Reconciler", detail))
 
+        spa = getattr(self.app, "session_payment_agent", None)
+        status, detail = self._check_agent(spa, "Session Payment Agent")
+        if self.db_pool:
+            try:
+                async with self.db_pool.acquire() as conn:
+                    unpaid = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions
+                           WHERE LOWER(COALESCE(payment_status,'')) IN ('pending','unpaid')
+                             AND UPPER(COALESCE(status,'')) IN ('SCHEDULED','CONFIRMED','ACTIVE')
+                             AND COALESCE(price_cents,0) > 0
+                             AND COALESCE(scheduled_start, scheduled_at)
+                                 BETWEEN NOW() AND NOW() + INTERVAL '48 hours'"""
+                    )
+                    verify_fail = await conn.fetchval(
+                        """SELECT COUNT(*) FROM session_payment_events
+                           WHERE event_type = 'charge_failed'
+                             AND COALESCE(error_message,'') ILIKE '%verif%'
+                             AND created_at > NOW() - INTERVAL '12 hours'"""
+                    )
+                extra = f" | unpaid_48h={int(unpaid or 0)} verify_fail_12h={int(verify_fail or 0)}"
+                detail = (detail or "") + extra
+                if int(unpaid or 0) or int(verify_fail or 0):
+                    status = "WARNING"
+            except Exception as e:
+                status, detail = "WARNING", f"{detail} | roster check failed: {e}"
+        rows.append((status, "Session Payment Agent", detail))
+
         return {"title": "Billing / Accounts", "rows": rows}
 
     async def _section_trust_auditors(self) -> dict:
