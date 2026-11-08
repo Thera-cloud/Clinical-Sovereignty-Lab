@@ -10,6 +10,7 @@ import '../config/app_config.dart';
 /// without a new layout. A pick persists, then polls until today's still matches.
 class TheraRegionChoice extends StatefulWidget {
   final String token;
+  final String? userId;
   final String? initialRegion;
   final List<Map<String, String>>? initialChoices;
   final VoidCallback? onApplied;
@@ -17,6 +18,7 @@ class TheraRegionChoice extends StatefulWidget {
   const TheraRegionChoice({
     super.key,
     required this.token,
+    this.userId,
     this.initialRegion,
     this.initialChoices,
     this.onApplied,
@@ -49,6 +51,7 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
   String _selected = 'wander';
   bool _busy = false;
   bool _generating = false;
+  String _error = '';
   Timer? _poll;
 
   String get _base =>
@@ -57,6 +60,7 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         if (widget.token.isNotEmpty) 'Authorization': 'Bearer ${widget.token}',
+        if ((widget.userId ?? '').isNotEmpty) 'X-User-Id': widget.userId!,
       };
 
   @override
@@ -154,6 +158,7 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
     setState(() {
       _busy = true;
       _selected = id;
+      _error = '';
     });
     try {
       final resp = await http.post(
@@ -170,8 +175,18 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
             return;
           }
         }
+      } else if (mounted) {
+        setState(() {
+          _error = 'Could not set path (${resp.statusCode}). Try again.';
+        });
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Could not set path. Check connection and try again.';
+        });
+      }
+    }
     if (mounted) setState(() => _busy = false);
     widget.onApplied?.call();
   }
@@ -179,13 +194,15 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
   @override
   Widget build(BuildContext context) {
     if (_regions.isEmpty) return const SizedBox.shrink();
-    final detail = _generating
-        ? 'Walking your still now. It will land in Sovereign Journey when it is ready.'
-        : (_regions.firstWhere(
-              (r) => r['id'] == _selected,
-              orElse: () => const {'detail': ''},
-            )['detail'] ??
-            '');
+    final detail = _error.isNotEmpty
+        ? _error
+        : _generating
+            ? 'Walking your still now. It will land in Sovereign Journey when it is ready.'
+            : (_regions.firstWhere(
+                  (r) => r['id'] == _selected,
+                  orElse: () => const {'detail': ''},
+                )['detail'] ??
+                '');
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
@@ -219,7 +236,12 @@ class _TheraRegionChoiceState extends State<TheraRegionChoice> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 detail,
-                style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11),
+                style: TextStyle(
+                  color: _error.isNotEmpty
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF8B7355),
+                  fontSize: 11,
+                ),
               ),
             ),
         ],

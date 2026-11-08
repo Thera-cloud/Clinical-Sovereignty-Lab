@@ -233,7 +233,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
           };
         }).toList();
         if (archetype['archetype_image_url'] != null) {
-          mapped.insert(0, {
+          mapped.add({
             'id': 'archetype',
             'display_name': '${archetype['archetype_hint'] ?? 'Your Archetype'}',
             'content_type': 'sse_archetype',
@@ -242,6 +242,21 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
             '_sse': {'r2_url': archetype['archetype_image_url'], 'narrative_text': 'This is you in the Thera-World.'},
           });
         }
+        mapped.sort((a, b) {
+          final aType = a['content_type']?.toString() ?? '';
+          final bType = b['content_type']?.toString() ?? '';
+          if (aType == 'sse_archetype') return 1;
+          if (bType == 'sse_archetype') return -1;
+          final aJourney = (a['_sse'] is Map &&
+                  ((a['_sse']['panel_type'] ?? '') == 'journey'))
+              ? 0
+              : 1;
+          final bJourney = (b['_sse'] is Map &&
+                  ((b['_sse']['panel_type'] ?? '') == 'journey'))
+              ? 0
+              : 1;
+          return aJourney.compareTo(bJourney);
+        });
         setState(() => _items = mapped);
       }
     } catch (e) {
@@ -481,7 +496,11 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
             if (sjFolder)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: TheraRegionChoice(token: _token, onApplied: _reloadJourneyStill),
+                child: TheraRegionChoice(
+                  token: _token,
+                  userId: (widget.profile['username'] ?? _userId).toString(),
+                  onApplied: _reloadJourneyStill,
+                ),
               ),
             if (!sjFolder) ...[
               const SizedBox(height: 8),
@@ -502,7 +521,11 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       return false;
     }).toList() : <Map<String, dynamic>>[];
     return Column(children: [
-      if (sjSelected) TheraRegionChoice(token: _token, onApplied: _reloadJourneyStill),
+      if (sjSelected) TheraRegionChoice(
+        token: _token,
+        userId: (widget.profile['username'] ?? _userId).toString(),
+        onApplied: _reloadJourneyStill,
+      ),
       if (pushItems.isNotEmpty)
         Container(
           margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),

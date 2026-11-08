@@ -1259,9 +1259,22 @@ async def generate_journey_panel(user_id: str, db_pool, *, replace_today: bool =
     journey_fresh = None
     try:
         async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM sse_user_journeys WHERE user_id = $1", user_id)
+            row = await conn.fetchrow(
+                "SELECT * FROM sse_user_journeys WHERE user_id = ANY($1::text[]) "
+                "ORDER BY last_panel_at DESC NULLS LAST LIMIT 1",
+                aliases or [user_id])
+            metas = await conn.fetch(
+                "SELECT journey_metadata FROM sse_user_journeys WHERE user_id = ANY($1::text[])",
+                aliases or [user_id])
             if row:
                 journey_fresh = dict(row)
+                try:
+                    from app.sse.neuro_region_engine import merge_journey_metadata_dicts
+                    extras = [m["journey_metadata"] for m in metas]
+                    journey_fresh["journey_metadata"] = merge_journey_metadata_dicts(
+                        journey_fresh.get("journey_metadata"), *extras)
+                except Exception:
+                    pass
     except Exception as _jf_err:
         logger.warning("generate_journey_panel journey refresh failed: %s", _jf_err)
     if journey_fresh:

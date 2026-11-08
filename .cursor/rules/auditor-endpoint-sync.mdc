@@ -61,7 +61,7 @@ for t in TAB_ENDPOINTS:
 | Login | `login_audit_sent` | `login_test_accounts` | 2 | 150s |
 | Client App | `client_app_audit_sent` | `client_app_endpoint_count` | 35 | 160s |
 | Coach & DOJO | `coach_dojo_audit_sent` | `coach_dojo_endpoint_count` | 55 | 170s |
-| Billing | `billing_audit_sent` | `billing_endpoint_count` | 32 | 180s |
+| Billing | `billing_audit_sent` | `billing_endpoint_count` | 38 | 180s |
 | Defense | `defense_audit_sent` | `defense_subsystem_count` | 8 | 190s |
 | AI Pipeline | `ai_pipeline_audit_sent` | `ai_pipeline_check_count` | 6 | 200s |
 | WS Flows | `ws_flow_audit_sent` | `ws_flow_test_count` | 10 | 210s |

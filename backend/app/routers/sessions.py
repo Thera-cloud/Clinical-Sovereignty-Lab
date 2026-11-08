@@ -1717,10 +1717,25 @@ async def get_recording_status(session_id: str, request: Request):
         sessions = []
 
     target = None
-    for s in sessions:
-        if s.get("session_id") == session_id:
-            target = s
-            break
+    db = _get_db(request)
+    if db:
+        try:
+            from app.services.pg_data_helpers import load_sessions_pg
+            pg_rows = await load_sessions_pg(db, session_id=session_id)
+            if pg_rows:
+                target = pg_rows[0]
+        except Exception as e:
+            _logger.warning("get_recording_status PG lookup: %s", e)
+    if not target:
+        for s in sessions:
+            if s.get("session_id") == session_id:
+                target = s
+                break
+    elif not (target.get("zoom_meeting_id") or "").strip():
+        for s in sessions:
+            if s.get("session_id") == session_id and (s.get("zoom_meeting_id") or "").strip():
+                target["zoom_meeting_id"] = s.get("zoom_meeting_id")
+                break
     if not target:
         raise HTTPException(404, "Session not found")
     

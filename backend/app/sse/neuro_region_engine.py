@@ -31,6 +31,8 @@ from app.sse.neuro_scoring import (
     merge_alias_ids,
     neuro_health,
     neuro_metadata_for_stems,
+    STRUCTURE_TO_BIOME,
+    champions_for_biome,
     pair_champion,
     resolve_panel_region,
     roll_coliseum_floor,
@@ -42,6 +44,7 @@ from app.sse.neuro_scoring import (
 from app.sse.thera_world_regions import (
     BIOME_TO_STRUCTURE,
     COLISEUM_FLOOR_VISUAL,
+    EXPLORE_WANDER,
     REGION_NEURO,
     REGION_ORIGIN,
     neuro_biome_spec,
@@ -61,11 +64,36 @@ def _loads(v: Any) -> Any:
     return v
 
 
+def merge_journey_metadata_dicts(*raw: Any) -> Dict[str, Any]:
+    """Union alias journey_metadata. Origin/Neuro picks beat wander."""
+    merged: Dict[str, Any] = {}
+    picks: List[str] = []
+    for item in raw:
+        meta = _loads(item) if not isinstance(item, dict) else item
+        if not isinstance(meta, dict):
+            continue
+        merged.update(meta)
+        ch = str(meta.get("explore_region") or "").strip().lower()
+        if ch in (REGION_ORIGIN, REGION_NEURO, EXPLORE_WANDER):
+            picks.append(ch)
+    chosen = None
+    for ch in reversed(picks):
+        if ch in (REGION_ORIGIN, REGION_NEURO):
+            chosen = ch
+            break
+    if chosen:
+        merged["explore_region"] = chosen
+    elif picks:
+        merged["explore_region"] = picks[-1]
+    return merged
+
+
 async def _resolve_uid(user_id: str, db_pool) -> Optional[str]:
     try:
         async with db_pool.acquire() as conn:
             uid = await conn.fetchval(
-                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1", user_id)
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 "
+                "ORDER BY CASE WHEN role = 'CLIENT' THEN 0 ELSE 1 END LIMIT 1", user_id)
         return str(uid) if uid else None
     except Exception as e:
         logger.warning("neuro uid resolve failed for %s: %s", user_id, e)
@@ -116,7 +144,9 @@ async def resolve_journey_aliases(db_pool, *raw_ids: str) -> List[str]:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT hardware_id, username FROM users "
-                "WHERE hardware_id = ANY($1::text[]) OR username = ANY($1::text[]) "
+                "WHERE (hardware_id = ANY($1::text[]) OR username = ANY($1::text[])) "
+                "AND deleted_at IS NULL "
+                "ORDER BY CASE WHEN role = 'CLIENT' THEN 0 ELSE 1 END "
                 "LIMIT 1", seed)
         if row:
             return merge_alias_ids(row["hardware_id"], row["username"], *seed)
@@ -292,12 +322,29 @@ async def resolve_neuro_panel_context(
     recent_places = await _recent_neuro_biomes(user_id, db_pool, n=3)
     biome_id = select_neuro_biome(scores, avoid=recent_places)
     spec = neuro_biome_spec(biome_id)
-    if not spec:
-        return None
     exclude = AGE_GATE_EXCLUDE if age_gated else ()
     skip = await _recent_neuro_champions(user_id, db_pool, n=2)
-    champion = pair_champion(scores, biome_id, skip_names=skip, exclude_names=exclude)
-    if not champion:
+    champion = None
+    if spec:
+        champion = pair_champion(scores, biome_id, skip_names=skip, exclude_names=exclude)
+        if not champion:
+            champion = pair_champion(scores, biome_id, skip_names=(), exclude_names=exclude)
+        if not champion:
+            cands = champions_for_biome(biome_id)
+            champion = cands[0] if cands else None
+    if not champion or not spec:
+        for bid in STRUCTURE_TO_BIOME.values():
+            spec2 = neuro_biome_spec(bid)
+            if not spec2:
+                continue
+            champ2 = pair_champion(scores, bid, skip_names=(), exclude_names=exclude)
+            if not champ2:
+                cands = champions_for_biome(bid)
+                champ2 = cands[0] if cands else None
+            if champ2:
+                biome_id, spec, champion = bid, spec2, champ2
+                break
+    if not spec or not champion:
         return None
     visitors = visiting_figures(scores, biome_id, k=2, exclude_names=exclude)
 
@@ -668,8 +715,14 @@ async def apply_explore_region_choice(user_ids: List[str], region: str, db_pool)
             row = await conn.fetchrow(
                 "SELECT * FROM sse_user_journeys WHERE user_id = ANY($1::text[]) "
                 "ORDER BY last_panel_at DESC NULLS LAST LIMIT 1", aliases)
+            metas = await conn.fetch(
+                "SELECT journey_metadata FROM sse_user_journeys WHERE user_id = ANY($1::text[])",
+                aliases)
         if row:
             journey = dict(row)
+            extras = [m["journey_metadata"] for m in metas]
+            journey["journey_metadata"] = merge_journey_metadata_dicts(
+                journey.get("journey_metadata"), *extras)
     except Exception as e:
         logger.warning("apply_explore_region journey load failed: %s", e)
     journey["journey_metadata"] = journey.get("journey_metadata") or {}

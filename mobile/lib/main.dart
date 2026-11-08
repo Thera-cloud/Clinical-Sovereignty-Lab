@@ -11218,6 +11218,8 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   bool _isLoading = true;
   bool _isBooking = false;
   String _coachId = '';
+  String? _confirmingSessionId;
+  final Set<String> _locallyConfirmedSids = {};
 
   // ===== Coach calendar overview (client view) =====
   DateTime _calMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -11504,7 +11506,16 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
       } else if (type == 'client_upcoming_sessions') {
         setState(() {
           _upcomingSessions = List<Map<String, dynamic>>.from(
-            (data['sessions'] ?? []).map((s) => Map<String, dynamic>.from(s))
+            (data['sessions'] ?? []).map((s) {
+              final m = Map<String, dynamic>.from(s);
+              final sid = (m['session_id'] ?? '').toString();
+              if (_locallyConfirmedSids.contains(sid) &&
+                  (m['client_confirmed_at'] == null ||
+                      m['client_confirmed_at'].toString().isEmpty)) {
+                m['client_confirmed_at'] = DateTime.now().toUtc().toIso8601String();
+              }
+              return m;
+            }),
           );
           _isLoading = false;
         });
@@ -11654,6 +11665,49 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
   
   void _requestUpcomingSessions() {
     _socket?.sink.add(jsonEncode({"type": "client_get_upcoming_sessions"}));
+  }
+
+  Future<void> _confirmSessionInApp(Map<String, dynamic> session) async {
+    final sid = (session['session_id'] ?? '').toString();
+    final token = (widget.currentUserProfile?['token'] ?? '').toString();
+    if (sid.isEmpty || token.isEmpty) return;
+    setState(() => _confirmingSessionId = sid);
+    try {
+      final resp = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/sessions/confirm'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'session_id': sid}),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        setState(() {
+          _locallyConfirmedSids.add(sid);
+          _upcomingSessions = _upcomingSessions.map((s) {
+            if ((s['session_id'] ?? '').toString() == sid) {
+              return {...s, 'client_confirmed_at': DateTime.now().toUtc().toIso8601String()};
+            }
+            return s;
+          }).toList();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Appointment confirmed'), backgroundColor: Color(0xFFC9A962)),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Confirm failed (${resp.statusCode})'), backgroundColor: const Color(0xFFEF4444)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Confirm failed. Try the email link.'), backgroundColor: Color(0xFFEF4444)),
+        );
+      }
+    }
+    if (mounted) setState(() => _confirmingSessionId = null);
   }
   
   void _requestAvailability(String date) {
@@ -13192,6 +13246,27 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen>
                   const SizedBox(width: 6),
                   Expanded(child: Text(notes, style: const TextStyle(color: Colors.white70, fontSize: 12, fontStyle: FontStyle.italic))),
                 ],
+              ),
+            ),
+          ],
+          if ((status.toLowerCase() == 'scheduled' ||
+                  status.toLowerCase() == 'confirmed') &&
+              !_locallyConfirmedSids.contains((session['session_id'] ?? '').toString()) &&
+              (session['client_confirmed_at'] == null ||
+                  session['client_confirmed_at'].toString().isEmpty)) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: _confirmingSessionId == (session['session_id'] ?? '').toString()
+                    ? null
+                    : () => _confirmSessionInApp(session),
+                child: Text(
+                  _confirmingSessionId == (session['session_id'] ?? '').toString()
+                      ? 'Confirming…'
+                      : 'Confirm I will attend',
+                  style: const TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],

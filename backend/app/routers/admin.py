@@ -6406,7 +6406,8 @@ async def sse_set_explore_region(request: Request, _user: dict = Depends(_sse_au
     body = await request.json()
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     uname = _user.get("username") or uid
-    ids = [uid, uname] if uid != uname else [uid]
+    header_uid = (request.headers.get("x-user-id") or "").strip()
+    ids = [i for i in {uid, uname, header_uid} if i]
     pool = request.app.state.db_pool
     return await apply_explore_region_choice(ids, (body or {}).get("region") or "wander", pool)
 

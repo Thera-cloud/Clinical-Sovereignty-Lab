@@ -186,3 +186,81 @@ async def consume_confirm_token(conn, raw: str) -> Dict[str, Any]:
         "session_uuid": row["id"],
     })
     return out
+
+
+async def confirm_session_for_user(
+    conn,
+    session_id: str,
+    *,
+    username: str = "",
+    hardware_id: str = "",
+) -> Dict[str, Any]:
+    """Authenticated in-app confirm. Matches client_id to login identity, not the email token."""
+    out: Dict[str, Any] = {
+        "ok": False, "already": False, "expired": False,
+        "when": "", "session_id": "", "client_id": "", "coach_id": "",
+        "client_name": "", "coach_email": "", "coach_name": "",
+    }
+    sid = (session_id or "").strip()
+    if not sid:
+        return out
+    ids = [i for i in (username, hardware_id) if i]
+    if not ids:
+        return out
+    row = await conn.fetchrow(
+        """SELECT cs.id, cs.session_id, cs.client_id, cs.coach_id, cs.client_name,
+                  cs.client_confirmed_at, cs.status,
+                  COALESCE(cs.scheduled_start, cs.scheduled_at) AS scheduled_at,
+                  cu.profile_data->>'email' AS coach_email,
+                  cu.profile_data->>'name' AS coach_name
+           FROM coaching_sessions cs
+           LEFT JOIN users cu ON cu.id::text = cs.coach_id::text
+              OR cu.hardware_id = cs.coach_id::text
+           WHERE cs.session_id = $1
+           LIMIT 1""",
+        sid,
+    )
+    if not row:
+        return out
+    client_id = str(row["client_id"] or "")
+    if client_id not in ids:
+        aliases = await conn.fetch(
+            """SELECT hardware_id, username FROM users
+               WHERE hardware_id = ANY($1::text[]) OR username = ANY($1::text[])""",
+            ids,
+        )
+        allowed = set(ids)
+        for a in aliases:
+            if a["hardware_id"]:
+                allowed.add(a["hardware_id"])
+            if a["username"]:
+                allowed.add(a["username"])
+        if client_id not in allowed:
+            return out
+    status = str(row["status"] or "").upper()
+    if status in ("CANCELLED", "CANCELED", "RESCHEDULED", "CANCELLED_BY_GOOGLE"):
+        return out
+    already = bool(row["client_confirmed_at"])
+    await conn.execute(
+        """UPDATE coaching_sessions
+              SET client_confirmed_at = COALESCE(client_confirmed_at, NOW()),
+                  session_data = COALESCE(session_data, '{}'::jsonb)
+                    || jsonb_build_object('client_confirmed_at', NOW()::text),
+                  updated_at = NOW()
+            WHERE id = $1""",
+        row["id"],
+    )
+    when = str(row["scheduled_at"] or "")
+    out.update({
+        "ok": True,
+        "already": already,
+        "when": when,
+        "session_id": row["session_id"] or "",
+        "client_id": row["client_id"] or "",
+        "coach_id": row["coach_id"] or "",
+        "client_name": row["client_name"] or "",
+        "coach_email": row["coach_email"] or "",
+        "coach_name": row["coach_name"] or "",
+        "session_uuid": row["id"],
+    })
+    return out

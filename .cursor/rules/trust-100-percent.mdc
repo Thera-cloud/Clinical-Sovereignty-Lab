@@ -23,7 +23,7 @@ Trust Enforcer (meta-agent)
 ├── Sovereign Command .......... 25 endpoints
 ├── The Eye ..................... 21 endpoints
 ├── Nevedal Research Lab ........ 30 checks (24 REST + 6 DB pipeline)
-├── Billing Pipeline ........... 35 endpoints
+├── Billing Pipeline ........... 38 endpoints
 ├── Coach & DOJO ............... 55 endpoints
 ├── Client App ................. 35 endpoints
 ├── System Integrity ........... 18 checks
@@ -177,7 +177,7 @@ After deploying any backend, database, or infrastructure change:
 | Sovereign Command | 25 | `command_endpoint_count` |
 | The Eye | 21 | `eye_endpoint_count` |
 | Nevedal Lab | 30 | `nevedal_lab_endpoint_count` |
-| Billing | 35 | `billing_endpoint_count` |
+| Billing | 38 | `billing_endpoint_count` |
 | Coach & DOJO | 55 | `coach_dojo_endpoint_count` |
 | System Integrity | 18 | `system_integrity_check_count` |
 | Client App | 35 | `client_app_endpoint_count` |

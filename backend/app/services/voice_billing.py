@@ -29,6 +29,12 @@ STRIPE_VOICE_PRICES = {
 BLOCK_SECONDS = 1200  # 20 minutes per block
 PAUSED_TTL_SECONDS = 300  # 5-minute recovery window
 
+
+def next_voice_extend_idempotency_key(session_id: str, prior_succeeded: int) -> str:
+    """Per-block key so a second paid 20-min extend on the same call is not dropped."""
+    n = max(0, int(prior_succeeded or 0)) + 1
+    return f"voice-ext-{session_id}-{n}"
+
 SECONDS_MAP = {
     "1block": 1200,
     "5blocks": 6000,
@@ -395,16 +401,35 @@ class VoiceBillingSystem:
                 logger.warning("extend_session: STRIPE_VOICE_PRICE_1BLOCK not set")
                 return False
 
+            prior_n = 0
+            try:
+                listed = stripe.PaymentIntent.list(
+                    customer=account["stripe_customer_id"],
+                    limit=40,
+                )
+                for pi in listed.data or []:
+                    meta = getattr(pi, "metadata", None) or {}
+                    if isinstance(meta, dict):
+                        same = meta.get("session_id") == session_id and meta.get("type") == "voice_extension"
+                    else:
+                        same = False
+                    if same and getattr(pi, "status", "") == "succeeded":
+                        prior_n += 1
+            except Exception as e:
+                logger.warning("extend_session prior PI list: %s", e)
+            block_n = prior_n + 1
             intent = stripe.PaymentIntent.create(
                 amount=5000,
                 currency="usd",
                 customer=account["stripe_customer_id"],
                 confirm=True,
                 automatic_payment_methods={"enabled": True, "allow_redirects": "never"},
+                idempotency_key=next_voice_extend_idempotency_key(session_id, prior_n),
                 metadata={
                     "type": "voice_extension",
                     "user_id": user_id,
                     "session_id": session_id,
+                    "block_n": str(block_n),
                 },
             )
 

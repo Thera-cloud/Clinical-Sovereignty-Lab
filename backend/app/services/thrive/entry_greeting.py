@@ -398,7 +398,11 @@ async def gather_signals(db_pool: Any, user_id: str) -> EntrySignals:
                 """
                 SELECT panel_id::text AS panel_id, panel_type, biome, narrative_text,
                        character_manifest, r2_url, generated_at
-                FROM sse_panel_log WHERE user_id = ANY($1::text[]) ORDER BY generated_at DESC LIMIT 1
+                FROM sse_panel_log
+                WHERE user_id = ANY($1::text[])
+                  AND panel_type = 'journey'
+                  AND r2_url IS NOT NULL AND r2_url != ''
+                ORDER BY generated_at DESC LIMIT 1
                 """,
                 ids,
             )

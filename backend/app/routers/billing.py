@@ -2771,6 +2771,48 @@ async def verify_discount_code(code: str, request: Request,
     raise HTTPException(404, "Invalid or expired code")
 
 
+@router.post("/sessions/confirm")
+async def session_confirm_in_app(
+    request: Request,
+    current_user: str = Depends(get_current_user_id),
+):
+    """In-app confirm. Auth required. Does not use the public email token."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    sid = str((body or {}).get("session_id") or "").strip()
+    if not sid:
+        raise HTTPException(400, "session_id required")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    from app.services.session_confirm import confirm_session_for_user
+
+    hw = ""
+    uname = current_user
+    try:
+        user = getattr(request.state, "user", None) or {}
+        if isinstance(user, dict):
+            hw = str(user.get("hardware_id") or "")
+            uname = str(user.get("username") or current_user)
+    except Exception:
+        pass
+    async with pool.acquire() as conn:
+        result = await confirm_session_for_user(
+            conn, sid, username=uname, hardware_id=hw or current_user,
+        )
+    if not result.get("ok"):
+        raise HTTPException(404, "Session not found or not yours")
+    return {
+        "ok": True,
+        "already": bool(result.get("already")),
+        "session_id": result.get("session_id") or sid,
+        "when": result.get("when") or "",
+    }
+
+
 @public_router.get("/session-confirm", response_class=HTMLResponse)
 async def session_confirm_tap(
     request: Request,

@@ -5875,8 +5875,20 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                                   fontSize: 11,
                                   fontStyle: FontStyle.italic))),
                     const SizedBox(height: 8),
+                    if ((_recapData!["last_panel_url"] ?? '').toString().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      TheraPanelImage(
+                        url: (_recapData!["last_panel_url"] ?? '').toString(),
+                        height: 180,
+                      ),
+                    ],
                     TheraRegionChoice(
                       token: (widget.currentUserProfile?['token'] ?? '').toString(),
+                      userId: (widget.currentUserProfile?['username'] ??
+                              widget.currentUserProfile?['hardware_id'] ??
+                              widget.username ??
+                              '')
+                          .toString(),
                       initialRegion: (_recapData!['explore_region'] ?? 'wander').toString(),
                       onApplied: _refreshRecapQuiet,
                     ),

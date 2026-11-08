@@ -100,13 +100,14 @@ class SignupSharingAgent:
                 entity_type = link["entity_type"]
                 cap = link["monthly_sharing_cap_cents"]
 
-                already_processed = await conn.fetchval(
-                    """SELECT EXISTS(SELECT 1 FROM signup_sharing_ledger
+                existing = await conn.fetchrow(
+                    """SELECT id, status, stripe_transfer_id FROM signup_sharing_ledger
                        WHERE code_id = $1 AND entity_id = $2
-                       AND billing_period_start = $3 AND billing_period_end = $4)""",
+                       AND billing_period_start = $3 AND billing_period_end = $4
+                       LIMIT 1""",
                     code_id, entity_id, period_start, period_end,
                 )
-                if already_processed:
+                if existing and str(existing["status"] or "") == "completed":
                     continue
 
                 gross_cents = await self._get_invoice_amount(conn, entity_id, period_start, period_end)
@@ -133,7 +134,7 @@ class SignupSharingAgent:
 
                 status = "pending"
                 stripe_transfer_id = None
-
+                stripe_connect = None
                 if shared_cents > 0:
                     profile = await conn.fetchrow(
                         "SELECT profile_data FROM users WHERE hardware_id = $1 AND role = 'COACH'",
@@ -145,12 +146,20 @@ class SignupSharingAgent:
                             pd = json.loads(pd)
                         stripe_connect = pd.get("stripe_connect_id")
 
-                        if stripe_connect:
-                            stripe_transfer_id = await self._create_transfer(
-                                shared_cents, stripe_connect, code_id, entity_id, period_start
+                if existing and str(existing["status"] or "") == "pending":
+                    if shared_cents > 0 and stripe_connect:
+                        stripe_transfer_id = await self._create_transfer(
+                            shared_cents, stripe_connect, code_id, entity_id, period_start
+                        )
+                        if stripe_transfer_id:
+                            await conn.execute(
+                                """UPDATE signup_sharing_ledger
+                                      SET stripe_transfer_id = $1, status = 'completed'
+                                    WHERE id = $2""",
+                                stripe_transfer_id, existing["id"],
                             )
-                            if stripe_transfer_id:
-                                status = "completed"
+                    processed += 1
+                    continue
 
                 await conn.execute(
                     """INSERT INTO signup_sharing_ledger
@@ -162,8 +171,21 @@ class SignupSharingAgent:
                     code_id, coach_id, entity_id, entity_type,
                     gross_cents, effective_pct, shared_cents,
                     period_start, period_end,
-                    stripe_transfer_id, status, source_note,
+                    None, "pending", source_note,
                 )
+                if shared_cents > 0 and stripe_connect:
+                    stripe_transfer_id = await self._create_transfer(
+                        shared_cents, stripe_connect, code_id, entity_id, period_start
+                    )
+                    if stripe_transfer_id:
+                        await conn.execute(
+                            """UPDATE signup_sharing_ledger
+                                  SET stripe_transfer_id = $1, status = 'completed'
+                                WHERE code_id = $2 AND entity_id = $3
+                                  AND billing_period_start = $4 AND billing_period_end = $5
+                                  AND source_type = 'subscription'""",
+                            stripe_transfer_id, code_id, entity_id, period_start, period_end,
+                        )
                 processed += 1
 
             # DOJO sharing for master coaches (Loophole #6, #7)
@@ -322,6 +344,7 @@ class SignupSharingAgent:
                     "entity_id": entity_id,
                     "period": str(period_start),
                 },
+                idempotency_key=f"share-{code_id}-{entity_id}-{period_start}",
             )
             return transfer.id
 

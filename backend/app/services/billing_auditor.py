@@ -114,6 +114,15 @@ TAB_ENDPOINTS = [
             ("POST", "/api/admin/discounts/corporate/00000000-0000-0000-0000-000000000000/sync-stripe"),
         ],
     },
+    {
+        "tab": "Session Ops Integrity",
+        "tab_num": 10,
+        "endpoints": [
+            ("DB", "unpaid_48h_queryable"),
+            ("DB", "charge_verify_fail_queryable"),
+            ("DB", "unconfirmed_in_window_queryable"),
+        ],
+    },
 ]
 
 
@@ -219,7 +228,10 @@ class BillingPipelineAuditor:
                 }
                 for method, path in tab_def["endpoints"]:
                     tab_result["total"] += 1
-                    ep_result = await self._test_endpoint(session, method, path, headers)
+                    if method == "DB":
+                        ep_result = await self._run_db_check(path)
+                    else:
+                        ep_result = await self._test_endpoint(session, method, path, headers)
                     tab_result["endpoints"].append(ep_result)
                     if ep_result["status"] == "TRUSTED":
                         tab_result["trusted"] += 1
@@ -281,6 +293,58 @@ class BillingPipelineAuditor:
             elapsed = int((time.monotonic() - t0) * 1000)
             return {"method": method, "path": path, "code": 0,
                     "ms": elapsed, "status": "FAILED", "detail": str(exc)[:80]}
+
+    async def _run_db_check(self, check_name: str) -> dict:
+        t0 = time.monotonic()
+        if not self.db_pool:
+            return {"method": "DB", "path": check_name, "code": 0,
+                    "ms": 0, "status": "FAILED", "detail": "no db_pool"}
+        try:
+            async with self.db_pool.acquire() as conn:
+                if check_name == "unpaid_48h_queryable":
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions
+                           WHERE LOWER(COALESCE(status,'')) = 'scheduled'
+                             AND LOWER(COALESCE(payment_status,''))
+                                 NOT IN ('paid','waived','zero')
+                             AND COALESCE(scheduled_start, scheduled_at)
+                                 BETWEEN NOW() AND NOW() + INTERVAL '48 hours'"""
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    return {"method": "DB", "path": check_name, "code": 200,
+                            "ms": elapsed, "status": "TRUSTED",
+                            "detail": f"{int(n or 0)} unpaid in 48h window"}
+                if check_name == "charge_verify_fail_queryable":
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions
+                           WHERE session_data->>'charge_skipped_reason' = 'verify_fail'
+                             AND updated_at > NOW() - INTERVAL '14 days'"""
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    return {"method": "DB", "path": check_name, "code": 200,
+                            "ms": elapsed, "status": "TRUSTED",
+                            "detail": f"{int(n or 0)} verify_fail skips (14d)"}
+                if check_name == "unconfirmed_in_window_queryable":
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions
+                           WHERE LOWER(COALESCE(status,'')) = 'scheduled'
+                             AND client_confirmed_at IS NULL
+                             AND COALESCE(scheduled_start, scheduled_at)
+                                 BETWEEN NOW() AND NOW() + INTERVAL '72 hours'"""
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    return {"method": "DB", "path": check_name, "code": 200,
+                            "ms": elapsed, "status": "TRUSTED",
+                            "detail": f"{int(n or 0)} unconfirmed in 72h window"}
+                elapsed = int((time.monotonic() - t0) * 1000)
+                return {"method": "DB", "path": check_name, "code": 0,
+                        "ms": elapsed, "status": "FAILED",
+                        "detail": f"Unknown check: {check_name}"}
+        except Exception as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.warning("BillingPipelineAuditor: DB check '%s' failed: %s", check_name, e)
+            return {"method": "DB", "path": check_name, "code": 0,
+                    "ms": elapsed, "status": "FAILED", "detail": str(e)[:80]}
 
     @staticmethod
     def _is_empty_payload(body) -> bool:

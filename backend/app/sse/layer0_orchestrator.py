@@ -275,9 +275,12 @@ class SSEOrchestrator:
                             logger.info("Skipping %s — pending Thera-World symbol-safety review", hw)
                             continue
                         async with self.db_pool.acquire() as c2:
+                            from app.sse.neuro_region_engine import resolve_journey_aliases
+                            aliases = await resolve_journey_aliases(self.db_pool, hw) or [hw]
                             exists = await c2.fetchval(
-                                "SELECT 1 FROM sse_panel_log WHERE user_id=$1 AND generated_at::date = CURRENT_DATE LIMIT 1",
-                                hw)
+                                "SELECT 1 FROM sse_panel_log WHERE user_id = ANY($1::text[]) "
+                                "AND panel_type = 'journey' AND generated_at::date = CURRENT_DATE LIMIT 1",
+                                aliases)
                         if exists:
                             logger.info("Skipping %s — panel already exists today", hw)
                             continue

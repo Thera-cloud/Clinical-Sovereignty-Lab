@@ -548,12 +548,32 @@ def _iso_to_zoom_start(iso_str: str) -> str:
         return s
 
 
-async def _attach_zoom_if_needed(session: Dict[str, Any]) -> None:
+async def _zoom_meeting_is_shared(db_pool: Any, meeting_id: str, session_id: str) -> bool:
+    """True when another live session already holds this Zoom meeting_id."""
+    mid = (meeting_id or "").strip()
+    sid = (session_id or "").strip()
+    if not db_pool or not mid:
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            n = await conn.fetchval(
+                """SELECT COUNT(*) FROM coaching_sessions
+                   WHERE zoom_meeting_id = $1
+                     AND session_id IS DISTINCT FROM $2
+                     AND LOWER(COALESCE(status, '')) NOT IN
+                         ('cancelled', 'canceled', 'rescheduled', 'cancelled_by_google')""",
+                mid, sid,
+            )
+        return int(n or 0) > 0
+    except Exception as e:
+        logger.warning("session_negotiation_notify: zoom uniqueness check: %s", e)
+        return True
+
+
+async def _attach_zoom_if_needed(session: Dict[str, Any], db_pool: Any = None) -> None:
     from app.config import settings as _settings
 
     if not getattr(_settings, "ENABLE_ZOOM", False):
-        return
-    if (session.get("zoom_link") or "").strip():
         return
     try:
         from app.services.zoom_client import ZoomClient
@@ -572,17 +592,27 @@ async def _attach_zoom_if_needed(session: Dict[str, Any]) -> None:
                 dur_min = max(5, int((en - st).total_seconds() / 60))
         except Exception:
             pass
-        zoom_resp = await ZoomClient.from_env().create_meeting(
+        mid = str(session.get("zoom_meeting_id") or "").strip()
+        allow_patch = not await _zoom_meeting_is_shared(
+            db_pool, mid, str(session.get("session_id") or "")
+        )
+        zoom_resp = await ZoomClient.from_env().ensure_scheduled_meeting(
+            meeting_id=mid,
             topic=f"Session: {session.get('client_name', 'Client')}",
             start_time_iso=_iso_to_zoom_start(str(st_s)) or "",
             duration_minutes=dur_min,
+            allow_time_patch=allow_patch,
         )
         if zoom_resp.get("join_url"):
-            session["zoom_link"] = zoom_resp["join_url"]
-            session["zoom_meeting_id"] = str(zoom_resp.get("id", ""))
-            session["zoom_host_url"] = zoom_resp.get("start_url", "")
+            try:
+                from app.services.session_zoom_repair import apply_zoom_result as _apply
+                _apply(session, zoom_resp)
+            except Exception:
+                session["zoom_link"] = zoom_resp["join_url"]
+                session["zoom_meeting_id"] = str(zoom_resp.get("id", ""))
+                session["zoom_host_url"] = zoom_resp.get("start_url", "")
     except Exception as e:
-        logger.warning("session_negotiation_notify: Zoom create failed: %s", e)
+        logger.warning("session_negotiation_notify: Zoom ensure failed: %s", e)
 
 
 async def _apply_coach_ledger(db_pool: Any, session: Dict[str, Any]) -> None:
@@ -657,7 +687,7 @@ async def enrich_approved_session(
 ) -> Dict[str, Any]:
     """Zoom + ledger + GCal for WS/chat approve path (shared with channel finalize)."""
     if action in ("approve_session", "reschedule_and_approve"):
-        await _attach_zoom_if_needed(session)
+        await _attach_zoom_if_needed(session, db_pool)
         await _apply_coach_ledger(db_pool, session)
         await _gcal_sync_session(
             db_pool, session, action="update" if session.get("google_event_id") else "create"

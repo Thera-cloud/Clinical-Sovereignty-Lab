@@ -26,6 +26,25 @@ _ZOOM_MEETING_ID_RE = re.compile(
 )
 
 
+def zoom_start_differs(existing_start: str, requested_iso: str) -> bool:
+    """True when Zoom's stored start is not the requested minute (UTC)."""
+    def _norm(s: str) -> str:
+        raw = (s or "").strip().replace("Z", "+00:00")
+        if not raw:
+            return ""
+        try:
+            parsed = dt.datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt.timezone.utc)
+            return parsed.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        except Exception:
+            return raw[:16]
+    req = (requested_iso or "").strip()
+    if not req:
+        return False
+    return _norm(existing_start) != _norm(req)
+
+
 def parse_zoom_meeting_id(*urls: Any) -> str:
     """Extract numeric Zoom meeting id from join/host URLs."""
     for raw in urls:
@@ -181,6 +200,43 @@ class ZoomClient:
             resp = await client.post(url, json=payload, headers={"Authorization": f"Bearer {token}"})
             resp.raise_for_status()
             return resp.json()
+
+    async def update_meeting(
+        self,
+        *,
+        meeting_id: str,
+        start_time_iso: str = "",
+        duration_minutes: Optional[int] = None,
+        topic: Optional[str] = None,
+        host_user: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """PATCH start_time / duration on an existing scheduled meeting."""
+        token = await self._get_access_token()
+        mid = (meeting_id or "").strip()
+        if not mid:
+            raise ValueError("Missing meeting_id")
+        payload: Dict[str, Any] = {}
+        if start_time_iso:
+            payload["start_time"] = start_time_iso
+        if duration_minutes is not None:
+            payload["duration"] = int(duration_minutes)
+        if topic:
+            payload["topic"] = topic
+        if not payload:
+            return {}
+        url = f"https://api.zoom.us/v2/meetings/{mid}"
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.patch(url, json=payload, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code == 404:
+                return {"code": 3001, "deleted": True}
+            try:
+                data = resp.json() if resp.content else {}
+            except Exception:
+                data = {}
+            if isinstance(data, dict) and data.get("code") == 3001:
+                return {"code": 3001, "deleted": True}
+            resp.raise_for_status()
+            return data if isinstance(data, dict) else {}
 
     async def delete_meeting(self, *, meeting_id: str, host_user: Optional[str] = None) -> None:
         """
@@ -554,12 +610,15 @@ class ZoomClient:
         agenda: str = "",
         settings: Optional[Dict[str, Any]] = None,
         host_user: Optional[str] = None,
+        allow_time_patch: bool = True,
     ) -> Dict[str, Any]:
         """
         Keep a live scheduled meeting + fresh host start_url.
 
         Zoom 404 / code 3001 means the stored meeting was deleted. Recreate it.
         If the meeting still exists, mint a new ZAK so Open Zoom is host, not guest.
+        PATCH start_time when the stored start differs and allow_time_patch is True
+        (caller must skip PATCH when this meeting_id is shared with another session).
         """
         mid = (meeting_id or "").strip()
         existing = None
@@ -568,24 +627,45 @@ class ZoomClient:
         status = str((existing or {}).get("status") or "").lower()
         if existing and status not in ("finished", "ended"):
             live_id = str(existing.get("id") or mid)
-            join_url = str(existing.get("join_url") or "")
-            start_url = str(existing.get("start_url") or "")
-            try:
-                zak = await self.get_zak_token(host_user=host_user)
-                refreshed = host_start_url(live_id, zak)
-                if refreshed:
-                    start_url = refreshed
-            except Exception as e:
-                logging.getLogger("zoom_client").warning(
-                    "ensure_scheduled_meeting ZAK refresh failed for %s: %s", live_id, e
-                )
-            return {
-                "id": live_id,
-                "join_url": join_url,
-                "start_url": start_url,
-                "recreated": False,
-                "status": status or "waiting",
-            }
+            if allow_time_patch and zoom_start_differs(
+                str(existing.get("start_time") or ""), start_time_iso
+            ):
+                try:
+                    patched = await self.update_meeting(
+                        meeting_id=live_id,
+                        start_time_iso=start_time_iso,
+                        duration_minutes=int(duration_minutes or 50),
+                        topic=topic,
+                        host_user=host_user,
+                    )
+                    if patched.get("deleted") or patched.get("code") == 3001:
+                        existing = None
+                    else:
+                        existing = {**existing, **{k: v for k, v in patched.items() if v}}
+                        status = str(existing.get("status") or status).lower()
+                except Exception as e:
+                    logging.getLogger("zoom_client").warning(
+                        "ensure_scheduled_meeting PATCH start_time failed for %s: %s", live_id, e
+                    )
+            if existing and status not in ("finished", "ended"):
+                join_url = str(existing.get("join_url") or "")
+                start_url = str(existing.get("start_url") or "")
+                try:
+                    zak = await self.get_zak_token(host_user=host_user)
+                    refreshed = host_start_url(live_id, zak)
+                    if refreshed:
+                        start_url = refreshed
+                except Exception as e:
+                    logging.getLogger("zoom_client").warning(
+                        "ensure_scheduled_meeting ZAK refresh failed for %s: %s", live_id, e
+                    )
+                return {
+                    "id": live_id,
+                    "join_url": join_url,
+                    "start_url": start_url,
+                    "recreated": False,
+                    "status": status or "waiting",
+                }
 
         created = await self.create_meeting(
             topic=topic,

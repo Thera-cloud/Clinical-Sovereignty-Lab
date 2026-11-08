@@ -206,7 +206,7 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                            topics_covered, homework_assigned, mood_at_start,
                            mood_at_end, nate_summary, recording_url, session_data,
                            payment_status, price_cents, cancellation_deadline,
-                           created_at, updated_at,
+                           created_at, updated_at, client_confirmed_at,
                            session_data->>'consultation_email' AS consultation_email,
                            session_data->>'consultation_name' AS consultation_name,
                            session_data->>'consultation_subject' AS consultation_subject
@@ -250,6 +250,7 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                     "consultation_email": r.get("consultation_email") or "",
                     "consultation_name": r.get("consultation_name") or "",
                     "consultation_subject": r.get("consultation_subject") or "",
+                    "client_confirmed_at": str(r["client_confirmed_at"]) if r.get("client_confirmed_at") else None,
                 }
                 extra = r.get("session_data")
                 if isinstance(extra, str):
@@ -332,9 +333,9 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      actual_start = EXCLUDED.actual_start,
                      actual_end = EXCLUDED.actual_end,
                      duration_minutes = EXCLUDED.duration_minutes,
-                     zoom_link = EXCLUDED.zoom_link,
-                     zoom_meeting_id = EXCLUDED.zoom_meeting_id,
-                     zoom_host_url = EXCLUDED.zoom_host_url,
+                     zoom_link = COALESCE(NULLIF(EXCLUDED.zoom_link, ''), coaching_sessions.zoom_link),
+                     zoom_meeting_id = COALESCE(NULLIF(EXCLUDED.zoom_meeting_id, ''), coaching_sessions.zoom_meeting_id),
+                     zoom_host_url = COALESCE(NULLIF(EXCLUDED.zoom_host_url, ''), coaching_sessions.zoom_host_url),
                      notes = EXCLUDED.notes,
                      coach_notes = EXCLUDED.coach_notes,
                      topics_covered = EXCLUDED.topics_covered,
@@ -507,6 +508,15 @@ async def upsert_classroom_analysis_pg(db_pool, analysis: Dict) -> bool:
         completed_at = analysis.get("completed_at")
 
         async with db_pool.acquire() as conn:
+            if not family_id:
+                try:
+                    fam = await conn.fetchval(
+                        "SELECT family_id FROM coaching_sessions WHERE session_id = $1",
+                        session_id,
+                    )
+                    family_id = (fam or "")[:128]
+                except Exception:
+                    pass
             await conn.execute("""
                 INSERT INTO classroom_session_analyses (
                     session_id, coach_id, client_id, client_name, family_id,
