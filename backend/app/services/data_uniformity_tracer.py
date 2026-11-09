@@ -19,6 +19,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from app.services.audit_window_guard import already_ran_this_window
 
 logger = logging.getLogger("nate.data_uniformity_tracer")
 
@@ -59,7 +60,8 @@ class DataUniformityTracer:
             try:
                 now = datetime.now(timezone.utc)
                 window_key = f"{now.date().isoformat()}_{now.hour}"
-                if now.hour in AUDIT_HOURS and window_key not in self._sent_windows:
+                if (now.hour in AUDIT_HOURS and window_key not in self._sent_windows
+                        and not await already_ran_this_window(self.db_pool, "data_uniformity_audit_sent")):
                     await self._build_and_send(now)
                     self._sent_windows.add(window_key)
                     self._sent_windows = {

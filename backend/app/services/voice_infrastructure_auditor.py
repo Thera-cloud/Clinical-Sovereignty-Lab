@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 import aiohttp
+from app.services.audit_window_guard import already_ran_this_window
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,8 @@ class VoiceInfrastructureAuditor:
         await asyncio.sleep(STAGGER_SECONDS)
         while self._running:
             now = datetime.now(timezone.utc)
-            if now.hour in AUDIT_HOURS:
+            if (now.hour in AUDIT_HOURS
+                    and not await already_ran_this_window(self._pool, "voice_infra_audit_sent")):
                 try:
                     await self._build_and_send()
                 except Exception as e:

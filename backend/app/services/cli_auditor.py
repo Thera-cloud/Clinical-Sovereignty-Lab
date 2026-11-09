@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
+from app.services.audit_window_guard import already_ran_this_window
 
 logger = logging.getLogger("nate.cli_auditor")
 
@@ -111,7 +112,8 @@ class CliAuditor:
             try:
                 now = datetime.now(timezone.utc)
                 window_key = f"{now.date().isoformat()}_{now.hour}"
-                if now.hour in AUDIT_HOURS and window_key not in self._sent_windows:
+                if (now.hour in AUDIT_HOURS and window_key not in self._sent_windows
+                        and not await already_ran_this_window(self.db_pool, "cli_audit_sent")):
                     await self._build_and_send(now)
                     self._sent_windows.add(window_key)
                     self._sent_windows = {

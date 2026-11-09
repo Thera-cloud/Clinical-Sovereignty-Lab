@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+from app.services.audit_window_guard import already_ran_this_window
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,8 @@ class LittleNateApiAuditor:
         while self._running:
             try:
                 now = datetime.now(timezone.utc)
-                if now.hour in AUDIT_HOURS and now.minute < 5:
+                if (now.hour in AUDIT_HOURS and now.minute < 5
+                        and not await already_ran_this_window(self._db_pool, "littlenate_api_audit_sent")):
                     await asyncio.sleep(STAGGER_SECONDS)
                     await self._build_and_send()
                 await asyncio.sleep(300)
