@@ -257,6 +257,147 @@ async def enrich_coach_briefing_zoom(
     return out
 
 
+async def classroom_zoom_wisdom_count(db_pool, session_id: str) -> int:
+    """Session-linked classroom_zoom rows (client, coach, or household)."""
+    sid = (session_id or "").strip()
+    if not db_pool or not sid:
+        return 0
+    try:
+        async with db_pool.acquire() as conn:
+            n = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM wisdom_extractions w
+                  JOIN coaching_sessions cs ON cs.id = w.session_id
+                 WHERE cs.session_id = $1
+                   AND w.source = 'classroom_zoom'
+                """,
+                sid,
+            )
+            return int(n or 0)
+    except Exception as e:
+        logger.warning("classroom_zoom_wisdom_count failed: %s", e)
+        return 0
+
+
+async def record_classroom_zoom_wisdom(
+    db_pool,
+    *,
+    session_id: str,
+    coach_id: str,
+    client_id: str,
+    content: str,
+    client_name: str = "",
+) -> int:
+    """Write classroom_zoom wisdom keyed to coaching_sessions.id + user UUID."""
+    sid = (session_id or "").strip()
+    body = (content or "").strip()[:8000]
+    if not db_pool or not sid or len(body) < 40:
+        return 0
+    inserted = 0
+    try:
+        async with db_pool.acquire() as conn:
+            cs = await conn.fetchrow(
+                """
+                SELECT id::text AS id, client_id, coach_id
+                  FROM coaching_sessions WHERE session_id = $1 LIMIT 1
+                """,
+                sid,
+            )
+            if not cs or not cs["id"]:
+                logger.warning("record_classroom_zoom_wisdom: no PG row %s", sid)
+                return 0
+            pg_id = cs["id"]
+            booked = (cs["client_id"] or client_id or "").strip()
+            coach_hw = (cs["coach_id"] or coach_id or "").strip()
+
+        from app.services.zoom_household_learning import household_crystal_targets
+        from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+        targets = await household_crystal_targets(db_pool, booked or client_id)
+        mgr = WisdomLifecycleManager(db_pool, None)
+        seen_uids = set()
+
+        async def _uid_and_family(hw: str) -> Tuple[str, str]:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id::text AS id, family_id::text AS family_id
+                      FROM users
+                     WHERE hardware_id = $1 OR LOWER(username) = LOWER($1)
+                     LIMIT 1
+                    """,
+                    hw,
+                )
+            if not row:
+                return "", ""
+            return (row["id"] or ""), (row["family_id"] or "")
+
+        async def _write(uid: str, family_uuid: str, text: str) -> None:
+            nonlocal inserted
+            if not uid or uid in seen_uids:
+                return
+            async with db_pool.acquire() as conn:
+                exists = await conn.fetchval(
+                    """
+                    SELECT 1 FROM wisdom_extractions
+                     WHERE source = 'classroom_zoom'
+                       AND session_id = $1::uuid
+                       AND user_id = $2::uuid
+                     LIMIT 1
+                    """,
+                    pg_id,
+                    uid,
+                )
+            if exists:
+                seen_uids.add(uid)
+                return
+            wid = await mgr.extract_wisdom(
+                source="classroom_zoom",
+                content=text,
+                user_id=uid,
+                domain="coaching",
+                confidence=0.45,
+                session_id=pg_id,
+                family_id=family_uuid or None,
+            )
+            if not wid and family_uuid:
+                wid = await mgr.extract_wisdom(
+                    source="classroom_zoom",
+                    content=text,
+                    user_id=uid,
+                    domain="coaching",
+                    confidence=0.45,
+                    session_id=pg_id,
+                    family_id=None,
+                )
+            if wid:
+                seen_uids.add(uid)
+                inserted += 1
+
+        header = f"Live session {sid} (classroom_zoom).\n"
+        primary_name = (client_name or "").strip() or "the booked client"
+        for t in targets:
+            hw = (t.get("hardware_id") or "").strip()
+            uid, fam = await _uid_and_family(hw)
+            is_primary = str(t.get("primary") or "") in ("1", "true", "True")
+            if is_primary:
+                text = header + body
+            else:
+                text = (
+                    f"Household live session (Sovereign Circle) with {primary_name}. "
+                    f"Session {sid}.\n" + body[:4000]
+                )
+            await _write(uid, fam, text)
+
+        if coach_hw:
+            uid, fam = await _uid_and_family(coach_hw)
+            await _write(uid, fam, header + body)
+    except Exception as e:
+        logger.warning("record_classroom_zoom_wisdom failed %s: %s", sid, e)
+        return inserted
+    return inserted
+
+
 async def _resolve_user_keys(db_pool, client_id: str) -> List[str]:
     keys = [client_id] if client_id else []
     try:
@@ -536,33 +677,14 @@ async def audit_zoom_learning_gaps_pg(
         )
     )
 
-    wisdom_rows = 0
-    try:
-        async with db_pool.acquire() as conn:
-            coach_uid = await conn.fetchval(
-                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
-                coach_id,
-            )
-            if coach_uid:
-                wisdom_rows = int(
-                    await conn.fetchval(
-                        """
-                        SELECT COUNT(*) FROM wisdom_extractions
-                        WHERE source = 'classroom_zoom' AND user_id = $1
-                        """,
-                        coach_uid,
-                    )
-                    or 0
-                )
-    except Exception:
-        pass
+    wisdom_rows = await classroom_zoom_wisdom_count(db_pool, sid)
     checks.append(
         _check(
             "B8",
             "wisdom_extractions row",
             "B",
-            wisdom_rows > 0 or sd.get("classroom_analysis_available"),
-            f"rows={wisdom_rows} classroom_flag={sd.get('classroom_analysis_available')}",
+            wisdom_rows > 0,
+            f"session_linked_rows={wisdom_rows}",
         )
     )
 

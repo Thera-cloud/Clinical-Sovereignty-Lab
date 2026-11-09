@@ -82,6 +82,8 @@ class WisdomLifecycleManager:
         user_id: str = None,
         domain: str = "clinical",
         confidence: float = 0.5,
+        session_id: str = None,
+        family_id: str = None,
     ) -> Optional[str]:
         """
         Extract a wisdom entry from a therapeutic interaction.
@@ -91,6 +93,8 @@ class WisdomLifecycleManager:
         if not self.db or not (content or "").strip():
             return None
         uid = self._parse_user_uuid(user_id)
+        sid = self._parse_user_uuid(session_id)
+        fid = self._parse_user_uuid(family_id)
         insight_type = f"wisdom_{(source or 'unknown')[:40]}"
         eff = float(confidence)
         try:
@@ -101,10 +105,12 @@ class WisdomLifecycleManager:
                         user_id, family_id, session_id, insight_type, content,
                         effectiveness_score, source, domain, confidence, status
                     )
-                    VALUES ($1, NULL, NULL, $2, $3, $4::double precision, $5, $6, $7::double precision, 'pending')
+                    VALUES ($1, $2, $3, $4, $5, $6::double precision, $7, $8, $9::double precision, 'pending')
                     RETURNING id::text
                     """,
                     uid,
+                    fid,
+                    sid,
                     insight_type,
                     (content or "").strip()[:20000],
                     eff,

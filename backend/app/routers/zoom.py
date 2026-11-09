@@ -589,6 +589,22 @@ async def _archive_transcript_and_classroom_for_pg_session(
             await try_place_session_summary_in_coach_folder(db_pool, pg_row, str(meeting_id))
         except Exception as _zf_skip:
             logger.warning("[Zoom] Folder place on transcript-skip %s: %s", session_id, _zf_skip)
+        try:
+            from app.services.zoom_learning_registry import record_classroom_zoom_wisdom
+
+            _skip_body = (sd0.get("zoom_ai_summary_text") or "").strip() or vtt_bytes.decode(
+                "utf-8", errors="ignore"
+            )[:8000]
+            await record_classroom_zoom_wisdom(
+                db_pool,
+                session_id=session_id,
+                coach_id=str(pg_row.get("coach_id") or ""),
+                client_id=str(pg_row.get("client_id") or ""),
+                content=_skip_body,
+                client_name=str(pg_row.get("client_name") or ""),
+            )
+        except Exception as _w_skip:
+            logger.warning("[Zoom] classroom wisdom on transcript-skip %s: %s", session_id, _w_skip)
         return
 
     from app.services.blob_storage import upload_bytes
@@ -864,34 +880,30 @@ async def _archive_transcript_and_classroom_for_pg_session(
     except Exception as _zf_err:
         logger.warning("[Zoom] Coach folder summary placement for %s: %s", session_id, _zf_err)
 
-    if db_pool and coach_id and (vtt_text or "").strip():
+    if db_pool and session_id and (
+        (zoom_ai_summary_text or "").strip() or (vtt_text or "").strip()
+    ):
         async def _wisdom_followup():
             try:
-                uid = None
-                async with db_pool.acquire() as c:
-                    uid = await c.fetchval(
-                        "SELECT id::text FROM users WHERE hardware_id = $1 LIMIT 1",
-                        coach_id,
-                    )
-                if not uid:
-                    return
-                from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+                from app.services.zoom_learning_registry import record_classroom_zoom_wisdom
 
-                mgr = WisdomLifecycleManager(db_pool, None)
-                await mgr.extract_wisdom(
-                    source="classroom_zoom",
-                    content=(vtt_text or "")[:20000],
-                    user_id=uid,
-                    domain="coaching",
-                    confidence=0.45,
+                body = (zoom_ai_summary_text or "").strip() or (vtt_text or "")[:8000]
+                n = await record_classroom_zoom_wisdom(
+                    db_pool,
+                    session_id=session_id,
+                    coach_id=coach_id or "",
+                    client_id=client_id or "",
+                    content=body,
+                    client_name=client_name or "",
                 )
+                logger.info("[Zoom] classroom_zoom wisdom rows=%s session=%s", n, session_id)
             except Exception as _w_err:
-                logger.debug("[Zoom] classroom wisdom follow-up: %s", _w_err)
+                logger.warning("[Zoom] classroom wisdom follow-up: %s", _w_err)
 
         try:
             asyncio.create_task(_wisdom_followup())
-        except Exception:
-            pass
+        except Exception as _task_err:
+            logger.warning("[Zoom] classroom wisdom task: %s", _task_err)
 
 
 async def _process_live_session_marker(event: str, payload: Dict[str, Any], meeting_id: str) -> None:
