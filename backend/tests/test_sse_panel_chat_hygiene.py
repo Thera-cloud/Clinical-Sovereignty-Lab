@@ -105,6 +105,18 @@ async def test_recent_panel_thread_queries_user_text_within_window_only():
     assert "ORDER BY created_at DESC" in pool.sql
 
 
+@pytest.mark.asyncio
+async def test_last_discussed_panel_id_bounded_to_current_thread_window():
+    """Production check (LetsGoLisa): her last tagged panel was the Aug 4
+    journey still, 8h old — explicit follow-up words resolved back to it.
+    The prior-tag lookup must share the 2h thread window."""
+    pid = "0f3b2d9a-1c4e-4b7a-9d2f-6a8c1e5b7d30"
+    pool = _Pool([{"user_text": f"(asking about my Sovereign Journey story panel image id:{pid})"}])
+    assert await spc._last_discussed_panel_id(pool, ["u"]) == pid
+    assert "INTERVAL '2 hours'" in pool.sql
+    assert "SELECT user_text" in pool.sql and "ai_text" not in pool.sql
+
+
 # ── build_sse_panel_chat_context routing ──────────────────────────────────────
 
 NOW = datetime.now(timezone.utc)

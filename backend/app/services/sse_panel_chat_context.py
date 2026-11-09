@@ -805,6 +805,10 @@ def _stale_panel_note(row: dict[str, Any]) -> str:
 
 
 async def _last_discussed_panel_id(db_pool, ids: list[str]) -> str | None:
+    """Panel the client tagged in the CURRENT thread (same 2h window as
+    `_recent_panel_thread`). A tag from an earlier day must not hijack a
+    follow-up — that is how the stale Aug still kept re-entering Lisa's chat.
+    Older tags fall through to the panel-of-the-day resolver."""
     if not db_pool or not ids:
         return None
     try:
@@ -813,6 +817,7 @@ async def _last_discussed_panel_id(db_pool, ids: list[str]) -> str | None:
             SELECT user_text
             FROM conversation_history
             WHERE user_id = ANY($1::text[])
+              AND created_at > NOW() - INTERVAL '2 hours'
             ORDER BY created_at DESC
             LIMIT 8
             """,
