@@ -55,9 +55,11 @@ def test_recall_diversity_flag_defaults_off_and_is_additive():
 def test_new_chapter_endpoint_shape():
     src = _src("routers", "admin.py")
     i = src.index('@sse_client_router.post("/journey/new-chapter")')
-    body = src[i:i + 4500]
+    body = src[i:i + 6000]
     # Validates against active delivery config, not free text.
     assert "FROM sse_delivery_config WHERE storyboard_id=$1 AND status='active'" in body
+    # One new chapter per 24h per client (cost + chapter-hopping guard).
+    assert "INTERVAL '24 hours'" in body and "HTTPException(429" in body
     # Completes other active enrollments (never deletes), inserts/upserts the new one.
     assert "SET status='completed'" in body
     assert "DELETE FROM sse_enrolled_users" not in body
@@ -70,9 +72,39 @@ def test_new_chapter_endpoint_shape():
     assert "'{chapter}'" in body
     # Atomic.
     assert "async with conn.transaction():" in body
-    # Does not mint on the spot — daily cycle owns minting.
+    # First panel of the new chapter is painted in the BACKGROUND through the
+    # shared delivery runtime, scoped to this user only, symbol-review gated,
+    # and never through the journey-still minter.
     assert "generate_journey_panel" not in body
-    assert "generate_user_daily_panel" not in body
+    assert "generate_daily_panels(sid, pool, skip_check=_skip)" in body
+    assert "if u != uid:" in body and "return True" in body
+    assert "needs_symbol_review as _nsr" in body
+    assert "_aio.create_task(_mint_first_chapter_panel())" in body
+    # Response is returned before the mint finishes (task, not await).
+    assert "await _mint_first_chapter_panel()" not in body
+
+
+def test_codex_legend_resolves_delivery_daily_panels():
+    """Welcome-card Legend holds the panel-of-the-day id, which may be a
+    delivery log_id; the codex endpoint must fall back to that table."""
+    src = _src("routers", "admin.py")
+    i = src.index('@sse_client_router.get("/codex/panel/{panel_id}")')
+    body = src[i:i + 9000]
+    assert "FROM sse_delivery_generation_log" in body
+    assert "WHERE log_id::text = $1" in body
+    assert 'codex_source = "delivery"' in body
+    assert '"source_type": codex_source' in body
+    # Ownership check still applies to the fallback row.
+    assert 'if not row or row["user_id"] not in ids:' in body
+
+
+def test_journey_panels_tag_source_and_today():
+    src = _src("routers", "admin.py")
+    i = src.index('@sse_client_router.get("/journey/panels")')
+    body = src[i:i + 4000]
+    assert 'panel["source_type"] = "journey" if' in body
+    assert 'panel["is_today"] = bool(' in body
+    assert "_today_utc" in body
 
 
 def test_chapters_endpoint_lists_active_storyboards_only():

@@ -5808,10 +5808,30 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     uname = _user.get("username") or uid
     ids = [i for i in {uid, uname} if i]
+    codex_source = "journey"
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT user_id, character_manifest, narrative_text, biome, generated_at, panel_tone, "
             "panel_metadata, crystal_domains_used FROM sse_panel_log WHERE panel_id = $1", panel_id)
+        if not row:
+            # Panel-of-the-day may be a delivery-runtime daily panel (log_id, not
+            # panel_id). Legend must open for it too — same id the Welcome card holds.
+            drow = await conn.fetchrow(
+                "SELECT user_id, storyboard_id, generated_at, generation_type::text AS generation_type, "
+                "client_narrative_text FROM sse_delivery_generation_log "
+                "WHERE log_id::text = $1 AND r2_url IS NOT NULL AND r2_url != ''", panel_id)
+            if drow:
+                codex_source = "delivery"
+                row = {
+                    "user_id": drow["user_id"],
+                    "character_manifest": None,
+                    "narrative_text": drow["client_narrative_text"] or "",
+                    "biome": drow["storyboard_id"] or "",
+                    "generated_at": drow["generated_at"],
+                    "panel_tone": drow["generation_type"],
+                    "panel_metadata": None,
+                    "crystal_domains_used": None,
+                }
         if not row or row["user_id"] not in ids:
             raise HTTPException(404, "panel not found")
         owner = row["user_id"]
@@ -5828,6 +5848,10 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
             owner, panel_id)
         latest_at = await conn.fetchval(
             "SELECT MAX(generated_at) FROM sse_panel_log WHERE user_id = $1", owner)
+        if codex_source == "delivery":
+            latest_at = await conn.fetchval(
+                "SELECT MAX(generated_at) FROM sse_delivery_generation_log "
+                "WHERE user_id = $1 AND r2_url IS NOT NULL AND r2_url != ''", owner)
     npc_details: list = []
     if jrow and jrow["last_panel_npcs"]:
         raw = jrow["last_panel_npcs"]
@@ -5933,13 +5957,18 @@ async def sse_client_codex_panel(panel_id: str, request: Request, _user: dict = 
                 legend_rows[idx] = {**legend_rows[idx], **entry}
     except Exception as _hyp_err:  # noqa: BLE001
         logger.warning("APHL: legend merge skipped for panel %s: %s", panel_id, _hyp_err)
+    _biome_label = bundle.get("biome_label") or bundle["biome"]
+    if codex_source == "delivery":
+        from app.sse.panel_of_the_day import storyboard_title as _sb_title
+        _biome_label = _sb_title(row["biome"] or "") or _biome_label
     return {
         "panel_id": panel_id,
+        "source_type": codex_source,
         "legend": legend_rows,
         "journey_thread": bundle["journey_thread"],
         "panel_sequence": bundle["panel_sequence"],
         "biome": bundle["biome"],
-        "biome_label": bundle.get("biome_label") or bundle["biome"],
+        "biome_label": _biome_label,
         "region": bundle.get("region") or "origin",
         "character": bundle["character"],
         "hypothesis_enabled": hyp_enabled,
@@ -6212,11 +6241,17 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
         uid = hw_id or uname
         j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
         f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
+    _journey_ids = {str(r["id"]) for r in rows_j}
     merged = sorted([dict(r) for r in rows_j] + [dict(r) for r in rows_w],
                      key=lambda x: x.get("generated_at") or "", reverse=True)[:50]
+    from datetime import datetime as _dt, timezone as _tz
+    _today_utc = _dt.now(_tz.utc).date()
     for panel in merged:
         panel["r2_url"] = _refresh_presigned(panel.get("r2_url"))
         panel.setdefault("region", "origin")
+        panel["source_type"] = "journey" if str(panel.get("id")) in _journey_ids else "delivery"
+        _ga = panel.get("generated_at")
+        panel["is_today"] = bool(_ga and _ga.astimezone(_tz.utc).date() == _today_utc)
     archetype = dict(f) if f else {}
     if archetype.get("archetype_image_url"):
         archetype["archetype_image_url"] = _refresh_presigned(archetype["archetype_image_url"])
@@ -6335,8 +6370,8 @@ async def sse_client_journey_chapters(request: Request, _user: dict = Depends(_s
 @sse_client_router.post("/journey/new-chapter")
 async def sse_client_journey_new_chapter(request: Request, _user: dict = Depends(_sse_auth)):
     """Client-initiated 'new season': complete the current storyboard enrollment,
-    enroll in the chosen one, and reset scene continuity so the next daily panel
-    opens fresh. Does NOT mint immediately — the regular daily cycle does."""
+    enroll in the chosen one, reset scene continuity, and paint the first panel of
+    the new chapter in the background (one new-chapter per 24h per client)."""
     from app.sse.panel_of_the_day import storyboard_title
     body = await request.json() or {}
     sid = (body.get("storyboard_id") or "").strip()
@@ -6351,6 +6386,12 @@ async def sse_client_journey_new_chapter(request: Request, _user: dict = Depends
             "SELECT 1 FROM sse_delivery_config WHERE storyboard_id=$1 AND status='active' LIMIT 1", sid)
         if not ok:
             raise HTTPException(404, "That chapter is not available right now.")
+        recent = await conn.fetchval(
+            "SELECT 1 FROM sse_user_journeys WHERE user_id = ANY($1) "
+            "AND (journey_metadata->>'chapter_started_at')::timestamptz > NOW() - INTERVAL '24 hours' LIMIT 1",
+            ids)
+        if recent:
+            raise HTTPException(429, "You opened a new chapter within the last day. Give it one more day before turning the page again.")
         async with conn.transaction():
             completed = await conn.fetch(
                 "UPDATE sse_enrolled_users SET status='completed' "
@@ -6372,9 +6413,29 @@ async def sse_client_journey_new_chapter(request: Request, _user: dict = Depends
                 "INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail) "
                 "VALUES ($1, 'client_new_chapter', 'Client Started New Chapter', $2)",
                 uid, f"{', '.join(c['storyboard_id'] for c in completed) or '(none)'} → {sid}")
+
+    async def _mint_first_chapter_panel() -> None:
+        # Single-user mint through the shared delivery runtime: everyone else in
+        # the storyboard is skipped, and the symbol-safety gate still applies.
+        try:
+            from app.sse.foundation.delivery_runtime import generate_daily_panels
+            from app.sse.layer1_identity_forge import needs_symbol_review as _nsr
+
+            async def _skip(u: str) -> bool:
+                if u != uid:
+                    return True
+                return await _nsr(u, pool)
+
+            res = await generate_daily_panels(sid, pool, skip_check=_skip)
+            print(f">>> [SSE NEW CHAPTER] first panel user={uid} sid={sid} result={res}")
+        except Exception as _mint_err:
+            print(f">>> [SSE NEW CHAPTER] first panel mint skipped user={uid}: {_mint_err}")
+
+    import asyncio as _aio
+    _aio.create_task(_mint_first_chapter_panel())
     return {"status": "new_chapter", "storyboard_id": sid, "title": storyboard_title(sid),
             "completed": [c["storyboard_id"] for c in completed],
-            "message": f"A new chapter begins: {storyboard_title(sid)}. Your next daily panel opens there."}
+            "message": f"A new chapter begins: {storyboard_title(sid)}. Your first panel there is being painted now — it will appear on your Welcome card shortly."}
 
 
 @sse_client_router.get("/recap")
