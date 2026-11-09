@@ -369,8 +369,60 @@ class SessionOpsReconcileAgent:
                 row.get("session_id"), e,
             )
 
+    async def _claim_notify(self, row: Dict[str, Any]) -> bool:
+        """Mark cancel_notify_sent BEFORE emailing (DB + in-memory row).
+
+        Payment agent already claims first; the REST coach-cancel path writes the
+        same flag. The conditional UPDATE loses the race if anyone else already
+        notified, so a restart mid-send or a second notifier cannot double-email
+        the client/coach/family.
+        """
+        sid = row.get("session_id")
+        if not sid or not self.db_pool:
+            return False
+        try:
+            async with self.db_pool.acquire() as conn:
+                claimed = await conn.fetchval(
+                    """
+                    UPDATE coaching_sessions
+                    SET session_data = COALESCE(session_data, '{}'::jsonb)
+                      || jsonb_build_object(
+                           'cancel_notify_sent', true,
+                           'cancel_notified_at', NOW()::text,
+                           'cancel_notified_by', 'session_ops_reconcile'
+                         )
+                    WHERE session_id = $1
+                      AND LOWER(COALESCE(session_data->>'cancel_notify_sent', ''))
+                          NOT IN ('true', '1', 'yes')
+                    RETURNING session_id
+                    """,
+                    sid,
+                )
+        except Exception as e:
+            logger.warning(
+                "SessionOpsReconcileAgent: notify claim failed sid=%s: %s", sid, e,
+            )
+            return False
+        sd = row.get("session_data")
+        if isinstance(sd, str):
+            try:
+                sd = json.loads(sd) if sd else {}
+            except Exception:
+                sd = {}
+        if not isinstance(sd, dict):
+            sd = {}
+        sd["cancel_notify_sent"] = True
+        row["session_data"] = sd
+        if not claimed:
+            logger.info(
+                "SessionOpsReconcileAgent: cancel already notified sid=%s — skipping", sid,
+            )
+        return bool(claimed)
+
     async def _notify_cancel(self, row: Dict[str, Any]) -> None:
         if _notify_sent(row):
+            return
+        if not await self._claim_notify(row):
             return
         notify_sys = (
             getattr(self.app_state, "notification_system", None)
@@ -404,19 +456,29 @@ class SessionOpsReconcileAgent:
                 "SessionOpsReconcileAgent: notify failed sid=%s: %s",
                 row.get("session_id"), e,
             )
+
+    async def _digest_already_sent(self) -> bool:
+        """Durable dedup: `_last_digest_key` lives in memory, so a backend restart
+        inside the 06:xx / 20:xx ET hour re-sent the digest (observed 2026-11-08
+        20:16 + 20:40 ET). The two windows are 14h apart, so a 6h lookback on the
+        skyeye_activity row is safe.
+        """
+        if not self.db_pool:
+            return False
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute(
+                hit = await conn.fetchval(
                     """
-                    UPDATE coaching_sessions
-                    SET session_data = COALESCE(session_data, '{}'::jsonb)
-                      || '{"cancel_notify_sent": true}'::jsonb
-                    WHERE session_id = $1
-                    """,
-                    row.get("session_id"),
+                    SELECT 1 FROM skyeye_activity
+                    WHERE type = 'session_ops_reconcile_sent'
+                      AND created_at > NOW() - INTERVAL '6 hours'
+                    LIMIT 1
+                    """
                 )
-        except Exception:
-            pass
+            return bool(hit)
+        except Exception as e:
+            logger.warning("SessionOpsReconcileAgent: digest dedup check failed: %s", e)
+            return False
 
     async def _maybe_digest(self, digest: Dict[str, Any], now: datetime) -> None:
         try:
@@ -427,6 +489,10 @@ class SessionOpsReconcileAgent:
             return
         key = et.strftime("%Y-%m-%d-%H")
         if key == self._last_digest_key:
+            return
+        if await self._digest_already_sent():
+            self._last_digest_key = key
+            logger.info("SessionOpsReconcileAgent: digest already sent this window — skipping")
             return
         issues = (digest.get("healed") or []) + list(digest.get("flags") or [])
         self._last_digest_key = key

@@ -810,6 +810,14 @@ async def apply_coach_session_cancel(
     except Exception as e:
         logger.warning("session_approval: coach-side cancel email failed: %s", e)
 
+    if notify.get("email") or notify.get("coach_email"):
+        # Top-level keys outside the PG column set land in session_data via
+        # upsert_session_pg (_save_session_dual). Without this flag the
+        # SessionOpsReconcileAgent re-sends the same cancel emails ≤30 min later.
+        session["cancel_notify_sent"] = True
+        session["cancel_notified_at"] = str(datetime.now())
+        session["cancel_notified_by"] = "coach_cancel"
+
     return {
         "session": session,
         "refund_outcome": refund_outcome,

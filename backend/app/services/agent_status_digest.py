@@ -81,9 +81,11 @@ class AgentStatusDigest:
     async def _build_and_send(self, now: datetime):
         try:
             async with self.db_pool.acquire() as conn:
+                # Whole-hour window: 30-min lookback missed restarts later in the
+                # hour and double-sent the digest (2026-11-08 23h, 2026-11-09 05h UTC).
                 already = await conn.fetchval(
                     "SELECT 1 FROM skyeye_activity WHERE type='agent_digest_sent' "
-                    "AND created_at > NOW() - INTERVAL '30 minutes' LIMIT 1")
+                    "AND created_at >= date_trunc('hour', NOW()) LIMIT 1")
             if already:
                 logger.info("AgentStatusDigest: skipping — already sent this window")
                 return

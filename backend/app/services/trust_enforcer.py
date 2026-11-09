@@ -214,9 +214,11 @@ class TrustEnforcer:
     async def _enforce_and_report(self, now: datetime):
         try:
             async with self.db_pool.acquire() as conn:
+                # Whole-hour window: a 30-min lookback let a restart at HH:45
+                # re-send the HH:10 report (observed 2026-11-08 23:10Z + 23:55Z).
                 already = await conn.fetchval(
                     "SELECT 1 FROM skyeye_activity WHERE type='trust_enforcer_sent' "
-                    "AND created_at > NOW() - INTERVAL '30 minutes' LIMIT 1")
+                    "AND created_at >= date_trunc('hour', NOW()) LIMIT 1")
             if already:
                 logger.info("TrustEnforcer: skipping — already sent this window")
                 return
