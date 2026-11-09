@@ -215,6 +215,23 @@ def _human_day_part(day_part: str) -> str:
     return _DAY_PART_HUMAN.get(day_part or "", (day_part or "").replace("_", " "))
 
 
+def _thera_panel_lead(panel: Dict[str, Any]) -> str:
+    """One honest sentence about the resolved panel of the day.
+
+    Journey stills name a biome ("put you in Drift Valley"). Storyboard daily
+    panels name the chapter instead, since their ``biome`` is the storyboard id.
+    ``is_today`` decides Today's vs Yesterday's so we never call a fresh panel
+    yesterday's or an old one today's."""
+    when = "Today's" if panel.get("is_today") else "Yesterday's"
+    if (panel.get("source_type") or "journey") == "delivery":
+        chapter = (panel.get("biome") or "").strip()
+        if chapter:
+            return f"{when} Thera-World panel is ready in your chapter {chapter.title()}."
+        return f"{when} Thera-World panel is ready in your current chapter."
+    biome = panel.get("biome") or "your world"
+    return f"{when} Thera-World panel put you in {biome}."
+
+
 # "Lisa West disclosed: "…"" / "The client expressed that …" — source framing LN must never echo.
 _CRYSTAL_FRAMING = re.compile(
     r"^\s*(?:the\s+)?(?:[A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+){0,3}|user|client)\s+"
@@ -394,29 +411,27 @@ async def gather_signals(db_pool: Any, user_id: str) -> EntrySignals:
             if hw:
                 ids.append(hw)
         try:
-            p = await conn.fetchrow(
-                """
-                SELECT panel_id::text AS panel_id, panel_type, biome, narrative_text,
-                       character_manifest, r2_url, generated_at
-                FROM sse_panel_log
-                WHERE user_id = ANY($1::text[])
-                  AND panel_type = 'journey'
-                  AND r2_url IS NOT NULL AND r2_url != ''
-                ORDER BY generated_at DESC LIMIT 1
-                """,
-                ids,
-            )
+            # Panel of the day across BOTH pipelines (journey still + storyboard
+            # daily panel) — journey-only reads left clients whose stills had
+            # stopped hearing about a months-old scene every morning.
+            from app.sse.panel_of_the_day import resolve_panel_of_the_day
+
+            p = await resolve_panel_of_the_day(conn, ids, now=now)
             if p:
+                gen = p.get("generated_at")
                 sig.thera_panel = {
                     "panel_id": p["panel_id"],
                     "panel_type": p["panel_type"],
-                    "biome": (p["biome"] or "").replace("_", " "),
-                    "narrative": (p["narrative_text"] or "")[:400],
-                    "narrative_text": (p["narrative_text"] or "")[:400],
-                    "character_manifest": p["character_manifest"] or "",
-                    "image_url": p["r2_url"],
-                    "generated_at": p["generated_at"].isoformat() if p["generated_at"] else None,
-                    "age_days": round((now - p["generated_at"]).total_seconds() / 86400, 1) if p["generated_at"] else None,
+                    "source_type": p.get("source_type") or "journey",
+                    "biome": (p.get("biome") or "").replace("_", " "),
+                    "narrative": (p.get("narrative_text") or "")[:400],
+                    "narrative_text": (p.get("narrative_text") or "")[:400],
+                    "character_manifest": p.get("character_manifest") or "",
+                    "image_url": p.get("r2_url"),
+                    "generated_at": gen.isoformat() if gen else None,
+                    "age_days": round(float(p["age_days"]), 1) if p.get("age_days") is not None else None,
+                    "is_today": bool(p.get("is_today")),
+                    "is_stale": bool(p.get("is_stale")),
                 }
             q = await conn.fetch("SELECT goal FROM sse_quests WHERE user_id = ANY($1::text[]) AND status='active' ORDER BY started_at DESC LIMIT 2", ids)
             sig.active_quests = [x["goal"] for x in q if x["goal"]]
@@ -547,8 +562,7 @@ def compose_direction(s: EntrySignals) -> str:
         when = "today" if p["in_days"] <= 0.5 else f"in about {max(1, int(round(p['in_days'])))} day{'s' if p['in_days'] >= 1.5 else ''}"
         topics.append(f"{len(topics)+1}) Your {_human_domain(p['domain'])} pattern points to {p['event'].replace('_', ' ')} {when} (I'm about {int(p['confidence']*100)}% sure). Naming it before it arrives is how we make it smaller.")
     if s.thera_panel and s.thera_panel.get("age_days") is not None and s.thera_panel["age_days"] <= 2:
-        biome = s.thera_panel.get("biome") or "your world"
-        topics.append(f"{len(topics)+1}) Yesterday's Thera-World panel put you in {biome}. Your memory chose those symbols for a reason — tap Thera-World below and I'll walk you through what surfaced.")
+        topics.append(f"{len(topics)+1}) {_thera_panel_lead(s.thera_panel)} Your memory chose those symbols for a reason — tap Thera-World below and I'll walk you through what surfaced.")
     if coaching:
         if s.goals_active and len(topics) < 3:
             g = s.goals_active[0]
@@ -619,8 +633,7 @@ def compose_blend(s: EntrySignals) -> str:
             f"If we point anywhere, I'd name the {_human_domain(str(p.get('domain') or ''))} pattern that looks like {event} {when} — naming it early keeps it smaller."
         )
     elif s.thera_panel and s.thera_panel.get("age_days") is not None and s.thera_panel["age_days"] <= 2:
-        biome = s.thera_panel.get("biome") or "your world"
-        sentences.append(f"Yesterday's Thera-World panel put you in {biome}. We can walk that, or you can start somewhere else.")
+        sentences.append(f"{_thera_panel_lead(s.thera_panel)} We can walk that, or you can start somewhere else.")
     elif gp.is_coaching_phase(s.phase, s.sub_state) and s.practices_due and s.practices_due[0] in pc.PRACTICES:
         pr_ = pc.PRACTICES[s.practices_due[0]]
         sentences.append(f"If you have {pr_.minutes} minutes, {pr_.label} would fit — or just tell me what's true this {_human_day_part(s.day_part)}.")

@@ -36,6 +36,7 @@ import '../widgets/coach_integrations_hub.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
 import 'intake_form_screen.dart';
+import 'onboarding_paid_screen.dart' show IntakeConversationScreen;
 import 'high_risk_crisis_screens.dart';
 import 'coaching_mesh_screen.dart';
 import 'community_mesh_screen.dart';
@@ -3563,13 +3564,32 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
                 backgroundColor: const Color(0xFF1A1A1A),
                 title: const Text('Change Archetype?', style: TextStyle(color: Color(0xFFE8D5A3))),
-                content: const Text('This will reset your character identity. Your journey, quests, and story panels will be preserved, but your archetype image and character will be regenerated based on a new conversation with Little Nate.\n\nContinue?', style: TextStyle(color: Colors.white70)),
+                content: const Text('This will reset your character identity. Your journey, quests, story panels, and anything you asked Nate to leave out of your images will be preserved; your previous archetype is kept in your history. Your archetype image and character will be regenerated from a new conversation with Little Nate, which starts right away.\n\nContinue?', style: TextStyle(color: Colors.white70)),
                 actions: [TextButton(onPressed: () => Navigator.pop(_, false), child: const Text('Cancel')), TextButton(onPressed: () => Navigator.pop(_, true), child: const Text('Reset', style: TextStyle(color: Color(0xFFC9A962))))],
               ));
               if (ok != true) return;
               final tok = _profile['token']?.toString() ?? '';
-              final resp = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/identity/reset'), headers: {'Authorization': 'Bearer $tok'});
-              if (mounted && resp.statusCode == 200) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Archetype reset. Open your chat to begin a new intake.'))); }
+              http.Response? resp;
+              try {
+                resp = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/identity/reset'), headers: {'Authorization': 'Bearer $tok'});
+              } catch (_) {}
+              if (!mounted) return;
+              if (resp == null || resp.statusCode != 200) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Couldn't reset just now — try again in a moment.")));
+                return;
+              }
+              // Go straight into the 11-turn intake so the client is never left
+              // on a "reset but nothing happened" dead end.
+              await Navigator.push(context, MaterialPageRoute(
+                builder: (_) => IntakeConversationScreen(
+                  profileWithToken: Map<String, dynamic>.from(_profile),
+                  onComplete: () => Navigator.of(context).pop(),
+                ),
+              ));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Your new archetype is being forged. Your next daily panel will reflect it.')));
+                _fetchArchetypeStatus();
+              }
             }),
           ]),
           const SizedBox(height: 20),

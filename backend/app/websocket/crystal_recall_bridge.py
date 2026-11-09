@@ -82,6 +82,12 @@ _GLOBAL_SNIPPET = int(_os.getenv("BRIDGE_RECALL_GLOBAL_SNIPPET", "200"))
 _SYNC_DEEP_RECALL = (_os.getenv("BRIDGE_SYNC_DEEP_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
 _SYNC_DEEP_TIMEOUT_S = float(_os.getenv("BRIDGE_SYNC_DEEP_TIMEOUT_S", "1.8"))
 _VALIDATOR_FILTER_RECALL = (_os.getenv("BRIDGE_VALIDATOR_FILTER_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
+# QUANTUM-CRYSTAL-ARCH: CRYSTAL_RECALL_DIVERSITY — default OFF. When on: (1) one
+# 'recent' user slot is swapped for the strongest crystal older than 7 days so a
+# daily scene echo cannot monopolise personal recall; (2) story-panel ask turns
+# are never crystallised (their marker text + scene nouns re-seed the echo).
+_RECALL_DIVERSITY = (_os.getenv("CRYSTAL_RECALL_DIVERSITY", "") or "").strip().lower() in ("1", "true", "yes", "on")
+_PANEL_ASK_MARKERS = ("Sovereign Journey story panel", "[SSE Panel:")
 
 # QUANTUM-CRYSTAL-ARCH: L3a — outcome-weighted recall rank. Uses crystal_outcome_view
 # (C_emo attributed to prior recalls). Does NOT UPDATE confidence for clinical/defense
@@ -195,6 +201,32 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
             if r["id"] not in _seen_ids and len(user_crystals) < max_user:
                 user_crystals.append(r)
                 _seen_ids.add(r["id"])
+        # QUANTUM-CRYSTAL-ARCH — CRYSTAL_RECALL_DIVERSITY: swap the oldest 'recent'
+        # slot for the strongest crystal >7 days old (not already selected).
+        if _RECALL_DIVERSITY and len(user_crystals) >= 2:
+            try:
+                _div = await conn.fetchrow(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata, scope, 'diverse' as source
+                    FROM nate_intelligence_crystals
+                    WHERE user_id = $1 AND confidence >= 0.30
+                      AND (scope = 'user' OR scope LIKE 'user:%')
+                      AND superseded_by IS NULL
+                      AND (crystal_status IS NULL OR crystal_status = 'production')
+                      AND created_at < NOW() - INTERVAL '7 days'
+                      AND NOT (id = ANY($2::int[]))
+                    ORDER BY confidence DESC, recall_count DESC NULLS LAST, created_at DESC
+                    LIMIT 1
+                    """,
+                    user_uuid, [int(i) for i in _seen_ids],
+                )
+                _recent_idx = [i for i, r in enumerate(user_crystals) if r["source"] == "recent"]
+                if _div and _recent_idx:
+                    _seen_ids.discard(user_crystals[_recent_idx[-1]]["id"])
+                    user_crystals[_recent_idx[-1]] = _div
+                    _seen_ids.add(_div["id"])
+            except Exception as _div_err:
+                print(f">>> [CRYSTAL RECALL] diversity swap skipped: {type(_div_err).__name__}: {_div_err}")
 
     global_crystals = []
     _now = _t.monotonic()
@@ -1186,6 +1218,10 @@ async def crystallize_from_conversation(
             return None
     except Exception:
         pass
+    # QUANTUM-CRYSTAL-ARCH — CRYSTAL_RECALL_DIVERSITY: story-panel ask turns carry
+    # rewritten marker text + scene nouns; forging them re-seeds the daily echo.
+    if _RECALL_DIVERSITY and any(m in (user_text or "") for m in _PANEL_ASK_MARKERS):
+        return None
     is_voice = origin_surface == "voice_call"
     effective_min_len = _MIN_USER_LEN_VOICE if is_voice else _MIN_USER_LEN
     if len(user_text) < effective_min_len:

@@ -242,11 +242,28 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
             '_sse': {'r2_url': archetype['archetype_image_url'], 'narrative_text': 'This is you in the Thera-World.'},
           });
         }
+        // Order: today's stills first (journey before storyboard on the same
+        // day), then newest first, archetype card last. A stale journey still
+        // must never outrank today's daily panel.
+        final nowUtc = DateTime.now().toUtc();
+        DateTime? _when(Map<String, dynamic> it) =>
+            DateTime.tryParse((it['created_at'] ?? '').toString())?.toUtc();
+        bool _isToday(DateTime? d) =>
+            d != null &&
+            d.year == nowUtc.year &&
+            d.month == nowUtc.month &&
+            d.day == nowUtc.day;
         mapped.sort((a, b) {
           final aType = a['content_type']?.toString() ?? '';
           final bType = b['content_type']?.toString() ?? '';
-          if (aType == 'sse_archetype') return 1;
-          if (bType == 'sse_archetype') return -1;
+          if (aType == 'sse_archetype' && bType != 'sse_archetype') return 1;
+          if (bType == 'sse_archetype' && aType != 'sse_archetype') return -1;
+          final aD = _when(a), bD = _when(b);
+          final aT = _isToday(aD) ? 0 : 1, bT = _isToday(bD) ? 0 : 1;
+          if (aT != bT) return aT.compareTo(bT);
+          if (aD != null && bD != null && aD != bD) return bD.compareTo(aD);
+          if (aD == null && bD != null) return 1;
+          if (bD == null && aD != null) return -1;
           final aJourney = (a['_sse'] is Map &&
                   ((a['_sse']['panel_type'] ?? '') == 'journey'))
               ? 0

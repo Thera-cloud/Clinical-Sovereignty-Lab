@@ -26,8 +26,22 @@ _PANEL_FOLLOWUP_RE = re.compile(
 )
 _VISUAL_FOLLOW_RE = re.compile(
     r"\b(?:scene|panel|image|picture|figure|knight|scribe|wings|hooded|"
-    r"beautiful|this one|look(?:ing)? at|in (?:the|this) (?:panel|image|scene)|"
-    r"death knight|book scribe|open sky|what is that)\b",
+    r"this one|in (?:the|this) (?:panel|image|scene)|"
+    r"death knight|book scribe|open sky)\b",
+    re.I,
+)
+# Client is explicitly stepping away from the panel thread. Any hit here ends
+# follow-up mode for the turn and tells the model to drop the prior scene.
+_PANEL_RELEASE_RE = re.compile(
+    r"(?:not (?:about|talking about) (?:the|that|this) (?:panel|scene|image|picture)|"
+    r"forget (?:the|that|this) (?:panel|scene|image|picture)|"
+    r"(?:leave|drop|move on from|done with|stop (?:talking about|bringing up)) "
+    r"(?:the|that|this) (?:panel|scene|image|picture|story)|"
+    r"(?:new|different) (?:topic|subject|adventure|season|chapter)|"
+    r"something (?:else|different)|change (?:the )?subject|"
+    r"stuck on (?:the|that|this|one) (?:panel|scene|image)|"
+    r"(?:keep|keeps) (?:talking about|bringing up|going back to) (?:the|that|this) "
+    r"(?:panel|scene|image|picture))",
     re.I,
 )
 _SHORT_PANEL_ACK_RE = re.compile(
@@ -726,30 +740,68 @@ async def _r2_url_to_data_url(url: str) -> str | None:
         return None
 
 
+_PANEL_THREAD_WINDOW = "2 hours"
+_PANEL_THREAD_ROWS = 6
+
+
+def _thread_state_from_rows(rows) -> bool:
+    """Walk newest→oldest *client* turns. The first decisive marker wins:
+    a release phrase ends the thread, a panel marker keeps it alive.
+
+    Only ``user_text`` is inspected. Little Nate's own replies routinely carry
+    scene nouns and protocol words ("DEEP REFLECTION", "focus topics"), so
+    scanning ``ai_text`` let every panel reply re-arm follow-up mode and the
+    model kept narrating one still for weeks."""
+    for r in rows or []:
+        text = (r.get("user_text") or "") if hasattr(r, "get") else (r["user_text"] or "")
+        if not text:
+            continue
+        if _PANEL_RELEASE_RE.search(text):
+            return False
+        if "Sovereign Journey story panel" in text or _PANEL_FOLLOWUP_RE.search(text):
+            return True
+    return False
+
+
 async def _recent_panel_thread(db_pool, ids: list[str]) -> bool:
     if not db_pool or not ids:
         return False
     try:
         rows = await db_pool.fetch(
-            """
-            SELECT user_text, ai_text
+            f"""
+            SELECT user_text
             FROM conversation_history
             WHERE user_id = ANY($1::text[])
+              AND created_at > NOW() - INTERVAL '{_PANEL_THREAD_WINDOW}'
             ORDER BY created_at DESC
-            LIMIT 6
+            LIMIT {_PANEL_THREAD_ROWS}
             """,
             ids,
         )
     except Exception as exc:
         print(f">>> [SSE PANEL] Follow-up thread check skipped: {type(exc).__name__}: {exc}")
         return False
-    for r in rows:
-        blob = f"{r.get('user_text') or ''} {r.get('ai_text') or ''}"
-        if "Sovereign Journey story panel" in blob or _PANEL_FOLLOWUP_RE.search(blob):
-            return True
-        if "DEEP REFLECTION" in blob or "focus topics" in blob.lower():
-            return True
-    return False
+    return _thread_state_from_rows(rows)
+
+
+def _release_context_block() -> str:
+    return "\n".join([
+        "[SSE PANEL RELEASED] The client has stepped away from the story-panel thread.",
+        "Do not reference any prior journey panel scene, its figures, its landmarks, or its",
+        "narrative this turn. Do not offer panel focus topics. Follow the client's new",
+        "direction and respond to what they are actually saying now.",
+    ])
+
+
+def _stale_panel_note(row: dict[str, Any]) -> str:
+    gen = row.get("generated_at")
+    when = gen.strftime("%Y-%m-%d") if hasattr(gen, "strftime") else "an earlier date"
+    return (
+        f"\n\n[SSE PANEL STALE] This is the client's most recent still, minted {when}. "
+        "No panel was minted today. Do not present this scene as today's panel and do not "
+        "assume the client is looking at it. If they are not clearly asking about this "
+        "specific image, respond to their message on its own terms."
+    )
 
 
 async def _last_discussed_panel_id(db_pool, ids: list[str]) -> str | None:
@@ -816,23 +868,29 @@ def _prefer_scene_matched_row(row, scene: str, candidates) -> Any:
 
 
 async def _latest_journey_panel_row(db_pool, ids: list[str]):
+    """Panel of the day across both pipelines (journey still + storyboard daily
+    panel). Returns the shared dict with ``is_today`` / ``is_stale`` flags."""
     if not db_pool or not ids:
         return None
     try:
-        return await db_pool.fetchrow(
-            """
-            SELECT panel_id, panel_type, r2_url, narrative_text, biome,
-                   character_manifest, panel_tone, crystal_domains_used, generated_at,
-                   panel_metadata
-            FROM sse_panel_log
-            WHERE user_id = ANY($1::text[])
-            ORDER BY generated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            ids,
-        )
+        from app.sse.panel_of_the_day import resolve_panel_of_the_day
+
+        return await resolve_panel_of_the_day(db_pool, ids)
     except Exception as exc:
         print(f">>> [SSE PANEL] Latest panel lookup skipped: {type(exc).__name__}: {exc}")
+        return None
+
+
+async def _panel_row_by_id(db_pool, panel_id: str, ids: list[str]):
+    """One id, both pipelines (sse_panel_log.panel_id or delivery log_id)."""
+    if not db_pool or not panel_id or not ids:
+        return None
+    try:
+        from app.sse.panel_of_the_day import fetch_panel_row_by_id
+
+        return await fetch_panel_row_by_id(db_pool, panel_id, ids)
+    except Exception as exc:
+        print(f">>> [SSE PANEL] Panel id lookup skipped: {type(exc).__name__}: {exc}")
         return None
 
 
@@ -857,6 +915,11 @@ async def build_sse_panel_chat_context(
 
     followup = False
     if not match and not legacy:
+        # Explicit release beats every follow-up heuristic: the client is
+        # telling us to leave the panel thread. Hand the model a release
+        # block so it stops narrating the prior still.
+        if _PANEL_RELEASE_RE.search(user_text):
+            return user_text, _release_context_block(), None
         followup = bool(_PANEL_FOLLOWUP_RE.search(user_text))
         if not followup and _SHORT_PANEL_ACK_RE.match(user_text.strip()):
             followup = await _recent_panel_thread(db_pool, ids)
@@ -872,52 +935,10 @@ async def build_sse_panel_chat_context(
     row = None
     if match:
         panel_id = match.group(1)
-        try:
-            row = await db_pool.fetchrow(
-                """
-                SELECT panel_id, panel_type, r2_url, narrative_text, biome,
-                       character_manifest, panel_tone, crystal_domains_used, generated_at,
-                       panel_metadata
-                FROM sse_panel_log
-                WHERE panel_id = $1::uuid AND user_id = ANY($2::text[])
-                """,
-                panel_id,
-                ids,
-            )
-        except Exception as exc:
-            print(f">>> [SSE PANEL] Panel lookup failed: {type(exc).__name__}: {exc}")
-            return user_text, "", None
-        if not row:
-            # Journey feed also serves delivery-runtime artifacts (weekly clips,
-            # monthly recaps, panels) whose id is a log_id, not a panel_id.
-            try:
-                drow = await db_pool.fetchrow(
-                    """
-                    SELECT log_id, generation_type, r2_url,
-                           COALESCE(NULLIF(btrim(client_narrative_text), ''), '') AS client_narrative_text,
-                           storyboard_id, generated_at
-                    FROM sse_delivery_generation_log
-                    WHERE log_id = $1::uuid AND user_id = ANY($2::text[])
-                    """,
-                    panel_id,
-                    ids,
-                )
-                if drow:
-                    narrative = (drow.get("client_narrative_text") or "").strip()
-                    row = {
-                        "panel_id": str(drow.get("log_id")),
-                        "panel_type": drow.get("generation_type") or "panel",
-                        "source_type": "delivery",
-                        "r2_url": drow.get("r2_url"),
-                        "narrative_text": narrative,
-                        "biome": drow.get("storyboard_id") or "",
-                        "character_manifest": _infer_character_from_narrative(narrative),
-                        "panel_tone": drow.get("generation_type") or "",
-                        "crystal_domains_used": None,
-                        "generated_at": drow.get("generated_at"),
-                    }
-            except Exception as exc:
-                print(f">>> [SSE PANEL] Delivery lookup skipped: {type(exc).__name__}: {exc}")
+        # Journey feed also serves delivery-runtime artifacts (daily panels,
+        # weekly clips, monthly recaps) whose id is a log_id, not a panel_id —
+        # the shared resolver checks both tables.
+        row = await _panel_row_by_id(db_pool, panel_id, ids)
         user_text = _SSE_PANEL_REF_RE.sub(
             f"(asking about my Sovereign Journey story panel image id:{panel_id})",
             user_text,
@@ -928,31 +949,22 @@ async def build_sse_panel_chat_context(
             "(asking about my Sovereign Journey story panel image) ", user_text, count=1
         ).strip()
 
+    stale_fallback = False
     if followup and not row:
         prior_id = await _last_discussed_panel_id(db_pool, ids)
         if prior_id:
-            try:
-                row = await db_pool.fetchrow(
-                    """
-                    SELECT panel_id, panel_type, r2_url, narrative_text, biome,
-                           character_manifest, panel_tone, crystal_domains_used, generated_at,
-                           panel_metadata
-                    FROM sse_panel_log
-                    WHERE panel_id = $1::uuid AND user_id = ANY($2::text[])
-                    """,
-                    prior_id,
-                    ids,
-                )
-            except Exception:
-                row = None
+            row = await _panel_row_by_id(db_pool, prior_id, ids)
         if not row:
             row = await _latest_journey_panel_row(db_pool, ids)
+            stale_fallback = bool(row and row.get("is_stale"))
 
     scene_m = _SCENE_HOOK_RE.search(user_text or "")
     scene_clip = (scene_m.group(1) if scene_m else "").strip()
     if scene_clip:
         cands = await _recent_journey_panels(db_pool, ids)
-        row = _prefer_scene_matched_row(row, scene_clip, cands)
+        picked = _prefer_scene_matched_row(row, scene_clip, cands)
+        if picked is not row:
+            row, stale_fallback = picked, False
 
     if not row:
         evidence = await _gather_therapeutic_evidence(db_pool, ids, [])
@@ -1006,7 +1018,11 @@ async def build_sse_panel_chat_context(
             "\n\n[SSE PANEL IMAGE MISSING] Pixels did not load this turn. "
             "Do not claim you can see the panel. You only have written scene notes."
         )
-    if followup:
+    if stale_fallback:
+        # Follow-up heuristics fired but the only panel we could find is old
+        # and was never named in this thread. Be honest instead of looping.
+        ctx += _stale_panel_note(row)
+    elif followup:
         ctx += (
             "\n\n[SSE PANEL FOLLOW-UP] Continue THIS scene. "
             "If they asked to repost topics, give three new sentences using nouns from "

@@ -5743,7 +5743,13 @@ async def sse_client_needs_symbol_review(request: Request, _user: dict = Depends
     from app.sse.layer1_identity_forge import needs_symbol_review, get_intake_prompt
     pool = request.app.state.db_pool
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
-    needs = await needs_symbol_review(uid, pool)
+    # Alias-aware (matches the mint gate in generate_journey_panel): the forge
+    # row may live under hardware_id OR username.
+    needs = False
+    for alias in [i for i in {uid, _user.get("username") or ""} if i]:
+        if await needs_symbol_review(alias, pool):
+            needs = True
+            break
     return {"needs_review": needs, "prompt": get_intake_prompt(11, _user.get("name", "friend")) if needs else ""}
 
 @sse_client_router.post("/intake/symbol-review")
@@ -5751,11 +5757,17 @@ async def sse_client_symbol_review(request: Request, _user: dict = Depends(_sse_
     """Thera-World Global Symbol Safety System — Layer C1, acceptance criterion 6.
     Records a migrated user's answer to the review question through the same
     detection path as live intake (source='onboarding_migration')."""
-    from app.sse.layer1_identity_forge import record_symbol_review_answer
+    from app.sse.layer1_identity_forge import record_symbol_review_answer, needs_symbol_review
     body = await request.json()
     pool = request.app.state.db_pool
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
-    result = await record_symbol_review_answer(uid, body.get("answer", ""), pool)
+    # Record against whichever alias actually holds the pending forge row.
+    target = uid
+    for alias in [i for i in {uid, _user.get("username") or ""} if i]:
+        if await needs_symbol_review(alias, pool):
+            target = alias
+            break
+    result = await record_symbol_review_answer(target, body.get("answer", ""), pool)
     return result
 
 @sse_client_router.get("/intake/status/{user_id}")
@@ -6265,9 +6277,104 @@ async def sse_client_identity_reset(request: Request, _user: dict = Depends(_sse
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     uname = _user.get("username") or uid
     ids = [i for i in {uid, uname} if i]
+    archived = 0
     async with request.app.state.db_pool.acquire() as conn:
+        # Hardened: snapshot the forge row(s) into journey_metadata.archetype_history
+        # before the DELETE so a "Change Archetype" never loses the prior identity.
+        # Symbol exclusions live in their own table and are intentionally kept.
+        try:
+            rows = await conn.fetch(
+                "SELECT user_id, character_visual, cultural_context, spiritual_framework, "
+                "archetype_hint, presenting_concern, wound_indicator, strength_indicator, "
+                "recommended_storyboard, status, created_at::text AS created_at, "
+                "completed_at::text AS completed_at "
+                "FROM sse_identity_forge WHERE user_id = ANY($1)", ids)
+            for r in rows:
+                snap = {k: r[k] for k in r.keys() if r[k] is not None}
+                snap["superseded_at"] = datetime.now(timezone.utc).isoformat()
+                await conn.execute(
+                    "UPDATE sse_user_journeys SET journey_metadata = jsonb_set("
+                    "COALESCE(journey_metadata, '{}'::jsonb), '{archetype_history}', "
+                    "COALESCE(journey_metadata->'archetype_history', '[]'::jsonb) || $1::jsonb) "
+                    "WHERE user_id = $2", json.dumps([snap]), r["user_id"])
+                archived += 1
+        except Exception as exc:
+            print(f">>> [SSE IDENTITY RESET] archive snapshot skipped: {type(exc).__name__}: {exc}")
         await conn.execute("DELETE FROM sse_identity_forge WHERE user_id = ANY($1)", ids)
-    return {"status": "reset", "message": "Your identity has been reset. Start a new conversation to begin your journey again."}
+    return {"status": "reset", "archived": archived,
+            "message": "Your identity has been reset. Start a new conversation to begin your journey again."}
+
+
+@sse_client_router.get("/journey/chapters")
+async def sse_client_journey_chapters(request: Request, _user: dict = Depends(_sse_auth)):
+    """Client-safe list of active storyboards (chapters) + the client's current one."""
+    from app.sse.panel_of_the_day import storyboard_title
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [i for i in {uid, uname} if i]
+    async with request.app.state.db_pool.acquire() as conn:
+        active = await conn.fetch(
+            "SELECT DISTINCT storyboard_id FROM sse_delivery_config WHERE status='active' ORDER BY storyboard_id")
+        current = await conn.fetch(
+            "SELECT storyboard_id, enrolled_at::text AS enrolled_at FROM sse_enrolled_users "
+            "WHERE user_id = ANY($1) AND status='active' ORDER BY enrolled_at DESC", ids)
+        j = await conn.fetchrow(
+            "SELECT journey_metadata FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
+    meta = (j["journey_metadata"] if j else None) or {}
+    meta = json.loads(meta) if isinstance(meta, str) else meta
+    cur_ids = {c["storyboard_id"] for c in current}
+    return {
+        "chapter": int(meta.get("chapter") or 1),
+        "current": [{"storyboard_id": c["storyboard_id"], "title": storyboard_title(c["storyboard_id"]),
+                     "enrolled_at": c["enrolled_at"]} for c in current],
+        "available": [{"storyboard_id": a["storyboard_id"], "title": storyboard_title(a["storyboard_id"]),
+                       "is_current": a["storyboard_id"] in cur_ids} for a in active],
+    }
+
+
+@sse_client_router.post("/journey/new-chapter")
+async def sse_client_journey_new_chapter(request: Request, _user: dict = Depends(_sse_auth)):
+    """Client-initiated 'new season': complete the current storyboard enrollment,
+    enroll in the chosen one, and reset scene continuity so the next daily panel
+    opens fresh. Does NOT mint immediately — the regular daily cycle does."""
+    from app.sse.panel_of_the_day import storyboard_title
+    body = await request.json() or {}
+    sid = (body.get("storyboard_id") or "").strip()
+    if not sid:
+        raise HTTPException(422, "storyboard_id required")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [i for i in {uid, uname} if i]
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        ok = await conn.fetchval(
+            "SELECT 1 FROM sse_delivery_config WHERE storyboard_id=$1 AND status='active' LIMIT 1", sid)
+        if not ok:
+            raise HTTPException(404, "That chapter is not available right now.")
+        async with conn.transaction():
+            completed = await conn.fetch(
+                "UPDATE sse_enrolled_users SET status='completed' "
+                "WHERE user_id = ANY($1) AND status='active' AND storyboard_id <> $2 "
+                "RETURNING storyboard_id", ids, sid)
+            await conn.execute(
+                "INSERT INTO sse_enrolled_users (enrollment_id, user_id, storyboard_id, source) "
+                "VALUES (gen_random_uuid(), $1, $2, 'client_new_chapter') "
+                "ON CONFLICT (user_id, storyboard_id) DO UPDATE "
+                "SET source='client_new_chapter', status='active', enrolled_at=NOW()", uid, sid)
+            await conn.execute(
+                "UPDATE sse_user_journeys SET last_panel_summary = NULL, last_panel_npcs = '[]'::jsonb, "
+                "panel_sequence = 0, journey_metadata = jsonb_set(jsonb_set("
+                "COALESCE(journey_metadata, '{}'::jsonb), '{chapter}', "
+                "to_jsonb(COALESCE((journey_metadata->>'chapter')::int, 1) + 1)), "
+                "'{chapter_started_at}', to_jsonb(NOW()::text)) "
+                "WHERE user_id = ANY($1)", ids)
+            await conn.execute(
+                "INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail) "
+                "VALUES ($1, 'client_new_chapter', 'Client Started New Chapter', $2)",
+                uid, f"{', '.join(c['storyboard_id'] for c in completed) or '(none)'} → {sid}")
+    return {"status": "new_chapter", "storyboard_id": sid, "title": storyboard_title(sid),
+            "completed": [c["storyboard_id"] for c in completed],
+            "message": f"A new chapter begins: {storyboard_title(sid)}. Your next daily panel opens there."}
 
 
 @sse_client_router.get("/recap")
@@ -6344,19 +6451,20 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
                 crystal = None
             if crystal:
                 result["crystal_insight"] = crystal[:200]
-            lp_row = await conn.fetchrow(
-                "SELECT panel_id::text AS panel_id, r2_url, biome, generated_at, "
-                "narrative_text, character_manifest, COALESCE(region, 'origin') AS region "
-                "FROM sse_panel_log "
-                "WHERE user_id = ANY($1) AND r2_url IS NOT NULL AND panel_type = 'journey' "
-                "ORDER BY generated_at DESC LIMIT 1",
-                ids,
-            )
+            # Panel of the day across BOTH pipelines (journey still + storyboard
+            # daily panel). A journey-only read left Welcome pinned to a stale
+            # still whenever the journey mint stopped (symbol gate / pause).
+            from app.sse.panel_of_the_day import resolve_panel_of_the_day
+            lp_row = await resolve_panel_of_the_day(conn, ids)
             if lp_row:
                 result["last_panel_url"] = lp_row["r2_url"]
                 # Thera-World hot button → "[SSE Panel:<id>]" ask-Nate flow (growth-phase v1)
                 result["last_panel_id"] = lp_row["panel_id"]
                 result["last_panel_biome"] = lp_row["biome"]
+                result["last_panel_source"] = lp_row.get("source_type") or "journey"
+                result["last_panel_is_today"] = bool(lp_row.get("is_today"))
+                result["last_panel_is_stale"] = bool(lp_row.get("is_stale"))
+                result["last_panel_age_days"] = lp_row.get("age_days")
                 # QUANTUM-CRYSTAL-ARCH — region column first, biome fallback
                 try:
                     from app.sse.thera_world_regions import NEURO_BIOMES, biome_display_name

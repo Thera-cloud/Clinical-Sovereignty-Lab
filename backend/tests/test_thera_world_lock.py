@@ -34,11 +34,31 @@ def test_pair_champion_skip_falls_back_to_ranked():
     assert champ.get("name")
 
 
-def test_greeting_query_is_journey_only():
+def test_greeting_uses_panel_of_the_day_resolver():
+    """Greeting reads the shared resolver (journey still OR storyboard daily
+    panel); the resolver itself keeps the journey + r2_url filter."""
     from app.services.thrive import entry_greeting as eg
+    from app.sse import panel_of_the_day as pod
     src = open(eg.__file__).read()
-    assert "AND panel_type = 'journey'" in src
-    assert "AND r2_url IS NOT NULL" in src
+    assert "resolve_panel_of_the_day" in src
+    assert "FROM sse_panel_log" not in src
+    rsrc = open(pod.__file__).read()
+    assert "AND panel_type = 'journey'" in rsrc
+    assert "AND r2_url IS NOT NULL" in rsrc
+    assert "generation_type = 'daily_panel'" in rsrc
+
+
+def test_recap_and_chat_fallback_use_resolver():
+    import os
+    from app.services import sse_panel_chat_context as spc
+    # admin.py is import-heavy (needs JWT_SECRET etc.) — read by path.
+    admin_path = os.path.join(os.path.dirname(spc.__file__), "..", "routers", "admin.py")
+    asrc = open(admin_path).read()
+    assert "resolve_panel_of_the_day(conn, ids)" in asrc
+    assert "last_panel_source" in asrc and "last_panel_is_today" in asrc
+    csrc = open(spc.__file__).read()
+    assert "resolve_panel_of_the_day" in csrc
+    assert "fetch_panel_row_by_id" in csrc
 
 
 def test_layer0_skips_on_journey_aliases():

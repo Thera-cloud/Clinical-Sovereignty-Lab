@@ -1659,6 +1659,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
 
   // ── SSE Story Journey ──
   bool _sseIntakePending = false;
+  // Thera-World symbol-safety review (intake turn 11) for pre-Aug-2026 clients.
+  // Non-empty prompt => show the inline Welcome card; answering (or skipping)
+  // unblocks daily journey stills for this client.
+  String _sseSymbolReviewPrompt = '';
+  bool _sseSymbolReviewBusy = false;
+  final TextEditingController _sseSymbolReviewCtrl = TextEditingController();
   Map<String, dynamic>? _recapData;
   bool _recapDismissed = false;
   Timer? _recapTimer;
@@ -3009,9 +3015,83 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       );
       if (resp.statusCode == 200 && mounted) {
         final data = jsonDecode(resp.body);
-        setState(() => _sseIntakePending = data['completed'] != true);
+        final completed = data['completed'] == true;
+        setState(() => _sseIntakePending = !completed);
+        if (completed) _checkSseSymbolReview(tok);
       }
     } catch (_) {}
+  }
+
+  Future<void> _checkSseSymbolReview(String tok) async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/sse-client/intake/needs-symbol-review'),
+        headers: {'Authorization': 'Bearer $tok'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        final needs = data['needs_review'] == true;
+        setState(() => _sseSymbolReviewPrompt =
+            needs ? (data['prompt'] ?? '').toString() : '');
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _submitSseSymbolReview({bool skip = false}) async {
+    if (_sseSymbolReviewBusy) return;
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    if (tok.isEmpty) return;
+    final answer = skip ? 'Nothing comes to mind.' : _sseSymbolReviewCtrl.text.trim();
+    if (answer.isEmpty) return;
+    setState(() => _sseSymbolReviewBusy = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/sse-client/intake/symbol-review'),
+        headers: {
+          'Authorization': 'Bearer $tok',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'answer': answer}),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        setState(() {
+          _sseSymbolReviewPrompt = '';
+          _sseSymbolReviewCtrl.clear();
+        });
+        // Mint today's still now that the gate is cleared (keeps the client's
+        // current region; falls back to 'wander').
+        try {
+          final region =
+              (_recapData?['explore_region'] ?? 'wander').toString();
+          final uid = (widget.currentUserProfile?['username'] ??
+                  widget.currentUserProfile?['hardware_id'] ??
+                  widget.username ??
+                  '')
+              .toString();
+          await http.post(
+            Uri.parse('$defaultApiBaseUrl/api/sse-client/explore-region'),
+            headers: {
+              'Authorization': 'Bearer $tok',
+              'Content-Type': 'application/json',
+              if (uid.isNotEmpty) 'x-user-id': uid,
+            },
+            body: jsonEncode({'region': region}),
+          );
+        } catch (_) {}
+        if (mounted) _refreshRecapQuiet();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Couldn't save that just now — try again in a moment.")));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Couldn't save that just now — try again in a moment.")));
+      }
+    } finally {
+      if (mounted) setState(() => _sseSymbolReviewBusy = false);
+    }
   }
 
   Future<void> _refreshRecapQuiet() async {
@@ -3216,6 +3296,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     setState(() => _recapDismissed = true);
   }
 
+  /// " (Nov 7)" style suffix for a non-today Thera-World still; '' if unknown.
+  String _theraPanelDateSuffix() {
+    final raw = (_recapData?['last_panel_generated_at'] ?? '').toString();
+    if (raw.isEmpty) return '';
+    final dt = DateTime.tryParse(raw)?.toLocal();
+    if (dt == null) return '';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return ' (${months[dt.month - 1]} ${dt.day})';
+  }
+
   Widget _recapBtn(String label, VoidCallback onTap) {
     return GestureDetector(
         onTap: onTap,
@@ -3312,6 +3403,115 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                     child: const Text('Start Quest',
                         style: TextStyle(color: Color(0xFFC9A962)))),
               ],
+            ));
+  }
+
+  /// Thera-World "new season": pick an available chapter (storyboard). The
+  /// backend completes the current enrollment, enrolls the new one and resets
+  /// scene continuity; the next daily panel opens there. No immediate mint.
+  Future<void> _showNewChapterDialog() async {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    if (tok.isEmpty) return;
+    Map<String, dynamic>? data;
+    try {
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/sse-client/journey/chapters'),
+        headers: {'Authorization': 'Bearer $tok'},
+      );
+      if (resp.statusCode == 200) {
+        data = Map<String, dynamic>.from(jsonDecode(resp.body));
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    final available = List<Map<String, dynamic>>.from(
+        (data?['available'] as List? ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map)));
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No new chapters are open right now. Ask Nate — he can suggest where to go next.')));
+      return;
+    }
+    final chapterNum = (data?['chapter'] ?? 1).toString();
+    String? chosen;
+    await showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+              builder: (ctx, setD) => AlertDialog(
+                backgroundColor: const Color(0xFF1A1A1A),
+                title: Text('Begin a New Chapter (you are in Chapter $chapterNum)',
+                    style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 16)),
+                content: SizedBox(
+                  width: 360,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text(
+                        'Your current chapter will be marked complete and your next daily panel will open in the one you choose. Your archetype and history stay with you.',
+                        style: TextStyle(color: Colors.white60, fontSize: 12)),
+                    const SizedBox(height: 10),
+                    ...available.map((a) {
+                      final sid = (a['storyboard_id'] ?? '').toString();
+                      final isCur = a['is_current'] == true;
+                      return RadioListTile<String>(
+                        dense: true,
+                        value: sid,
+                        groupValue: chosen,
+                        activeColor: const Color(0xFFC9A962),
+                        onChanged: isCur ? null : (v) => setD(() => chosen = v),
+                        title: Text(
+                            '${a['title'] ?? sid}${isCur ? '  (current)' : ''}',
+                            style: TextStyle(
+                                color: isCur ? Colors.white38 : Colors.white,
+                                fontSize: 13)),
+                      );
+                    }),
+                  ]),
+                ),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Not yet')),
+                  TextButton(
+                      onPressed: chosen == null
+                          ? null
+                          : () async {
+                              final sid = chosen!;
+                              Navigator.pop(ctx);
+                              try {
+                                final resp = await http.post(
+                                  Uri.parse(
+                                      '$defaultApiBaseUrl/api/sse-client/journey/new-chapter'),
+                                  headers: {
+                                    'Authorization': 'Bearer $tok',
+                                    'Content-Type': 'application/json',
+                                  },
+                                  body: jsonEncode({'storyboard_id': sid}),
+                                );
+                                if (!mounted) return;
+                                if (resp.statusCode == 200) {
+                                  final r = jsonDecode(resp.body);
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                      content: Text((r['message'] ??
+                                              'A new chapter begins.')
+                                          .toString())));
+                                  _refreshRecapQuiet();
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text(
+                                              "Couldn't open that chapter just now.")));
+                                }
+                              } catch (_) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text(
+                                              "Couldn't open that chapter just now.")));
+                                }
+                              }
+                            },
+                      child: const Text('Begin',
+                          style: TextStyle(color: Color(0xFFC9A962)))),
+                ],
+              ),
             ));
   }
 
@@ -5435,6 +5635,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _reconnectTimer?.cancel();
     _backoffResetTimer?.cancel();
     _recapTimer?.cancel();
+    _sseSymbolReviewCtrl.dispose();
     for (final t in _ttsDebounceByTurn.values) {
       t.cancel();
     }
@@ -5842,10 +6043,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                               color: Colors.white70, fontSize: 12)),
                     if (_recapData!["last_panel_biome"] != null)
                       Text(
-                          '\u{1F30D} Thera-World: ${(_recapData!["last_panel_biome_label"] ?? _recapData!["last_panel_biome"]).toString().replaceAll("_", " ")}'
+                          '\u{1F30D} ${_recapData!["last_panel_is_today"] == true ? "Today's panel" : "Last still${_theraPanelDateSuffix()}"}: ${(_recapData!["last_panel_biome_label"] ?? _recapData!["last_panel_biome"]).toString().replaceAll("_", " ")}'
                           '${_recapData!["last_panel_region"] == "neuro" && (_recapData!["last_panel_character"] ?? "").toString().isNotEmpty ? " — with ${_recapData!["last_panel_character"]}" : ""}',
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 12)),
+                    if (_recapData!["last_panel_is_stale"] == true)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 2),
+                        child: Text(
+                            '\u{23F3} No panel has been minted today yet.',
+                            style: TextStyle(color: Colors.white38, fontSize: 11)),
+                      ),
                     if (_recapData!["last_panel_region"] == 'neuro')
                       const Padding(
                         padding: EdgeInsets.only(top: 2),
@@ -5961,9 +6169,58 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
                           _sendPresetMessage(
                               "Let's talk about my mission with ${_recapData!["active_missions"][0]["relationship_target"] ?? "my relationship"}");
                         }),
+                      if (_recapData!["journey"] != null ||
+                          _recapData!["last_panel_id"] != null)
+                        _recapBtn('\u{1F4D6} New Chapter', _showNewChapterDialog),
                       _recapBtn('Just Chat', _dismissRecap),
                     ]),
                   ]),
+            ),
+          // Thera-World symbol-safety review (intake turn 11) — pre-Aug-2026
+          // clients answer once here; daily journey stills resume afterwards.
+          if (_sseSymbolReviewPrompt.isNotEmpty && !_sseIntakePending)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0A1A),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.5)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text("One question before your next Thera-World panel",
+                    style: TextStyle(
+                        color: Color(0xFFE8D5A3),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Text(_sseSymbolReviewPrompt,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _sseSymbolReviewCtrl,
+                  minLines: 1,
+                  maxLines: 3,
+                  enabled: !_sseSymbolReviewBusy,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Images, creatures, or places to leave out…',
+                    hintStyle: TextStyle(color: Colors.white38, fontSize: 12),
+                    enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF8B7355))),
+                    focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF4ECDC4))),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 4, children: [
+                  _recapBtn(_sseSymbolReviewBusy ? 'Saving…' : 'Save',
+                      () => _submitSseSymbolReview()),
+                  _recapBtn('Nothing comes to mind — continue',
+                      () => _submitSseSymbolReview(skip: true)),
+                ]),
+              ]),
             ),
           if ((widget.currentUserProfile?['subscription_status'] ?? '')
                   .toString()

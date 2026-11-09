@@ -1238,6 +1238,18 @@ async def generate_journey_panel(user_id: str, db_pool, *, replace_today: bool =
     except Exception as _id_err:
         logger.warning("generate_journey_panel identity resolve skipped: %s", _id_err)
 
+    # QUANTUM-CRYSTAL-ARCH — Symbol safety (Layer C1, criterion 6) on EVERY mint
+    # path, alias-aware. The scheduler already gates on hardware_id; the
+    # explore-region walk (replace_today=True) bypassed it entirely.
+    try:
+        from app.sse.layer1_identity_forge import needs_symbol_review as _needs_symbol_review
+        for _alias in (aliases or [user_id]):
+            if await _needs_symbol_review(_alias, db_pool):
+                logger.info("generate_journey_panel skipped %s — pending symbol-safety review", _alias)
+                return {"skipped": True, "reason": "pending_symbol_review", "user_id": _alias}
+    except Exception as _sr_err:
+        logger.warning("generate_journey_panel symbol-review gate skipped: %s", _sr_err)
+
     # One panel per day maximum unless the client asked to walk the other stream today.
     if not replace_today:
         try:
