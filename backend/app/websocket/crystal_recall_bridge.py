@@ -82,11 +82,12 @@ _GLOBAL_SNIPPET = int(_os.getenv("BRIDGE_RECALL_GLOBAL_SNIPPET", "200"))
 _SYNC_DEEP_RECALL = (_os.getenv("BRIDGE_SYNC_DEEP_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
 _SYNC_DEEP_TIMEOUT_S = float(_os.getenv("BRIDGE_SYNC_DEEP_TIMEOUT_S", "1.8"))
 _VALIDATOR_FILTER_RECALL = (_os.getenv("BRIDGE_VALIDATOR_FILTER_RECALL", "") or "").strip().lower() in ("1", "true", "yes", "on")
-# QUANTUM-CRYSTAL-ARCH: CRYSTAL_RECALL_DIVERSITY — default OFF. When on: (1) one
+# QUANTUM-CRYSTAL-ARCH: CRYSTAL_RECALL_DIVERSITY — default ON since 2026-11-09
+# (operator-approved; set CRYSTAL_RECALL_DIVERSITY=false to revert). When on: (1) one
 # 'recent' user slot is swapped for the strongest crystal older than 7 days so a
 # daily scene echo cannot monopolise personal recall; (2) story-panel ask turns
 # are never crystallised (their marker text + scene nouns re-seed the echo).
-_RECALL_DIVERSITY = (_os.getenv("CRYSTAL_RECALL_DIVERSITY", "") or "").strip().lower() in ("1", "true", "yes", "on")
+_RECALL_DIVERSITY = (_os.getenv("CRYSTAL_RECALL_DIVERSITY", "true") or "true").strip().lower() in ("1", "true", "yes", "on")
 _PANEL_ASK_MARKERS = ("Sovereign Journey story panel", "[SSE Panel:")
 
 # QUANTUM-CRYSTAL-ARCH: L3a — outcome-weighted recall rank. Uses crystal_outcome_view

@@ -34,10 +34,12 @@ def test_generate_journey_panel_gates_on_symbol_review_for_every_alias():
     assert body.index("needs_symbol_review") < body.index("One panel per day maximum")
 
 
-def test_recall_diversity_flag_defaults_off_and_is_additive():
+def test_recall_diversity_flag_defaults_on_and_is_additive():
     src = _src("websocket", "crystal_recall_bridge.py")
-    m = re.search(r'_RECALL_DIVERSITY = \(_os\.getenv\("CRYSTAL_RECALL_DIVERSITY", ""\)', src)
-    assert m, "flag must read CRYSTAL_RECALL_DIVERSITY with empty default (off)"
+    # Default flipped ON 2026-11-09 (operator-approved); env "false"/"0" still reverts.
+    m = re.search(r'_RECALL_DIVERSITY = \(_os\.getenv\("CRYSTAL_RECALL_DIVERSITY", "true"\)', src)
+    assert m, "flag must read CRYSTAL_RECALL_DIVERSITY with default 'true' (on)"
+    assert 'in ("1", "true", "yes", "on")' in src, "env override must still be honoured"
     # Diversity swap is guarded by the flag and never raises.
     assert "if _RECALL_DIVERSITY and len(user_crystals) >= 2:" in src
     assert "diversity swap skipped" in src
