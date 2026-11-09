@@ -146,7 +146,7 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
             actions.append("ensure_zoom")
         if not has_gcal:
             actions.append("create_gcal")
-        if not sd.get("schedule_published_at"):
+        if not sd.get("schedule_published_at") or sd.get("schedule_publish_pending"):
             actions.append("publish_json")
     late = str(sd.get("late_cancel_fee") or "").lower() in ("true", "1", "yes")
     inv_id = str(sd.get("stripe_invoice_id") or "").strip()
@@ -240,11 +240,21 @@ class SessionOpsReconcileAgent:
             if any(a in actions for a in ("create_gcal", "ensure_zoom", "publish_json")):
                 try:
                     from app.services.session_schedule_publish import publish_scheduled_session
-                    await publish_scheduled_session(self.db_pool, row, reason="ops_heal")
-                    item["healed"] = "schedule_publish"
+                    pub = await publish_scheduled_session(
+                        self.db_pool, row, reason="ops_heal",
+                        app_state=self.app_state,
+                    )
+                    if pub.get("pending"):
+                        logger.error(
+                            "SessionOpsReconcileAgent: publish still pending sid=%s %s",
+                            row.get("session_id"), pub.get("pending_reason"),
+                        )
+                        item["publish_pending"] = pub.get("pending_reason")
+                    else:
+                        item["healed"] = "schedule_publish"
                     healed.append(item)
                 except Exception as e:
-                    logger.warning(
+                    logger.error(
                         "SessionOpsReconcileAgent: publish heal failed sid=%s: %s",
                         row.get("session_id"), e,
                     )

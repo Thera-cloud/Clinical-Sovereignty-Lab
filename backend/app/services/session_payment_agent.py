@@ -848,13 +848,23 @@ class SessionPaymentAgent:
                     pub_row["payment_status"] = "paid"
                     pub_row["stripe_payment_intent_id"] = intent.id
                     pub_row["scheduled_start"] = session.get("scheduled_at")
-                    asyncio.create_task(
+                    result = await asyncio.wait_for(
                         publish_scheduled_session(
                             self.db_pool, pub_row, reason="charge_succeeded",
-                        )
+                            app_state=self.app_state,
+                        ),
+                        timeout=20,
                     )
+                    if result.get("pending"):
+                        logger.error(
+                            "SessionPaymentAgent: publish pending after charge sid=%s %s",
+                            session_id_str, result.get("pending_reason"),
+                        )
                 except Exception as pe:
-                    logger.warning("SessionPaymentAgent: publish bundle skipped: %s", pe)
+                    logger.error(
+                        "SessionPaymentAgent: publish bundle failed sid=%s: %s",
+                        session_id_str, pe,
+                    )
                 return True
             else:
                 await release_claim(conn, session_id)
@@ -1019,6 +1029,17 @@ so it is the default.</p>
     async def _send_confirmation(self, conn, session):
         """Send payment confirmation to both client and coach."""
         session_id = session["id"]
+        try:
+            already = await conn.fetchval(
+                """SELECT 1 FROM session_notifications
+                    WHERE session_id = $1 AND notification_type = 'confirmation'
+                    LIMIT 1""",
+                session_id,
+            )
+            if already:
+                return
+        except Exception:
+            pass
         notify = getattr(self.app_state, "notification_system", None) if self.app_state else None
         if not notify or not hasattr(notify, "_send_email"):
             return

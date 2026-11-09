@@ -15339,6 +15339,7 @@ async def handle_client(websocket, path=None):
                             except Exception as _ooo_e:
                                 print(f">>> [BOOKING] google ooo check skipped: {_ooo_e}")
                             # QUANTUM-CRYSTAL-ARCH: PG occupancy is the lock (JSON is display)
+                            _occ_fail = "Time slot conflict (occupancy unavailable)"
                             try:
                                 from app.services.session_occupancy import occupancy_blocks_booking
                                 _occ = await occupancy_blocks_booking(
@@ -15350,7 +15351,13 @@ async def handle_client(websocket, path=None):
                                     await websocket.send(json.dumps({"type": "error", "message": _occ}))
                                     continue
                             except Exception as _occ_e:
-                                print(f">>> [BOOKING] PG occupancy skipped: {_occ_e}")
+                                # QUANTUM-CRYSTAL-ARCH: occupancy fail-closed
+                                print(f">>> [BOOKING] PG occupancy failed closed: {_occ_e}")
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": _occ_fail,
+                                }))
+                                continue
                             # Conflict check — QUANTUM-CRYSTAL-ARCH: pending_approval also blocks the slot
                             conflict = False
                             for s in sessions:

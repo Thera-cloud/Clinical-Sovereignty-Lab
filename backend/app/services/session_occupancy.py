@@ -13,6 +13,7 @@ logger = logging.getLogger("nate.session_occupancy")
 
 BLOCKING_STATUSES = ("scheduled", "active", "pending_approval")
 PAID_STATUSES = ("paid", "waived", "zero")
+OCCUPANCY_UNAVAILABLE = "Time slot conflict (occupancy unavailable)"
 
 OVERLAP_SQL = """
 SELECT cs.session_id, cs.coach_id, cs.client_id, cs.family_id, cs.status,
@@ -36,11 +37,45 @@ SELECT cs.session_id, cs.coach_id, cs.client_id, cs.family_id, cs.status,
        ) && tstzrange($2::timestamptz, $3::timestamptz, '[)')
    AND (
          cs.coach_id = $4
-      OR ($5 <> '' AND cs.client_id = $5)
+      OR (CARDINALITY($5::text[]) > 0 AND cs.client_id = ANY($5::text[]))
       OR ($6 <> '' AND COALESCE(cs.family_id, '') = $6)
    )
    AND ($7 = '' OR cs.session_id <> $7)
  LIMIT 25
+"""
+
+SIBLING_CLIENT_SQL = """
+SELECT DISTINCT u2.hardware_id::text AS hardware_id
+  FROM users u1
+  JOIN users u2
+    ON u2.role = 'CLIENT'
+   AND u2.hardware_id IS DISTINCT FROM u1.hardware_id
+ WHERE u1.role = 'CLIENT'
+   AND (
+        u1.hardware_id = $1
+     OR u1.id::text = $1
+     OR LOWER(u1.username) = LOWER($1)
+   )
+   AND (
+        (
+          LOWER(TRIM(COALESCE(u1.profile_data->>'name', ''))) <> ''
+          AND LOWER(TRIM(u1.profile_data->>'name'))
+            = LOWER(TRIM(COALESCE(u2.profile_data->>'name', '')))
+        )
+     OR (
+          NULLIF(COALESCE(u1.stripe_customer_id,
+                          u1.profile_data->>'stripe_customer_id'), '') IS NOT NULL
+          AND COALESCE(u1.stripe_customer_id, u1.profile_data->>'stripe_customer_id', '')
+            = COALESCE(u2.stripe_customer_id, u2.profile_data->>'stripe_customer_id', '')
+        )
+     OR (
+          NULLIF(COALESCE(u1.family_id::text, u1.profile_data->>'family_id'), '')
+            IS NOT NULL
+          AND COALESCE(u1.family_id::text, u1.profile_data->>'family_id', '')
+            = COALESCE(u2.family_id::text, u2.profile_data->>'family_id', '')
+        )
+   )
+ LIMIT 12
 """
 
 OCCUPANCY_PAIR_COUNT_SQL = """
@@ -87,6 +122,24 @@ def _end_or_default(start: datetime, end: Optional[datetime]) -> datetime:
     return start + timedelta(minutes=50)
 
 
+async def expand_client_ids(conn, client_id: str) -> List[str]:
+    """Same person, second CLIENT row (hardware_id). Does not merge accounts."""
+    cid = str(client_id or "").strip()
+    ids = [cid] if cid else []
+    if not conn or not cid:
+        return ids
+    try:
+        rows = await conn.fetch(SIBLING_CLIENT_SQL, cid)
+    except Exception as e:
+        logger.warning("session_occupancy: sibling lookup failed: %s", e)
+        return ids
+    for row in rows:
+        hid = str(row.get("hardware_id") or "").strip()
+        if hid and hid not in ids:
+            ids.append(hid)
+    return ids
+
+
 async def fetch_blocking_overlaps(
     conn,
     *,
@@ -101,13 +154,14 @@ async def fetch_blocking_overlaps(
     if not st or not conn:
         return []
     en = _end_or_default(st, as_utc(end))
+    client_ids = await expand_client_ids(conn, client_id)
     rows = await conn.fetch(
         OVERLAP_SQL,
         list(BLOCKING_STATUSES),
         st,
         en,
         str(coach_id or ""),
-        str(client_id or ""),
+        client_ids,
         str(family_id or ""),
         str(exclude_session_id or ""),
     )
@@ -126,7 +180,7 @@ async def occupancy_blocks_booking(
 ) -> Optional[str]:
     """Return a conflict message when the slot is taken, else None."""
     if not db_pool:
-        return None
+        return OCCUPANCY_UNAVAILABLE
     try:
         async with db_pool.acquire() as conn:
             rows = await fetch_blocking_overlaps(
@@ -140,7 +194,7 @@ async def occupancy_blocks_booking(
             )
     except Exception as e:
         logger.warning("session_occupancy: overlap query failed: %s", e)
-        return None
+        return OCCUPANCY_UNAVAILABLE
     if not rows:
         return None
     sid = rows[0].get("session_id") or ""
