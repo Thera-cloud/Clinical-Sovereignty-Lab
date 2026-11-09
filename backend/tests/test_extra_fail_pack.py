@@ -108,13 +108,16 @@ def test_voice_extend_idempotency_increments_per_block():
     assert a != b
 
 
-def test_billing_auditor_has_38_checks():
+def test_billing_auditor_has_41_checks():
     total = sum(len(t["endpoints"]) for t in TAB_ENDPOINTS)
-    assert total == 38
+    assert total == 41
     db = [ep for t in TAB_ENDPOINTS for ep in t["endpoints"] if ep[0] == "DB"]
     assert ("DB", "unpaid_48h_queryable") in db
     assert ("DB", "charge_verify_fail_queryable") in db
     assert ("DB", "unconfirmed_in_window_queryable") in db
+    assert ("DB", "paid_missing_zoom") in db
+    assert ("DB", "occupancy_overlap") in db
+    assert ("DB", "paid_not_scheduled") in db
 
 
 def test_signup_sharing_inserts_pending_before_transfer():
