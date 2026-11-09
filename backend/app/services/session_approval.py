@@ -379,20 +379,19 @@ async def sync_sessions_with_pg(db_pool, sessions: List[Dict]) -> bool:
         return False
     ids = [s.get("session_id") for s in sessions
            if s.get("session_id") and str(s.get("status", "")).lower() in BLOCKING_STATUSES]
-    if not ids:
-        return False
-    try:
-        async with db_pool.acquire() as conn:
-            rows = await conn.fetch(
-                """SELECT session_id, status, zoom_link, zoom_meeting_id
-                   FROM coaching_sessions WHERE session_id = ANY($1::text[])""",
-                ids,
-            )
-    except Exception as e:
-        logger.warning("session_approval: PG sync query failed: %s", e)
-        return False
-    pg_map = {r["session_id"]: r for r in rows}
     changed = False
+    pg_map = {}
+    if ids:
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT session_id, status, zoom_link, zoom_meeting_id, payment_status
+                       FROM coaching_sessions WHERE session_id = ANY($1::text[])""",
+                    ids,
+                )
+            pg_map = {r["session_id"]: r for r in rows}
+        except Exception as e:
+            logger.warning("session_approval: PG sync query failed: %s", e)
     for s in sessions:
         row = pg_map.get(s.get("session_id"))
         if not row:
@@ -405,6 +404,53 @@ async def sync_sessions_with_pg(db_pool, sessions: List[Dict]) -> bool:
             s["zoom_link"] = row["zoom_link"]
             s["zoom_meeting_id"] = row["zoom_meeting_id"]
             changed = True
+        pg_pay = (row["payment_status"] or "") if "payment_status" in row.keys() else ""
+        if pg_pay and pg_pay != str(s.get("payment_status") or ""):
+            s["payment_status"] = pg_pay
+            changed = True
+    try:
+        async with db_pool.acquire() as conn:
+            extra = await conn.fetch(
+                """SELECT session_id, status, coach_id, client_id, client_name,
+                          family_id, scheduled_start, scheduled_end, session_type,
+                          zoom_link, zoom_meeting_id, zoom_host_url, payment_status,
+                          price_cents, stripe_payment_intent_id
+                     FROM coaching_sessions
+                    WHERE LOWER(status) = ANY($1::text[])
+                      AND COALESCE(scheduled_start, scheduled_at)
+                          BETWEEN NOW() AND NOW() + INTERVAL '21 days'
+                      AND session_id <> ALL($2::text[])
+                    LIMIT 200""",
+                list(BLOCKING_STATUSES),
+                ids or [""],
+            )
+        have = {s.get("session_id") for s in sessions}
+        for r in extra:
+            if r["session_id"] in have:
+                continue
+            st = r["scheduled_start"]
+            en = r["scheduled_end"]
+            sessions.append({
+                "session_id": r["session_id"],
+                "id": r["session_id"],
+                "coach_id": r["coach_id"] or "",
+                "client_id": r["client_id"] or "",
+                "client_name": r["client_name"] or "",
+                "family_id": r["family_id"] or "",
+                "status": r["status"] or "scheduled",
+                "payment_status": r["payment_status"] or "",
+                "scheduled_start": st.isoformat() if hasattr(st, "isoformat") else str(st or ""),
+                "scheduled_end": en.isoformat() if hasattr(en, "isoformat") else str(en or ""),
+                "session_type": r["session_type"] or "COACH",
+                "zoom_link": r["zoom_link"] or "",
+                "zoom_meeting_id": r["zoom_meeting_id"] or "",
+                "zoom_host_url": r["zoom_host_url"] or "",
+                "price_cents": r["price_cents"] or 0,
+                "stripe_payment_intent_id": r["stripe_payment_intent_id"] or "",
+            })
+            changed = True
+    except Exception as e:
+        logger.warning("session_approval: PG occupancy merge failed: %s", e)
     return changed
 
 

@@ -64,6 +64,21 @@ def overlay_calendar_zoom(schedule: List[Any], sid: str, zoom: Dict[str, str]) -
                 s[k] = zoom[k]
         return
 
+
+def overlay_calendar_billing(schedule: List[Any], sid: str, pay: str, later: Any) -> None:
+    if not sid:
+        return
+    for s in schedule:
+        if not isinstance(s, dict):
+            continue
+        if (s.get("session_id") or s.get("id") or "") != sid:
+            continue
+        if pay:
+            s["payment_status"] = pay
+        if later not in (None, "", False):
+            s["collect_later"] = later
+        return
+
 # ==============================================================================
 # NEW DATA STRUCTURES
 # ==============================================================================
@@ -270,6 +285,8 @@ class CoachNexusV2:
                         "zoom_host_url": ses.get("zoom_host_url") or "",
                         "zoom_meeting_id": ses.get("zoom_meeting_id") or "",
                         "status": ses.get("status") or "scheduled",
+                        "payment_status": ses.get("payment_status") or "",
+                        "collect_later": ses.get("collect_later") or False,
                         "notes": ses.get("notes") or "",
                     })
                 except Exception:
@@ -347,7 +364,7 @@ class CoachNexusV2:
                 rows = await conn.fetch(
                     """
                     SELECT session_id, coach_id, client_id, client_name,
-                           session_type, status,
+                           session_type, status, payment_status,
                            scheduled_start, scheduled_end,
                            zoom_link, zoom_host_url, zoom_meeting_id, notes,
                            session_data
@@ -388,6 +405,11 @@ class CoachNexusV2:
             zoom = calendar_zoom_fields(row)
             if sid and sid in existing_ids:
                 overlay_calendar_zoom(base.get("schedule") or [], sid, zoom)
+                overlay_calendar_billing(
+                    base.get("schedule") or [], sid,
+                    str(row.get("payment_status") or ""),
+                    _sd(row, "collect_later", ""),
+                )
                 continue
             if not sid:
                 continue
@@ -435,6 +457,8 @@ class CoachNexusV2:
                 "zoom_host_url": zoom["zoom_host_url"],
                 "zoom_meeting_id": zoom["zoom_meeting_id"],
                 "status": row.get("status") or "scheduled",
+                "payment_status": row.get("payment_status") or "",
+                "collect_later": _sd(row, "collect_later", False),
                 "notes": row.get("notes") or "",
             })
             existing_ids.add(sid)

@@ -71,6 +71,8 @@ def test_new_session_links_from_old():
         "client_name": "Paula Swain",
         "session_type": "COACH",
         "status": "scheduled",
+        "payment_status": "paid",
+        "stripe_payment_intent_id": "pi_westslot",
     }
     new = build_new_session(
         old,
@@ -83,6 +85,8 @@ def test_new_session_links_from_old():
     assert new["status"] == "scheduled"
     assert new["rescheduled_from"] == "SES_OLD"
     assert new["client_id"] == "CLIENT_PAULA182_ID"
+    assert new["payment_status"] == "paid"
+    assert new["stripe_payment_intent_id"] == "pi_westslot"
 
 
 def test_duration_from_window():

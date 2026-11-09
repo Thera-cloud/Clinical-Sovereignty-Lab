@@ -121,6 +121,9 @@ TAB_ENDPOINTS = [
             ("DB", "unpaid_48h_queryable"),
             ("DB", "charge_verify_fail_queryable"),
             ("DB", "unconfirmed_in_window_queryable"),
+            ("DB", "paid_missing_zoom"),
+            ("DB", "occupancy_overlap"),
+            ("DB", "paid_not_scheduled"),
         ],
     },
 ]
@@ -336,6 +339,63 @@ class BillingPipelineAuditor:
                     return {"method": "DB", "path": check_name, "code": 200,
                             "ms": elapsed, "status": "TRUSTED",
                             "detail": f"{int(n or 0)} unconfirmed in 72h window"}
+                if check_name == "paid_missing_zoom":
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions
+                           WHERE LOWER(COALESCE(status,'')) IN
+                                 ('scheduled','active','pending_approval')
+                             AND LOWER(COALESCE(payment_status,'')) = 'paid'
+                             AND COALESCE(scheduled_start, scheduled_at) > NOW()
+                             AND COALESCE(zoom_link,'') = ''
+                             AND COALESCE(zoom_meeting_id,'') = ''"""
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    failed = int(n or 0) > 0
+                    return {"method": "DB", "path": check_name, "code": 200,
+                            "ms": elapsed,
+                            "status": "FAILED" if failed else "TRUSTED",
+                            "detail": f"{int(n or 0)} paid future rows missing Zoom"}
+                if check_name == "occupancy_overlap":
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions a
+                             JOIN coaching_sessions b
+                               ON a.session_id < b.session_id
+                              AND a.coach_id = b.coach_id
+                              AND LOWER(COALESCE(a.status,'')) IN
+                                  ('scheduled','active','pending_approval')
+                              AND LOWER(COALESCE(b.status,'')) IN
+                                  ('scheduled','active','pending_approval')
+                              AND tstzrange(
+                                    COALESCE(a.scheduled_start, a.scheduled_at),
+                                    COALESCE(a.scheduled_end,
+                                      COALESCE(a.scheduled_start, a.scheduled_at)
+                                      + INTERVAL '50 minutes'), '[)')
+                                  && tstzrange(
+                                    COALESCE(b.scheduled_start, b.scheduled_at),
+                                    COALESCE(b.scheduled_end,
+                                      COALESCE(b.scheduled_start, b.scheduled_at)
+                                      + INTERVAL '50 minutes'), '[)')"""
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    failed = int(n or 0) > 0
+                    return {"method": "DB", "path": check_name, "code": 200,
+                            "ms": elapsed,
+                            "status": "FAILED" if failed else "TRUSTED",
+                            "detail": f"{int(n or 0)} overlapping live coach slots"}
+                if check_name == "paid_not_scheduled":
+                    n = await conn.fetchval(
+                        """SELECT COUNT(*) FROM coaching_sessions
+                           WHERE LOWER(COALESCE(payment_status,'')) = 'paid'
+                             AND COALESCE(scheduled_start, scheduled_at) > NOW()
+                             AND LOWER(COALESCE(status,'')) NOT IN
+                                 ('scheduled','active','pending_approval')"""
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    failed = int(n or 0) > 0
+                    return {"method": "DB", "path": check_name, "code": 200,
+                            "ms": elapsed,
+                            "status": "FAILED" if failed else "TRUSTED",
+                            "detail": f"{int(n or 0)} paid future rows not on schedule"}
                 elapsed = int((time.monotonic() - t0) * 1000)
                 return {"method": "DB", "path": check_name, "code": 0,
                         "ms": elapsed, "status": "FAILED",

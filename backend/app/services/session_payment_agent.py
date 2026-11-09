@@ -136,6 +136,7 @@ class SessionPaymentAgent:
             # QUANTUM-CRYSTAL-ARCH: charge only after coach accepts (scheduled/confirmed/active)
             sessions_to_charge = await conn.fetch(
                 f"""SELECT cs.id, cs.session_id AS session_id_str, cs.coach_id, cs.client_id,
+                          cs.family_id, cs.zoom_link, cs.zoom_meeting_id, cs.scheduled_end,
                           {_APPT_TIME} AS scheduled_at, cs.price_cents,
                           cs.payment_status, cs.session_data,
                           u.profile_data->>'name' as client_name,
@@ -640,6 +641,36 @@ class SessionPaymentAgent:
                 await self._reconcile_existing_intent(conn, session, existing, amount_cents)
                 return None
 
+            try:
+                from app.services.session_occupancy import find_paid_slot_credit
+                sibling = await find_paid_slot_credit(
+                    conn,
+                    coach_id=str(session.get("coach_id") or ""),
+                    start=session.get("scheduled_at"),
+                    end=session.get("scheduled_end"),
+                    client_id=str(session.get("client_id") or ""),
+                    family_id=str(session.get("family_id") or ""),
+                    exclude_session_id=session_id_str,
+                )
+                if sibling:
+                    pi = str(sibling.get("stripe_payment_intent_id") or "")
+                    await conn.execute(
+                        """UPDATE coaching_sessions
+                              SET payment_status = 'paid',
+                                  stripe_payment_intent_id = COALESCE(
+                                      NULLIF(stripe_payment_intent_id, ''), $2),
+                                  updated_at = NOW()
+                            WHERE id = $1""",
+                        session_id, pi,
+                    )
+                    await self._log_event(
+                        conn, session_id, "charge_skipped", amount_cents,
+                        note=f"slot credit from {sibling.get('session_id')}",
+                    )
+                    return None
+            except Exception as ce:
+                logger.warning("SessionPaymentAgent: slot credit check failed: %s", ce)
+
             pm_id = ""
             try:
                 from app.services.session_pm_sync import sync_default_pm_from_stripe
@@ -810,6 +841,20 @@ class SessionPaymentAgent:
                               "application_fee_cents": app_fee if connect_id else 0,
                               "source": "session_payment_agent"},
                 )
+                try:
+                    from app.services.session_schedule_publish import publish_scheduled_session
+                    pub_row = dict(session)
+                    pub_row["session_id"] = session_id_str
+                    pub_row["payment_status"] = "paid"
+                    pub_row["stripe_payment_intent_id"] = intent.id
+                    pub_row["scheduled_start"] = session.get("scheduled_at")
+                    asyncio.create_task(
+                        publish_scheduled_session(
+                            self.db_pool, pub_row, reason="charge_succeeded",
+                        )
+                    )
+                except Exception as pe:
+                    logger.warning("SessionPaymentAgent: publish bundle skipped: %s", pe)
                 return True
             else:
                 await release_claim(conn, session_id)

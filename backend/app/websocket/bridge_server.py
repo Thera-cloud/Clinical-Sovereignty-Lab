@@ -15338,6 +15338,19 @@ async def handle_client(websocket, path=None):
                                     continue
                             except Exception as _ooo_e:
                                 print(f">>> [BOOKING] google ooo check skipped: {_ooo_e}")
+                            # QUANTUM-CRYSTAL-ARCH: PG occupancy is the lock (JSON is display)
+                            try:
+                                from app.services.session_occupancy import occupancy_blocks_booking
+                                _occ = await occupancy_blocks_booking(
+                                    db_pool, coach_id=coach_id, start=scheduled_start,
+                                    end=scheduled_end, client_id=client_id,
+                                    family_id=str((current_profile or {}).get("family_id") or ""),
+                                )
+                                if _occ:
+                                    await websocket.send(json.dumps({"type": "error", "message": _occ}))
+                                    continue
+                            except Exception as _occ_e:
+                                print(f">>> [BOOKING] PG occupancy skipped: {_occ_e}")
                             # Conflict check — QUANTUM-CRYSTAL-ARCH: pending_approval also blocks the slot
                             conflict = False
                             for s in sessions:

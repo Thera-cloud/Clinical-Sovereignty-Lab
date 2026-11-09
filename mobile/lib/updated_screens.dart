@@ -15482,6 +15482,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }.contains(st);
   }
 
+  String _sessionPayTag(Map session) {
+    final later = session['collect_later'] == true ||
+        session['collect_later']?.toString().toLowerCase() == 'true';
+    if (later) return ' (later pay)';
+    final pay = (session['payment_status'] ?? '').toString().toLowerCase();
+    if (pay == 'paid' || pay == 'waived' || pay == 'zero') return ' (paid)';
+    if (pay == 'pending' || pay == 'unpaid') return ' (unpaid)';
+    return '';
+  }
+
   /// Prefer appointment instant; stale `date` on vault JSON put Paula on the wrong day.
   bool _sessionMatchesCalendarDay(Map<String, dynamic> m, DateTime d) {
     try {
@@ -16114,7 +16124,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           final tag = st == 'pending_approval'
               ? ' (pending)'
               : (ref ? ' (reference)' : '');
-          lines.add('$clientNm • $pretty$tag');
+          lines.add('$clientNm • $pretty$tag${_sessionPayTag(s)}');
         }
         tooltipText = lines.join('\n');
       }
@@ -16477,7 +16487,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    "${isC ? 'Consultation · ' : ''}${isPending ? 'PENDING · ' : ''}$cl${tm.isNotEmpty ? ' • $tm' : ''}",
+                    "${isC ? 'Consultation · ' : ''}${isPending ? 'PENDING · ' : ''}$cl${tm.isNotEmpty ? ' • $tm' : ''}${_sessionPayTag(sm)}",
                     style: TextStyle(
                         color: isPending
                             ? const Color(0xFFF59E0B)

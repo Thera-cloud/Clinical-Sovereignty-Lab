@@ -67,7 +67,10 @@ def test_classify_paid_billable():
         },
         NOW,
     )
-    assert actions == ["paid_confirmed"]
+    assert "paid_confirmed" in actions
+    assert "create_gcal" in actions
+    assert "ensure_zoom" in actions
+    assert "publish_json" in actions
 
 
 def test_classify_unpaid_inside_48h():

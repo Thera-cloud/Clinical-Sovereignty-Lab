@@ -90,6 +90,14 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
     future = bool(start and start > now)
     has_gcal = bool(row.get("google_event_id"))
     pay = str(row.get("payment_status") or "").lower()
+    sd = row.get("session_data") or {}
+    if isinstance(sd, str):
+        try:
+            sd = json.loads(sd) if sd else {}
+        except Exception:
+            sd = {}
+    if not isinstance(sd, dict):
+        sd = {}
     actions: List[str] = []
     if not future and status in ACTIVE_STATUSES:
         return actions
@@ -132,14 +140,14 @@ def classify_session(row: Dict[str, Any], now: datetime) -> List[str]:
         and pay == "paid"
     ):
         actions.append("paid_confirmed")
-    sd = row.get("session_data") or {}
-    if isinstance(sd, str):
-        try:
-            sd = json.loads(sd) if sd else {}
-        except Exception:
-            sd = {}
-    if not isinstance(sd, dict):
-        sd = {}
+    if future and status in ACTIVE_STATUSES and pay == "paid":
+        zoom = str(row.get("zoom_link") or row.get("zoom_meeting_id") or "").strip()
+        if not zoom:
+            actions.append("ensure_zoom")
+        if not has_gcal:
+            actions.append("create_gcal")
+        if not sd.get("schedule_published_at"):
+            actions.append("publish_json")
     late = str(sd.get("late_cancel_fee") or "").lower() in ("true", "1", "yes")
     inv_id = str(sd.get("stripe_invoice_id") or "").strip()
     inv_st = str(sd.get("invoice_status") or "").lower()
@@ -229,6 +237,17 @@ class SessionOpsReconcileAgent:
                 await self._void_orphan_invoice(row)
                 item["healed"] = "voided_orphan_invoice"
                 healed.append(item)
+            if any(a in actions for a in ("create_gcal", "ensure_zoom", "publish_json")):
+                try:
+                    from app.services.session_schedule_publish import publish_scheduled_session
+                    await publish_scheduled_session(self.db_pool, row, reason="ops_heal")
+                    item["healed"] = "schedule_publish"
+                    healed.append(item)
+                except Exception as e:
+                    logger.warning(
+                        "SessionOpsReconcileAgent: publish heal failed sid=%s: %s",
+                        row.get("session_id"), e,
+                    )
             if any(
                 a in actions
                 for a in (
@@ -252,6 +271,8 @@ class SessionOpsReconcileAgent:
                 SELECT cs.session_id, cs.client_id, cs.coach_id, cs.client_name, cs.status,
                        cs.payment_status, cs.price_cents, cs.google_event_id, cs.sync_state,
                        cs.scheduled_start, cs.scheduled_end, cs.session_data,
+                       cs.zoom_link, cs.zoom_meeting_id, cs.zoom_host_url,
+                       cs.stripe_payment_intent_id,
                        COALESCE(u.profile_data->>'default_payment_method_id','')
                            AS client_default_pm,
                        cs.client_confirmed_at,

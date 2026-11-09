@@ -873,6 +873,15 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     if _ooo_msg:
         raise HTTPException(409, _ooo_msg)
 
+    from app.services.session_occupancy import occupancy_blocks_booking
+    _occ = await occupancy_blocks_booking(
+        _get_db(request), coach_id=req.coach_id, start=req.scheduled_start,
+        end=req.scheduled_end, client_id=req.client_id,
+        family_id=getattr(req, "family_id", None) or "",
+    )
+    if _occ:
+        raise HTTPException(409, _occ)
+
     if not req.collect_later:
         try:
             from app.services.session_collect_later import client_booking_paused
@@ -1118,6 +1127,19 @@ async def reschedule_session(
             continue
         if new_start < existing_end and new_end > existing_start:
             raise HTTPException(409, "Time slot conflict with existing session")
+
+    from app.services.session_occupancy import occupancy_blocks_booking
+    _occ = await occupancy_blocks_booking(
+        _get_db(request),
+        coach_id=old.get("coach_id") or "",
+        start=new_start,
+        end=new_end,
+        client_id=old.get("client_id") or "",
+        family_id=old.get("family_id") or "",
+        exclude_session_id=session_id,
+    )
+    if _occ:
+        raise HTTPException(409, _occ)
 
     from app.services.coach_slot_engine import appointment_blocked_by_google
     _ooo_msg = await appointment_blocked_by_google(

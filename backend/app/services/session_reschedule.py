@@ -123,6 +123,8 @@ def build_new_session(
         "coach_notes": old.get("coach_notes") or "",
         "price_cents": old.get("price_cents") or 0,
         "payment_status": old.get("payment_status") or "pending",
+        "stripe_payment_intent_id": old.get("stripe_payment_intent_id") or "",
+        "billing_obligation": old.get("billing_obligation") or "",
         "created_at": stamp,
         "rescheduled_from": old.get("session_id") or "",
         "session_data": {
