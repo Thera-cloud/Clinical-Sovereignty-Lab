@@ -13,7 +13,7 @@ GitHub workflow `.github/workflows/deploy.yml` runs **`bash backend/scripts/run_
 |-------------------|--------|
 | Offline pass count | <!-- ci-gate:offline-test-count -->24<!-- /ci-gate:offline-test-count --> |
 | `--ignore` entries in `run_ci_tests.sh` | <!-- ci-gate:ignore-count -->15<!-- /ci-gate:ignore-count --> |
-| Hook stamp (sha256) | <!-- ci-gate:hooks-stamp -->a661892d11a652a021b1c895bec39c5d7ea340f4b17a0847709a1e3e43b56ba8<!-- /ci-gate:hooks-stamp --> |
+| Hook stamp (sha256) | <!-- ci-gate:hooks-stamp -->84f716d028f96df48ad9ed3004745548079e2f3c025c68bfde299ddd754e2397<!-- /ci-gate:hooks-stamp --> |
 
 After a green pre-push, counts/stamp in this rule file update automatically — **commit the rule if it changed**.
 
