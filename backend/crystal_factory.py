@@ -60,7 +60,62 @@ logger = logging.getLogger("crystal_factory")
 CLUSTER_MIN_ITEMS = 3
 MAX_CRYSTAL_LENGTH = 3000
 WATERMARK_KEY_PREFIX = "crystal_factory_watermark"
-DEDUP_INTERVAL_CYCLES = 12  # run semantic dedup every 12 cycles (~6 hours)
+DEDUP_INTERVAL_CYCLES = 12  # run semantic dedup every 12 cycles (~6 hours at 1800s)
+
+# QUANTUM-CRYSTAL-ARCH: mint governor (2026-11-10). Default interval was "10"
+# while the docstring/deploy envelope said 1800s / 50-150 crystals/day.
+# Hetzner minted ~3100/day then prefix-archived ~85% as near-dups; coding and
+# defense never 90-day decay. Clamp unless FACTORY_ALLOW_FAST=true.
+MIN_HARVEST_INTERVAL_SEC = 1800
+DEFAULT_HARVEST_INTERVAL_SEC = 1800
+DEFAULT_DAILY_STORE_CAP = 96
+DEFAULT_MAX_STORE_PER_CYCLE = 2
+FACTORY_DOMAIN_DEFAULT_CAP = 6
+FACTORY_DOMAIN_DAILY_CAP = {
+    "coding": 4,
+    "defense": 4,
+    "marketing": 8,
+    "biochem": 6,
+    "culture": 6,
+    "voice": 6,
+    "patent": 6,
+    "coherence": 6,
+    "predictive_intelligence": 6,
+    "neuroscience_foundations": 6,
+    "neural_acoustic": 6,
+    "product": 6,
+    "operational": 6,
+    "general": 8,
+    "coaching": 12,
+    "research": 16,
+    "clinical": 24,
+}
+_DOMAIN_STAGE2_PRIORITY = {
+    "clinical": 0, "research": 1, "coaching": 2, "general": 3,
+    "marketing": 4, "culture": 5, "biochem": 6, "voice": 7,
+    "patent": 8, "coherence": 9, "predictive_intelligence": 10,
+    "coding": 11, "defense": 12,
+}
+
+
+def resolve_harvest_interval_sec(raw: Optional[str], allow_fast: bool = False) -> int:
+    """Return harvest sleep seconds. Refuses the 10s firehose unless allow_fast."""
+    try:
+        v = int((raw if raw is not None else str(DEFAULT_HARVEST_INTERVAL_SEC)).strip() or DEFAULT_HARVEST_INTERVAL_SEC)
+    except (TypeError, ValueError):
+        v = DEFAULT_HARVEST_INTERVAL_SEC
+    if v < 1:
+        v = DEFAULT_HARVEST_INTERVAL_SEC
+    if not allow_fast and v < MIN_HARVEST_INTERVAL_SEC:
+        return MIN_HARVEST_INTERVAL_SEC
+    return v
+
+
+def domain_mint_allowed(domain: str, already_today: int,
+                        caps: Optional[Dict[str, int]] = None,
+                        default_cap: int = FACTORY_DOMAIN_DEFAULT_CAP) -> bool:
+    cap = (caps or FACTORY_DOMAIN_DAILY_CAP).get(domain or "general", default_cap)
+    return already_today < cap
 
 # ─────────────────────────────────────────────────────────────────
 # Source-based confidence tiers
@@ -606,6 +661,19 @@ class CrystalDB:
                 except Exception as e:
                     logger.warning("Crystal store failed: %s", e)
         return stored
+
+    async def factory_mint_counts_today(self) -> Tuple[int, Dict[str, int]]:
+        """Factory inserts since UTC midnight (any scope — archived still counts)."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT COALESCE(domain, 'general') AS domain, count(*)::int AS n
+                FROM nate_intelligence_crystals
+                WHERE origin_surface = 'crystal_factory'
+                  AND created_at >= date_trunc('day', NOW())
+                GROUP BY 1
+            """)
+        by_domain = {r["domain"]: int(r["n"]) for r in rows}
+        return sum(by_domain.values()), by_domain
 
     async def find_near_duplicates(self, limit: int = 50) -> List[Tuple]:
         """Find crystals with identical domain + very similar text prefix.
@@ -1186,8 +1254,10 @@ class ExternalHarvester:
 
     def __init__(self):
         self._session = None
+        # Default 1: RSS/GitHub/SO each cycle. The old 180 was a throttle for
+        # the 10s firehose (~30 min). At 1800s, 180 would mean RSS every ~3.75d.
         self._full_harvest_every_cycles = max(
-            1, int(os.environ.get("FULL_HARVEST_EVERY_CYCLES", "180"))
+            1, int(os.environ.get("FULL_HARVEST_EVERY_CYCLES", "1"))
         )
         self._queries_per_cycle = max(
             1, int(os.environ.get("SEARCH_QUERIES_PER_CYCLE", "1"))
@@ -1212,7 +1282,7 @@ class ExternalHarvester:
     async def harvest(self, cutoff: datetime, cycle: int = 0) -> List[Dict]:
         await self._ensure_session()
         fragments = []
-        # Internet research queries run every cycle for high-cadence learning.
+        # Search queries run each cycle; harvest interval (min 1800s) is the cadence.
         sq = await self._harvest_search_queries(cycle)
         fragments.extend(sq)
         # High-cost harvesters run on a slower cadence to avoid API abuse.
@@ -1643,7 +1713,20 @@ class CrystalFactory:
     def __init__(self):
         self.role = os.getenv("CRYSTAL_ROLE", "external")
         self.node_id = os.getenv("CRYSTAL_NODE_ID", platform.node())
-        self.interval = int(os.getenv("HARVEST_INTERVAL_SEC", "10"))
+        _allow_fast = (os.getenv("FACTORY_ALLOW_FAST", "") or "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        self.interval = resolve_harvest_interval_sec(
+            os.getenv("HARVEST_INTERVAL_SEC"), allow_fast=_allow_fast,
+        )
+        try:
+            self.daily_cap = max(1, int(os.getenv("FACTORY_DAILY_STORE_CAP", str(DEFAULT_DAILY_STORE_CAP))))
+        except (TypeError, ValueError):
+            self.daily_cap = DEFAULT_DAILY_STORE_CAP
+        try:
+            self.max_per_cycle = max(1, int(os.getenv("FACTORY_MAX_STORE_PER_CYCLE", str(DEFAULT_MAX_STORE_PER_CYCLE))))
+        except (TypeError, ValueError):
+            self.max_per_cycle = DEFAULT_MAX_STORE_PER_CYCLE
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         self.grok_url = os.getenv("GROK_URL", os.getenv("NATE_CHAT_URL", ""))
         self.grok_key = os.getenv("GROK_API_KEY", os.getenv("NATE_CHAT_KEY", ""))
@@ -1687,12 +1770,15 @@ class CrystalFactory:
             "║   Node:    %-40s ║\n"
             "║   Role:    %-40s ║\n"
             "║   Cycle:   every %4d seconds                        ║\n"
+            "║   Caps:    %3d/day  %d/cycle (governor)              ║\n"
             "║   Stage 1: Ollama 8B filter                         ║\n"
             "║   Stage 2: Grok %-36s ║\n"
             "╚══════════════════════════════════════════════════════╝",
             self.node_id[:40],
             self.role[:40],
             self.interval,
+            self.daily_cap,
+            self.max_per_cycle,
             grok_status[:36],
         )
 
@@ -1718,6 +1804,18 @@ class CrystalFactory:
         cutoff = await self._db.get_watermark(self.node_id)
         logger.info("── Cycle %d (%s) ── cutoff: %s",
                      self._cycles, self.role, cutoff.isoformat())
+
+        total_today, by_domain = await self._db.factory_mint_counts_today()
+        if total_today >= self.daily_cap:
+            logger.info(
+                "Daily store cap %d reached (%d minted today). Skip harvest.",
+                self.daily_cap, total_today,
+            )
+            await self._db.write_heartbeat(self.node_id, self._cycles, {
+                "fragments": 0, "elapsed": time.monotonic() - cycle_start,
+                "stored": 0, "deduped": 0,
+            })
+            return
 
         # ── Harvest ──
         if self.role == "external":
@@ -1757,11 +1855,22 @@ class CrystalFactory:
 
         logger.info("Formed %d clusters from %d filtered fragments",
                      len(clusters), len(filtered))
+        clusters.sort(key=lambda c: _DOMAIN_STAGE2_PRIORITY.get(c.get("domain", "general"), 5))
 
-        # ── Stage 2: Grok synthesis ──
+        # ── Stage 2: Grok synthesis (skip when daily/domain/cycle caps bind) ──
         crystals_to_store = []
         stage2_count = 0
         for cluster in clusters:
+            if len(crystals_to_store) >= self.max_per_cycle or total_today >= self.daily_cap:
+                logger.info(
+                    "Cycle/day cap — skip remaining %d clusters (have %d this cycle, %d today)",
+                    len(clusters) - stage2_count, len(crystals_to_store), total_today,
+                )
+                break
+            domain = cluster.get("domain") or "general"
+            if not domain_mint_allowed(domain, by_domain.get(domain, 0)):
+                logger.info("Domain cap skip %s (%d today)", domain, by_domain.get(domain, 0))
+                continue
             crystal_text = await self._pipeline.stage2_synthesize(cluster)
             stage2_count += 1
             if not crystal_text or len(crystal_text) < 30:
@@ -1791,6 +1900,8 @@ class CrystalFactory:
                 "context_end": ctx_end,
                 "face_path": f"factory:{self.node_id}",
             })
+            total_today += 1
+            by_domain[domain] = by_domain.get(domain, 0) + 1
 
         stored = await self._db.store_crystals(crystals_to_store)
         self._total_crystals += stored
