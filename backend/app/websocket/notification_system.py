@@ -301,6 +301,15 @@ class NotificationSystem:
         in pre-built HTML (breaks the attribute mid-string) and double-wraps
         the design. Use for digests/reports that ship their own template.
         """
+        try:
+            from app.services.notifications_service import outbound_email_blocked
+            if outbound_email_blocked():
+                self._log_email(to_email, subject, "skipped_test_ci")
+                return False
+        except Exception:
+            if os.getenv("PYTEST_CURRENT_TEST"):
+                return False
+
         if not self.sendgrid_enabled:
             print(f">>> [NOTIFY] Email skipped (SendGrid disabled): {to_email}")
             self._log_email(to_email, subject, "skipped_disabled")

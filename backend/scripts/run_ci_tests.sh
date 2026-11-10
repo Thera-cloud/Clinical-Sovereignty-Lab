@@ -7,6 +7,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 export ENVIRONMENT="${ENVIRONMENT:-test}"
 export DATABASE_URL="${DATABASE_URL:-}"
 export REDIS_URL="${REDIS_URL:-}"
+# Charge-guard happy path used to call live publish → SendGrid (SES_TEST ops mail).
+export SENDGRID_API_KEY=""
+export SMTP_PASSWORD=""
 export PYTHONPATH="${PYTHONPATH:-${ROOT}/backend}"
 PYTHON="${PYTHON:-python3}"
 

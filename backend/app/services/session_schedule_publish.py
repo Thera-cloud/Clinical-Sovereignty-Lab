@@ -279,7 +279,10 @@ async def stamp_publish_state(
 
 async def _send_notices(row: Dict[str, Any], reason: str) -> None:
     try:
-        from app.services.notifications_service import EmailService
+        from app.services.notifications_service import EmailService, outbound_email_blocked
+        if outbound_email_blocked():
+            logger.info("session_schedule_publish: notice skipped (test/ci) sid=%s", _session_id(row))
+            return
         sid = _session_id(row)
         when = _iso(row.get("scheduled_start") or row.get("scheduled_at"))
         zoom = row.get("zoom_link") or ""

@@ -1,10 +1,15 @@
 """Regression tests for the 2026-11-05 duplicate session charge (Blake Barnes).
 
 A Zoom-repair upsert reset payment_status paid→pending every 30 min and the
-payment agent re-charged on each cycle. These tests pin every layer of the fix
-and run fully offline (no DB, no Stripe network).
+payment agent re-charged on each cycle. These tests pin every layer of the
+collection fix (never-downgrade upsert, collected_reason, Stripe search
+reconcile, atomic claim, idempotency key, payment_history). They are not
+Schedule Ops / publish tests — charge success may call
+publish_scheduled_session, which must be mocked so pytest never SendGrids
+SES_TEST ops mail (incident 2026-11-10 07:03 ET).
 """
 
+import os
 import sys
 import types
 from datetime import datetime, timedelta, timezone
@@ -237,6 +242,15 @@ def _conn_with_state(state, claim_result="UPDATE 1"):
     return conn
 
 
+def _mute_publish(monkeypatch):
+    pub = AsyncMock(return_value={"pending": False, "session_id": "SES_TEST"})
+    monkeypatch.setattr(
+        "app.services.session_schedule_publish.publish_scheduled_session",
+        pub,
+    )
+    return pub
+
+
 @pytest.mark.asyncio
 async def test_charge_card_skips_when_db_says_collected(monkeypatch):
     stripe_mod = _fake_stripe()
@@ -311,6 +325,7 @@ async def test_charge_card_happy_path_uses_idempotency_key_and_ledger(monkeypatc
     stripe_mod = _fake_stripe()
     monkeypatch.setitem(sys.modules, "stripe", stripe_mod)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+    pub = _mute_publish(monkeypatch)
     fin = types.ModuleType("app.services.session_financial_records")
     fin.platform_fee_cents_from_session = lambda s, a: 3000
     fin.mark_coach_ledger_collected = AsyncMock()
@@ -329,6 +344,8 @@ async def test_charge_card_happy_path_uses_idempotency_key_and_ledger(monkeypatc
     sqls = [str(c.args[0]) for c in conn.execute.await_args_list]
     assert any("INSERT INTO payment_history" in s for s in sqls)
     assert any("- 'charge_claim_at'" in s for s in sqls)  # claim cleared on success
+    pub.assert_awaited_once()
+    assert pub.await_args.kwargs.get("reason") == "charge_succeeded"
 
 
 @pytest.mark.asyncio
@@ -336,6 +353,7 @@ async def test_charge_card_prefers_stripe_pm_over_stale_profile(monkeypatch):
     stripe_mod = _fake_stripe()
     monkeypatch.setitem(sys.modules, "stripe", stripe_mod)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+    _mute_publish(monkeypatch)
 
     async def _stripe_pm(*_a, **_k):
         return "pm_stripe"
@@ -357,6 +375,20 @@ async def test_charge_card_prefers_stripe_pm_over_stale_profile(monkeypatch):
     )
     assert res is True
     assert stripe_mod._created[0]["payment_method"] == "pm_stripe"
+
+
+@pytest.mark.asyncio
+async def test_email_service_refuses_sendgrid_during_pytest():
+    from app.services.notifications_service import EmailService, outbound_email_blocked
+
+    assert outbound_email_blocked() is True
+    assert os.getenv("PYTEST_CURRENT_TEST")
+    ok = await EmailService().send_email(
+        "support@sovereignsanctuary.net",
+        "session_ops_digest",
+        {"issue_count": 1, "issue_count_plural": "", "digest_html": "<p>SES_TEST</p>"},
+    )
+    assert ok is False
 
 
 # ── Layer 4: check-in agent only repairs when a reminder will actually send ──

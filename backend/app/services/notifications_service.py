@@ -36,6 +36,18 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "") or os.getenv("SMTP_PASSWORD
 FROM_EMAIL = os.getenv("FROM_EMAIL", "sanctuary@littlenate.ai")
 FROM_NAME = os.getenv("FROM_NAME", "Sovereign Sanctuary")
 
+
+def outbound_email_blocked() -> bool:
+    """Pytest/CI must never hit SendGrid. PYTEST_CURRENT_TEST is set per test;
+    ENVIRONMENT=test is set by run_ci_tests.sh. SENDGRID_FORCE_SEND=true is the
+    only override (manual live-mail drills)."""
+    if os.getenv("SENDGRID_FORCE_SEND", "").lower() in ("1", "true", "yes"):
+        return False
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    return env in ("test", "pytest", "ci")
+
 from app.config import settings as _app_settings
 APP_URL = _app_settings.APP_URL
 
@@ -960,6 +972,13 @@ class EmailService:
             except Exception as _tg_err:
                 logger.debug("Transit Guardian email inspection non-blocking: %s", _tg_err)
         
+        if outbound_email_blocked():
+            logger.warning(
+                "Email send blocked (test/ci): template=%s dest=%s",
+                template_name, (to_email or "")[:24],
+            )
+            return False
+
         if not SENDGRID_API_KEY:
             print("Email send failed: SENDGRID_API_KEY not set")
             return False
