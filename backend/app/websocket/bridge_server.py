@@ -7740,7 +7740,7 @@ async def _persist_chat_to_conversation_history(
     """Write text chat turns to conversation_history (PG) so Memory Search and
     deep recall can find them. Fire-and-forget from process_interaction."""
     try:
-        _meta_dict = {}
+        _meta_dict = {"surface": "bridge_chat"}  # QUANTUM-CRYSTAL-ARCH — read-back is main chat only
         if turn_id:
             _meta_dict["turn_id"] = turn_id
         # QUANTUM-CRYSTAL-ARCH: Commit 2 (ENABLE_CRYSTAL_ATTRIBUTION, default
@@ -11399,6 +11399,11 @@ class AzureCortex:
                 except Exception as _ad_post_err:
                     print(f">>> [ADAPTIVE] post-turn error (non-fatal): {_ad_post_err}")
 
+            # QUANTUM-CRYSTAL-ARCH — a connection failure is not a reply the next turn should copy
+            _failed_reply = (
+                _provider_used == "failed"
+                or (_final_response or "").strip().startswith("I'm having trouble connecting")
+            )
             if not _is_search_synthesis:  # QUANTUM-CRYSTAL-ARCH — skip crystallizing search dumps
                 try:
                     asyncio.create_task(crystallize_from_conversation(
@@ -11457,10 +11462,11 @@ class AzureCortex:
                 try:
                     if uid not in _chat_live_turns:
                         _chat_live_turns[uid] = []
-                    _ai_store = _final_response
+                    _ai_store = "" if _failed_reply else _final_response
                     try:  # QUANTUM-CRYSTAL-ARCH — a broken reply is stored short so the next turn cannot copy it
-                        from app.services.main_chat_payload import ai_text_for_next_turn as _ai_next
-                        _ai_store = _ai_next(_final_response)
+                        if not _failed_reply:
+                            from app.services.main_chat_payload import ai_text_for_next_turn as _ai_next
+                            _ai_store = _ai_next(_final_response)
                     except Exception:
                         pass
                     _chat_live_turns[uid].append({
@@ -11475,13 +11481,14 @@ class AzureCortex:
                     except Exception:
                         pass
 
-                    if uid not in _chat_session_turns:
-                        _chat_session_turns[uid] = []
-                    _chat_session_turns[uid].append({
-                        "user_text": _qg_verbatim_user_text,
-                        "ai_text": _final_response,
-                    })
-                    if len(_chat_session_turns[uid]) >= _CHAT_SESSION_CRYSTAL_INTERVAL:
+                    if not _failed_reply:  # QUANTUM-CRYSTAL-ARCH — do not crystallize the failure line
+                        if uid not in _chat_session_turns:
+                            _chat_session_turns[uid] = []
+                        _chat_session_turns[uid].append({
+                            "user_text": _qg_verbatim_user_text,
+                            "ai_text": _final_response,
+                        })
+                    if not _failed_reply and len(_chat_session_turns.get(uid) or []) >= _CHAT_SESSION_CRYSTAL_INTERVAL:
                         _accumulated = list(_chat_session_turns[uid])
                         _chat_session_turns[uid] = []
                         asyncio.create_task(crystallize_session_summary(
@@ -11495,7 +11502,8 @@ class AzureCortex:
 
             # SOVEREIGN-VOICE — persist chat turns to conversation_history (PG) so Memory Search works
             try:
-                if db_pool and user_text and _final_response:
+                _history_ai = "" if _failed_reply else _final_response  # QUANTUM-CRYSTAL-ARCH
+                if db_pool and user_text and _history_ai:
                     _ch_username = profile.get("username", uid)
                     _ch_session = self._ensure_session_id(uid)
                     _sym_persist = None

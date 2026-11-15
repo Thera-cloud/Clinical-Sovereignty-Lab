@@ -13,14 +13,16 @@ from app.services.main_chat_payload import (
     clean_standing_text,
     extract_standing_candidate,
     is_resend,
+    live_turns_to_messages,
     mark_recall_dirty,
     maybe_apply_stride,
+    repair_prior_turns,
     store_memory_cache,
     teaching_allowed,
 )
 from app.services.sovereign_chat_client import held_session_provider, remember_session_provider
 from app.websocket.chat_depth_mode import allow_plan_context, allow_plan_heavy, crystal_recall_timeout_s
-from app.websocket.inference_race import chat_messages
+from app.websocket.inference_race import chat_messages, realtime_content_type
 from app.websocket.cli_prompt_budget import shrink_memory_segment, window_cli_conversation_history
 
 _FLAG = "ENABLE_MAIN_CHAT_STRIDE"
@@ -91,7 +93,7 @@ def test_faster_and_extra_share_core_person_and_live_budget():
     turns = [{"user_text": "u" * 30, "ai_text": "a" * 30}]
     common = dict(
         name="A",
-        user_text="still with this",
+            user_text="still with this " + ("word " * 40),
         plan_block="step-alpha keep me",
         crystal_block="M" * 20_000,
         history_block="",
@@ -340,7 +342,13 @@ def test_safety_caps_are_never_raised():
     assert cap == 200
     _, _, cap = _build(max_tokens=2000, autonomic_state="activated")
     assert cap == 500
-    _, _, cap = _build(max_tokens=900, autonomic_state="in_window")
+    _, _, cap = _build(user_text="ok", max_tokens=900, autonomic_state="in_window")
+    assert cap == 450
+    _, _, cap = _build(user_text="ok", max_tokens=1200, autonomic_state="in_window")
+    assert cap == 450
+    _, _, cap = _build(user_text="tell me more", max_tokens=1200, autonomic_state="in_window")
+    assert cap == 1200
+    _, _, cap = _build(user_text="word " * 80, max_tokens=900, autonomic_state="in_window")
     assert cap == 1200
     _, _, cap = _build(max_tokens=2000, depth="faster", autonomic_state="regulated")
     assert cap == 900
@@ -485,8 +493,44 @@ def test_fallback_generation_carries_the_turns(monkeypatch):
     assert text == "ok"
     assert [m["role"] for m in seen["messages"]] == ["system", "user", "assistant", "user"]
     assert seen["messages"][-1]["content"] == "now"
+    trailing = hist + [{"role": "user", "content": "still waiting"}]
+    asyncio.run(chat_client.generate_complete("SYS", "now", history_messages=trailing))
+    assert [m["role"] for m in seen["messages"]] == ["system", "user", "assistant", "user"]
+    assert seen["messages"][-1]["content"] == "still waiting\n\nnow"
     asyncio.run(chat_client.generate_complete("SYS", "now"))
     assert [m["role"] for m in seen["messages"]] == ["system", "user"]
+
+
+def test_unanswered_user_joins_the_current_message():
+    hist = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply"},
+        {"role": "user", "content": "still waiting"},
+    ]
+    msgs = chat_messages("SYS", "now", hist)
+    assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
+    assert msgs[-1]["content"] == "still waiting\n\nnow"
+    turns = live_turns_to_messages([
+        {"user_text": "first", "ai_text": "reply"},
+        {"user_text": "still waiting", "ai_text": ""},
+    ])
+    fixed, current = repair_prior_turns(turns, "now")
+    assert [m["role"] for m in fixed] == ["user", "assistant"]
+    assert current == "still waiting\n\nnow"
+
+
+def test_realtime_assistant_items_use_text():
+    assert realtime_content_type("assistant") == "text"
+    assert realtime_content_type("user") == "input_text"
+
+
+def test_readback_sql_keeps_main_chat_only():
+    sql = payload._READBACK_SQL
+    assert "bridge_chat" in sql
+    assert "reconnect:%" in sql
+    assert "[HYBRID_RESUME]%" in sql
+    assert "COALESCE(ai_text, '') <> ''" in sql
+    assert "session_id NOT LIKE 'CA%'" in sql
 
 
 def test_prior_turns_sit_between_system_and_the_current_user():

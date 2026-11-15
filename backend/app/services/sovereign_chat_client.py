@@ -43,8 +43,8 @@ def remember_session_provider(session_key: str, provider: str) -> None:
 
 
 def _window_history(history_messages: List[Dict], system_prompt: str) -> Tuple[List[Dict], str]:
-    """Prior turns that fit the window, plus the system prompt with a line for any left out."""
-    from app.websocket.cli_prompt_budget import window_cli_conversation_history
+    """Newest whole user/assistant pairs that fit. A dropped turn is noted on the system prompt."""
+    from app.websocket.cli_prompt_budget import CLI_MAX_HISTORY_CHARS
 
     clean = [
         {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user",
@@ -52,7 +52,33 @@ def _window_history(history_messages: List[Dict], system_prompt: str) -> Tuple[L
         for m in history_messages
         if isinstance(m, dict) and isinstance(m.get("content"), str) and m.get("content")
     ]
-    kept = window_cli_conversation_history(clean, insert_gap_note=False)
+    if sum(len(m["content"]) for m in clean) <= CLI_MAX_HISTORY_CHARS:
+        return clean, system_prompt
+
+    seq = list(clean)
+    while seq and seq[-1].get("role") != "assistant":
+        seq.pop()
+    if not seq:
+        seq = list(clean)
+    kept: List[Dict] = []
+    used = 0
+    for msg in reversed(seq):
+        n = len(msg.get("content") or "")
+        if kept and used + n > CLI_MAX_HISTORY_CHARS:
+            break
+        kept.append(dict(msg))
+        used += n
+    kept.reverse()
+    i = 0
+    while i < len(kept) - 1:
+        if kept[i].get("role") == kept[i + 1].get("role"):
+            kept.pop(i)
+            continue
+        i += 1
+    while kept and kept[0].get("role") != "user":
+        kept.pop(0)
+    while kept and kept[-1].get("role") != "assistant":
+        kept.pop()
     omitted = len(clean) - len(kept)
     if omitted > 0:
         system_prompt += (
@@ -583,9 +609,10 @@ async def generate_streaming(
     _t0 = time.monotonic()
     _chars_out = 0
     _hist: List[Dict] = []
-    if history_messages and not image_data_url:
-        from app.websocket.cli_prompt_budget import window_cli_conversation_history
+    if history_messages:
         _hist, system_prompt = _window_history(history_messages, system_prompt)
+    from app.services.main_chat_payload import repair_prior_turns as _repair_prior
+    _hist, user_message = _repair_prior(_hist, user_message)
 
     # Slice 3 + gap-fix (bee-hiv-only): pseudonymize outbound / restore
     # inbound. Cohort-gated via program_id — non-strict users get zero
@@ -626,8 +653,7 @@ async def generate_streaming(
                 system_prompt, user_message, provider, max_tokens, history_chars=_hist_chars,
             )
             if image_data_url and provider in ("azure", "grok"):
-                messages = [
-                    {"role": "system", "content": _sp},
+                messages = [{"role": "system", "content": _sp}] + _hist + [
                     {"role": "user", "content": [
                         {"type": "text", "text": _um},
                         {"type": "image_url", "image_url": {"url": image_data_url, "detail": "high"}},
@@ -808,9 +834,11 @@ async def generate_complete(
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
     _hist: List[Dict] = []
-    if history_messages and not image_data_url:
+    if history_messages:
         _hist, system_prompt = _window_history(history_messages, system_prompt)
-    _hist_chars = sum(len(m["content"]) for m in _hist)
+    from app.services.main_chat_payload import repair_prior_turns as _repair_prior
+    _hist, user_message = _repair_prior(_hist, user_message)
+    _hist_chars = sum(len(m["content"]) for m in _hist if isinstance(m.get("content"), str))
 
     if image_data_url:
         providers_to_try = []
@@ -835,8 +863,7 @@ async def generate_complete(
                 system_prompt, user_message, provider, max_tokens, history_chars=_hist_chars,
             )
             if image_data_url and provider in ("azure", "grok"):
-                messages = [
-                    {"role": "system", "content": _sp},
+                messages = [{"role": "system", "content": _sp}] + _hist + [
                     {"role": "user", "content": [
                         {"type": "text", "text": _um},
                         {"type": "image_url", "image_url": {"url": image_data_url, "detail": "high"}},

@@ -32,18 +32,22 @@ _AZURE_ENDPOINT = (
 )
 
 
+def realtime_content_type(role: str) -> str:
+    """Assistant items take ``text``. ``input_text`` is valid for user items only."""
+    return "text" if role == "assistant" else "input_text"
+
+
 def chat_messages(system_prompt, user_text, history_messages=None, limit: int = 24):
     """System, then prior user/assistant turns, then the current user turn."""
-    prior = []
-    for raw in history_messages or []:
-        if not isinstance(raw, dict):
-            continue
-        role = raw.get("role")
-        content = (raw.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            prior.append({"role": role, "content": content})
-    return [{"role": "system", "content": system_prompt or ""}] + prior[-limit:] + [
-        {"role": "user", "content": user_text or ""},
+    from app.services.main_chat_payload import repair_prior_turns
+
+    prior, current = repair_prior_turns(history_messages, user_text or "")
+    if limit and len(prior) > limit:
+        prior = prior[-limit:]
+        while prior and prior[0].get("role") != "user":
+            prior.pop(0)
+    return [{"role": "system", "content": system_prompt or ""}] + prior + [
+        {"role": "user", "content": current},
     ]
 
 
@@ -113,7 +117,10 @@ async def _call_azure_realtime(
                     "item": {
                         "type": "message",
                         "role": _prior["role"],
-                        "content": [{"type": "input_text", "text": _prior["content"]}],
+                        "content": [{
+                            "type": realtime_content_type(_prior["role"]),
+                            "text": _prior["content"],
+                        }],
                     },
                 }))
             await ws.send_str(json.dumps({

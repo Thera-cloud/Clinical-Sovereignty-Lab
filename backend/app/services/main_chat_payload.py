@@ -24,6 +24,15 @@ PERSON_BUDGET = 4_000
 MEMORY_BUDGET_EXTRA = 12_000
 MEMORY_BUDGET_FASTER = 6_000
 LIVE_TURN_BUDGET = 24_000
+# A short in-window message must not inherit the 1200 default from the bridge.
+SHORT_TURN_CAP = 450
+_MORE_PHRASES = (
+    "tell me more", "go deeper", "explain in detail", "explain more",
+    "elaborate", "expand on", "more about", "more detail",
+    "dive into", "walk me through", "break it down",
+    "is there more", "there's more", "keep going", "go on",
+    "say more", "continue", "finish that", "don't stop",
+)
 
 _MEM_OPEN = "<!--MEM-->"
 _MEM_CLOSE = "<!--/MEM-->"
@@ -188,12 +197,12 @@ def ai_text_for_next_turn(text: str) -> str:
 def _shorten_reply(body: str) -> str:
     folded = f" {body.lower()} "
     talks = " you " in folded or " you're " in folded or " you'" in folded
-    if len(body) > 1800 and not talks:
-        cut = body[:160].rsplit(" ", 1)[0]
-        return cut + " [reply shortened; do not copy its shape]"
     if len(body) > 3500:
         cut = body[:220].rsplit(" ", 1)[0]
         return cut + " [reply shortened; continue, do not repeat it]"
+    if len(body) > 1800 and not talks:
+        cut = body[:160].rsplit(" ", 1)[0]
+        return cut + " [reply shortened; do not copy its shape]"
     return body
 
 
@@ -239,14 +248,68 @@ def teaching_allowed(user_text: str, autonomic_state: str) -> bool:
 
 def live_turns_to_messages(live_turns: Optional[List[dict]]) -> List[dict]:
     out: List[dict] = []
+    pending: List[str] = []
     for turn in live_turns or []:
         user = (turn.get("user_text") or "").strip()
         ai = _shorten_reply((turn.get("ai_text") or "").strip())
-        if user:
-            out.append({"role": "user", "content": user})
-        if ai:
-            out.append({"role": "assistant", "content": ai})
+        if not user:
+            continue
+        if not ai:
+            pending.append(user)
+            continue
+        if pending:
+            user = "\n\n".join(pending + [user])
+            pending = []
+        out.append({"role": "user", "content": user})
+        out.append({"role": "assistant", "content": ai})
+    if pending and out and out[-1]["role"] == "user":
+        out[-1]["content"] = out[-1]["content"] + "\n\n" + "\n\n".join(pending)
+    elif pending:
+        out.append({"role": "user", "content": "\n\n".join(pending)})
     return out
+
+
+def asked_for_more(user_text: str) -> bool:
+    """Same phrases the bridge and tempo hook treat as a request for a longer reply."""
+    lower = (user_text or "").lower()
+    return any(phrase in lower for phrase in _MORE_PHRASES)
+
+
+def repair_prior_turns(history: Optional[List[dict]], current_user: str) -> Tuple[List[dict], str]:
+    """Prior turns end on an assistant message. A trailing user turn joins the current one.
+
+    Under the 24k history budget the window returns the list unchanged, so this
+    repair has to run at send time. Otherwise the current message is appended
+    after an unanswered user turn and the model sees user, user.
+    """
+    prior: List[dict] = []
+    for raw in history or []:
+        if not isinstance(raw, dict):
+            continue
+        role = raw.get("role")
+        content = raw.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if isinstance(content, str):
+            text = content.strip()
+            if not text:
+                continue
+            if prior and prior[-1]["role"] == role and isinstance(prior[-1].get("content"), str):
+                prior[-1] = {"role": role, "content": prior[-1]["content"] + "\n\n" + text}
+            else:
+                prior.append({"role": role, "content": text})
+        elif content:
+            prior.append({"role": role, "content": content})
+    while prior and prior[0].get("role") != "user":
+        prior.pop(0)
+    carried: List[str] = []
+    while prior and prior[-1].get("role") == "user" and isinstance(prior[-1].get("content"), str):
+        carried.append(prior.pop()["content"])
+    carried.reverse()
+    current = current_user or ""
+    if carried:
+        current = "\n\n".join(carried + ([current] if current else []))
+    return prior, current
 
 
 def _clip(text: str, limit: int) -> str:
@@ -443,18 +506,23 @@ def assemble_stride_prompt(
 
     messages = live_turns_to_messages(live_turns)
     # The controller's cap is a safety decision. Length floors apply only when it left room.
+    # The bridge default is already 1200, so a short message has to be lowered here.
     incoming = int(max_tokens or 900)
     cap = incoming
     guarded = fragile or incoming < 600
+    resend_exempt = resend or asked_for_more(user_text)
+    short_turn = len((user_text or "").strip()) < 160 and not resend_exempt
     if faster:
         cap = min(cap, 900)
-    elif not guarded:
+    elif not guarded and not short_turn:
         cap = max(cap, 1200)
     if not guarded:
         if not live_turns and len(user_text or "") > 400:
             cap = max(cap, 800)
         if resend:
             cap = max(cap, 900)
+    if short_turn and not guarded and not faster:
+        cap = min(cap, SHORT_TURN_CAP)
     if fragile:
         cap = min(cap, 500)
     return system, messages, cap
@@ -565,22 +633,30 @@ def advance_standing_state(uid: str, user_text: str, state: Dict[str, Any]) -> b
     return False
 
 
+# Main-chat rows only. Voice, reconnect, and hybrid-resume writers share this table.
+# Untagged rows from before the surface mark are kept only when they are not those writers.
+_READBACK_SQL = """
+SELECT user_text, ai_text FROM conversation_history
+WHERE user_id = ANY($1) AND created_at > NOW() - INTERVAL '45 minutes'
+  AND COALESCE(user_text, '') <> ''
+  AND COALESCE(ai_text, '') <> ''
+  AND COALESCE(session_id, '') <> ''
+  AND session_id NOT LIKE 'reconnect:%'
+  AND session_id NOT LIKE 'CA%'
+  AND COALESCE(user_text, '') NOT LIKE '[HYBRID_RESUME]%'
+  AND COALESCE(metadata->>'surface', '') IN ('', 'bridge_chat')
+ORDER BY created_at DESC, id DESC LIMIT 16
+"""
+
+
 async def _recent_turns(db_pool: Any, username: str, uid: str) -> List[dict]:
-    """Last turns of an interrupted conversation, read back after the in-memory ring was lost."""
+    """Last main-chat turns of an interrupted conversation, after the in-memory ring was lost."""
     ids = [i for i in dict.fromkeys([username, uid]) if i]
     if not db_pool or not ids:
         return []
     try:
         async with db_pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT user_text, ai_text FROM conversation_history
-                WHERE user_id = ANY($1) AND created_at > NOW() - INTERVAL '45 minutes'
-                  AND COALESCE(user_text, '') <> ''
-                ORDER BY created_at DESC, id DESC LIMIT 16
-                """,
-                ids,
-            )
+            rows = await conn.fetch(_READBACK_SQL, ids)
     except Exception as exc:
         logger.warning("main_chat_payload: live-turn read-back failed: %s", exc)
         return []
@@ -604,9 +680,25 @@ async def _live_with_readback(
         _rehydrated[uid] = held
     if not held or not held[1]:
         return live_turns
-    seen = {(t.get("user_text") or "").strip() for t in live_turns}
-    older = [t for t in held[1] if (t.get("user_text") or "").strip() not in seen]
+    seen = [(t.get("user_text") or "").strip() for t in live_turns]
+    older = [t for t in held[1] if not _same_user_line(t.get("user_text") or "", seen)]
     return (older + live_turns)[-16:]
+
+
+def _same_user_line(text: str, seen: List[str]) -> bool:
+    """Ring stores the sanitized line; the table stores the verbatim line."""
+    body = (text or "").strip()
+    if not body:
+        return False
+    for other in seen:
+        if not other:
+            continue
+        if body == other:
+            return True
+        n = min(len(body), len(other), 48)
+        if n >= 24 and body[:n] == other[:n]:
+            return True
+    return False
 
 
 async def maybe_apply_stride(
