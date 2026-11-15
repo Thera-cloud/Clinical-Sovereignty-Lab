@@ -193,6 +193,8 @@ services:
       - SANDBOX_URL=http://10.13.13.4:9090
       - SANDBOX_HMAC_KEY=${SANDBOX_HMAC_KEY:-}
       - ENVIRONMENT=production
+      # QUANTUM-CRYSTAL-ARCH — main-chat stride live turns (operator on 2026-11-15)
+      - ENABLE_MAIN_CHAT_STRIDE=${ENABLE_MAIN_CHAT_STRIDE:-true}
       # QUANTUM-CRYSTAL-ARCH — LN7 Step 0 weld tree (W13); host dir is SA-unwritable
       - FROZEN_CONFIG_DIR=/opt/ln7/frozen-config
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
@@ -471,6 +473,8 @@ services:
       - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      # QUANTUM-CRYSTAL-ARCH — main-chat stride live turns (operator on 2026-11-15)
+      - ENABLE_MAIN_CHAT_STRIDE=${ENABLE_MAIN_CHAT_STRIDE:-true}
       # QUANTUM-CRYSTAL-ARCH — paid Inner Chamber / Sovereign Circle must go Stripe-first (WS bypass blocked)
       - REGISTRATION_STRIPE_FIRST=true
       # QUANTUM-CRYSTAL-ARCH — heal→thrive phase model (bridge addendum)

@@ -20,6 +20,7 @@ from app.services.main_chat_payload import (
 )
 from app.services.sovereign_chat_client import held_session_provider, remember_session_provider
 from app.websocket.chat_depth_mode import allow_plan_context, allow_plan_heavy, crystal_recall_timeout_s
+from app.websocket.inference_race import chat_messages
 from app.websocket.cli_prompt_budget import shrink_memory_segment, window_cli_conversation_history
 
 _FLAG = "ENABLE_MAIN_CHAT_STRIDE"
@@ -486,6 +487,17 @@ def test_fallback_generation_carries_the_turns(monkeypatch):
     assert seen["messages"][-1]["content"] == "now"
     asyncio.run(chat_client.generate_complete("SYS", "now"))
     assert [m["role"] for m in seen["messages"]] == ["system", "user"]
+
+
+def test_prior_turns_sit_between_system_and_the_current_user():
+    msgs = chat_messages(
+        "SYS",
+        "now",
+        [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "reply"},
+         {"role": "tool", "content": "skip"}],
+    )
+    assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
+    assert msgs[-1]["content"] == "now" and msgs[0]["content"] == "SYS"
 
 
 def test_held_light_model_moves_up_on_a_heavy_turn(monkeypatch):

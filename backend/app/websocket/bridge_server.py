@@ -429,7 +429,7 @@ def _stance_persist(uid: str, role, state) -> None:
         print(f">>> [STANCE] persist error (non-fatal): {_stp_err}")
 
 
-async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, st_state, t_start):
+async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, st_state, t_start, history_messages=None):
     # QUANTUM-CRYSTAL-ARCH — ITEM 9: one-shot WITNESS-only regen when a guard guts the reply
     if not gutted or _stance_mod is None:
         return prior
@@ -441,7 +441,7 @@ async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, s
         _hard = ("\n\nCRITICAL: Respond with WITNESS only — a single grounded reflective "
                  "sentence. No list, no menu of options, no question, no action plan.")
         _sys = (system_prompt or "") + _hard
-        _regen = await _stance_regen_llm(_sys, user_text)
+        _regen = await _stance_regen_llm(_sys, user_text, history_messages)  # QUANTUM-CRYSTAL-ARCH — stride turns
         if not _regen or not _regen.strip():
             return prior
         _regen, _ = _stance_mod.apply_post_generation_guards(
@@ -453,16 +453,16 @@ async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, s
         return prior
 
 
-async def _stance_regen_llm(system_prompt, user_text):
+async def _stance_regen_llm(system_prompt, user_text, history_messages=None):
     # QUANTUM-CRYSTAL-ARCH — ITEM 9: minimal single-shot completion for hardened witness regen
     try:
         import aiohttp as _aio
+        from app.websocket.inference_race import chat_messages as _chat_messages
         _url = globals().get("_CHAT_SUMMARY_URL") or globals().get("_CHAT_COMPLETIONS_URL")
         _key = globals().get("AZURE_API_KEY") or os.getenv("AZURE_API_KEY", "")
         if not _url or not _key:
             return None
-        _payload = {"messages": [{"role": "system", "content": system_prompt},
-                                 {"role": "user", "content": user_text}],
+        _payload = {"messages": _chat_messages(system_prompt, user_text, history_messages, limit=8),
                     "max_completion_tokens": 220}
         _hdrs = {"api-key": _key, "Content-Type": "application/json"}
         async with _aio.ClientSession() as _s:
@@ -10860,6 +10860,7 @@ class AzureCortex:
                         domain="clinical",
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                         program_id=_program_id,  # gap-fix (bee-hiv-only)
+                        history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
                     )
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Primary inference failed: {_sov_err}")
@@ -10878,6 +10879,7 @@ class AzureCortex:
                     full_response, _provider_used = await _race_inference(
                         system_prompt, user_text, uid,
                         send_fn=_race_fn, temperature=_user_temp, max_tokens=_len_cap,  # FIX-LEN
+                        history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
                     )
                 except Exception as _race_err:
                     print(f">>> [RACE] Primary inference failed: {_race_err}")
@@ -10939,6 +10941,7 @@ class AzureCortex:
                         full_response, _provider_used = await _race_inference(
                             _retry_prompt, user_text, uid,
                             send_fn=None, temperature=_user_temp, max_tokens=200,
+                            history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
                         )
                     if full_response.strip():
                         print(f">>> [AQ-BYPASS] Clinical retry succeeded via {_provider_used}")
@@ -11102,6 +11105,7 @@ class AzureCortex:
                         full_response = await _stance_maybe_regen(
                             _st_gutted, system_prompt, user_text, full_response,
                             _st_dec2, _st_state2, _t_inf_start,
+                            history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
                         )
                         await _stance_log_guard_telemetry(
                             db_pool, uid,

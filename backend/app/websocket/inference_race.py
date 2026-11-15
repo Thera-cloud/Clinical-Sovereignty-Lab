@@ -32,12 +32,28 @@ _AZURE_ENDPOINT = (
 )
 
 
+def chat_messages(system_prompt, user_text, history_messages=None, limit: int = 24):
+    """System, then prior user/assistant turns, then the current user turn."""
+    prior = []
+    for raw in history_messages or []:
+        if not isinstance(raw, dict):
+            continue
+        role = raw.get("role")
+        content = (raw.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            prior.append({"role": role, "content": content})
+    return [{"role": "system", "content": system_prompt or ""}] + prior[-limit:] + [
+        {"role": "user", "content": user_text or ""},
+    ]
+
+
 async def _call_grok(
     system_prompt: str,
     user_text: str,
     uid: str,
     max_tokens: int = 150,
     temperature: float = 1.37,
+    history_messages=None,
 ) -> Tuple[str, str]:
     """Call Grok Chat Completions (HTTP POST, non-streaming)."""
     import aiohttp
@@ -45,10 +61,7 @@ async def _call_grok(
     headers = {"Content-Type": "application/json", "api-key": _GROK_KEY}
     payload = {
         "model": _GROK_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_text},
-        ],
+        "messages": chat_messages(system_prompt, user_text, history_messages),
         "max_completion_tokens": max_tokens,
         "temperature": temperature,
     }
@@ -74,6 +87,7 @@ async def _call_azure_realtime(
     user_text: str,
     uid: str,
     send_fn: Optional[Callable[[str, str], Coroutine]] = None,
+    history_messages=None,
 ) -> Tuple[str, str]:
     """Call Azure Realtime (WebSocket, streaming text deltas)."""
     import aiohttp
@@ -93,6 +107,15 @@ async def _call_azure_realtime(
                     "turn_detection": None,
                 },
             }))
+            for _prior in chat_messages("", "", history_messages)[1:-1]:
+                await ws.send_str(json.dumps({
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": _prior["role"],
+                        "content": [{"type": "input_text", "text": _prior["content"]}],
+                    },
+                }))
             await ws.send_str(json.dumps({
                 "type": "conversation.item.create",
                 "item": {
@@ -129,6 +152,7 @@ async def race_inference(
     send_fn: Optional[Callable[[str, str], Coroutine]] = None,
     temperature: float = 1.37,
     max_tokens: int = 150,
+    history_messages=None,
 ) -> Tuple[str, str]:
     """Race Grok HTTP vs Azure Realtime.  Returns (response_text, provider_name).
 
@@ -140,10 +164,10 @@ async def race_inference(
 
     if has_grok and has_azure:
         grok_task = asyncio.create_task(
-            _call_grok(system_prompt, user_text, uid, max_tokens, temperature)
+            _call_grok(system_prompt, user_text, uid, max_tokens, temperature, history_messages)
         )
         azure_task = asyncio.create_task(
-            _call_azure_realtime(system_prompt, user_text, uid, send_fn)
+            _call_azure_realtime(system_prompt, user_text, uid, send_fn, history_messages)
         )
 
         done, pending = await asyncio.wait(
@@ -176,8 +200,12 @@ async def race_inference(
         raise RuntimeError("Both Grok and Azure failed")
 
     elif has_grok:
-        return await _call_grok(system_prompt, user_text, uid, max_tokens, temperature)
+        return await _call_grok(
+            system_prompt, user_text, uid, max_tokens, temperature, history_messages,
+        )
     elif has_azure:
-        return await _call_azure_realtime(system_prompt, user_text, uid, send_fn)
+        return await _call_azure_realtime(
+            system_prompt, user_text, uid, send_fn, history_messages,
+        )
     else:
         raise RuntimeError("No inference provider configured")
