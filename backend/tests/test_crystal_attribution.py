@@ -261,7 +261,7 @@ async def test_persist_flag_off_omits_crystal_ids(monkeypatch, persist_fn):
 
     _query, args = conn.calls[0]
     meta = json.loads(args[4])
-    assert meta == {"turn_id": "turn-abc"}
+    assert meta == {"turn_id": "turn-abc", "surface": "bridge_chat"}
     assert "crystal_ids" not in meta
 
 
@@ -274,7 +274,7 @@ async def test_persist_no_ids_no_turn_id_writes_empty_metadata(monkeypatch, pers
     await persist_fn(pool, "alice", "hello", "hi there")
 
     _query, args = conn.calls[0]
-    assert json.loads(args[4]) == {}
+    assert json.loads(args[4]) == {"surface": "bridge_chat"}
 
 
 @pytest.mark.asyncio
@@ -289,4 +289,5 @@ async def test_persist_empty_crystal_ids_list_omits_key(monkeypatch, persist_fn)
 
     _query, args = conn.calls[0]
     meta = json.loads(args[4])
-    assert meta == {"turn_id": "t1"}
+    assert meta == {"turn_id": "t1", "surface": "bridge_chat"}
+    assert "crystal_ids" not in meta
