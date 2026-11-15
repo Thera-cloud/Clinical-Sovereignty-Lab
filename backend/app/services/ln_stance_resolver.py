@@ -47,6 +47,7 @@ This resolver re-opens that narrow lane WITHOUT re-opening diagnosis.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -1089,6 +1090,21 @@ def reconcile_intent(
     return regex_intent
 
 
+def _stride_witness_narrow() -> bool:
+    """Witness only on an explicit 'what do you see' when the stride flag is on."""
+    return (os.getenv("ENABLE_MAIN_CHAT_STRIDE") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _explicit_witness_ask(text: str) -> bool:
+    return bool(re.search(
+        r"\bwhat do you (?:see|notice)\b|\btell me what you (?:actually )?see\b",
+        text or "",
+        re.I,
+    ))
+
+
 def resolve_stance(
     user_text: str,
     state: StanceState,
@@ -1184,19 +1200,23 @@ def resolve_stance(
         and intent == TurnIntent.NEUTRAL
         and not _any(_PRACTICAL_REQUEST_PATTERNS, user_text)
     ):
-        state.consecutive_framings = 0
-        _latch_add = _ADDENDUM_WITNESS
-        _boundary = _position_boundary_addendum(user_text, state)
-        if _boundary:
-            _latch_add = _ADDENDUM_WITNESS + "\n" + _boundary
-        return StanceDecision(
-            intent=intent,
-            move=StanceMove.WITNESS,
-            addendum=_augment_addendum(_latch_add, state),
-            end_on_question=False,
-            rationale="Position thread latch active: force witness on "
-                      "neutral/ambiguous follow-up.",
-        )
+        if _stride_witness_narrow():
+            # One witness reply is enough. The latch must not outrank the standing request.
+            state.position_thread_active = False
+        else:
+            state.consecutive_framings = 0
+            _latch_add = _ADDENDUM_WITNESS
+            _boundary = _position_boundary_addendum(user_text, state)
+            if _boundary:
+                _latch_add = _ADDENDUM_WITNESS + "\n" + _boundary
+            return StanceDecision(
+                intent=intent,
+                move=StanceMove.WITNESS,
+                addendum=_augment_addendum(_latch_add, state),
+                end_on_question=False,
+                rationale="Position thread latch active: force witness on "
+                          "neutral/ambiguous follow-up.",
+            )
 
     # ── META_FEEDBACK ──
     if intent == TurnIntent.META_FEEDBACK:
@@ -1219,19 +1239,22 @@ def resolve_stance(
     # ── POSITION ──
     if intent == TurnIntent.POSITION:
         state.consecutive_framings = 0
-        _pos_add = _ADDENDUM_WITNESS
-        _boundary = _position_boundary_addendum(user_text, state)
-        if _boundary:
-            _pos_add = _ADDENDUM_WITNESS + "\n" + _boundary
-        return StanceDecision(
-            intent=intent,
-            move=StanceMove.WITNESS,
-            addendum=_augment_addendum(_pos_add, state),
-            end_on_question=False,
-            rationale="User explicitly asked for the bot's observation / a "
-                      "proportionality read. Provide a non-diagnostic position "
-                      "and stop. Framing menu is the wrong tool here.",
-        )
+        if _stride_witness_narrow() and not _explicit_witness_ask(user_text):
+            state.position_thread_active = False
+        else:
+            _pos_add = _ADDENDUM_WITNESS
+            _boundary = _position_boundary_addendum(user_text, state)
+            if _boundary:
+                _pos_add = _ADDENDUM_WITNESS + "\n" + _boundary
+            return StanceDecision(
+                intent=intent,
+                move=StanceMove.WITNESS,
+                addendum=_augment_addendum(_pos_add, state),
+                end_on_question=False,
+                rationale="User explicitly asked for the bot's observation / a "
+                          "proportionality read. Provide a non-diagnostic position "
+                          "and stop. Framing menu is the wrong tool here.",
+            )
 
     # ── LOW_WEIGHT ──
     if intent == TurnIntent.LOW_WEIGHT:
@@ -1278,7 +1301,7 @@ def resolve_stance(
                       "do not offer another framing menu.",
         )
 
-    if state.consecutive_framings >= 2:
+    if state.consecutive_framings >= 2 and not _stride_witness_narrow():
         state.consecutive_framings = 0
         return StanceDecision(
             intent=intent,

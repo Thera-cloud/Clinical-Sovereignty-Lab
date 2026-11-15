@@ -773,6 +773,77 @@ async def patch_client_timezone(request: Request, payload: dict, user=Depends(_r
     return {"timezone": tz_string, "source": "user_explicit"}
 
 
+@router.get("/standing-request")
+async def get_standing_request(request: Request, user: dict = Depends(_require_auth)):
+    """Pinned 'how I want Nate with me' line. Empty until the client confirms it."""
+    username = (user.get("username") or "").strip()
+    if not username:
+        raise HTTPException(400, "username missing")
+    db_pool = getattr(request.app.state, "db_pool", None)
+    from app.services.main_chat_payload import stride_enabled
+    if not db_pool or not stride_enabled():
+        return {"text": "", "confirmed": False, "theraworld_in_chat": False, "available": False}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT standing_request, confirmed, theraworld_in_chat
+                FROM main_chat_stride_state WHERE username = $1
+                """,
+                username,
+            )
+    except Exception as exc:
+        logger.warning("standing-request read failed: %s", exc)
+        return {"text": "", "confirmed": False, "theraworld_in_chat": False, "available": False}
+    if not row:
+        return {"text": "", "confirmed": False, "theraworld_in_chat": False, "available": True}
+    return {
+        "text": row["standing_request"] or "",
+        "confirmed": bool(row["confirmed"]),
+        "theraworld_in_chat": bool(row["theraworld_in_chat"]),
+        "available": True,
+    }
+
+
+@router.put("/standing-request")
+async def put_standing_request(request: Request, user: dict = Depends(_require_auth)):
+    """Client edits the pinned request. Confirming it stops the one-time restatement."""
+    username = (user.get("username") or "").strip()
+    if not username:
+        raise HTTPException(400, "username missing")
+    body = await request.json()
+    from app.services.main_chat_payload import clean_standing_text
+    raw = str((body or {}).get("text") or "").strip()
+    text = clean_standing_text(raw, 500)
+    if raw and not text:
+        raise HTTPException(400, "That wording cannot be saved. Say it in your own plain words.")
+    confirmed = bool(text) and bool((body or {}).get("confirmed", True))
+    theraworld = bool((body or {}).get("theraworld_in_chat", False))
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "database unavailable")
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO main_chat_stride_state
+                    (username, standing_request, confirmed, theraworld_in_chat, updated_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (username) DO UPDATE SET
+                    standing_request = EXCLUDED.standing_request,
+                    confirmed = EXCLUDED.confirmed,
+                    pending_request = '',
+                    theraworld_in_chat = EXCLUDED.theraworld_in_chat,
+                    updated_at = NOW()
+                """,
+                username, text, confirmed, theraworld,
+            )
+    except Exception as exc:
+        logger.warning("standing-request write failed: %s", exc)
+        raise HTTPException(503, "standing request could not be saved")
+    return {"text": text, "confirmed": confirmed, "theraworld_in_chat": theraworld}
+
+
 def _load_registry() -> dict:
     """Load user registry from JSON backup. Matches bridge load_registry()."""
     paths = [

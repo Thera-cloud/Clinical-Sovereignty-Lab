@@ -183,6 +183,12 @@ async def maybe_record_plan_divergence(
                 "note": "keyword drift — coach/client acknowledgment required to pause",
             },
         )
+        try:
+            # The conversation left the plan theme: the held memory block is refreshed next turn.
+            from app.services.main_chat_payload import mark_recall_dirty
+            mark_recall_dirty(user_id)
+        except Exception:
+            pass
         return True
     except Exception as e:
         logger.warning("therapeutic_plan: maybe_record_plan_divergence failed: %s", e)

@@ -4554,7 +4554,9 @@ class MemorySystem:
             date_str = session_entries[0].get("timestamp", "")[:10] if session_entries else key
             parts.append(f"\n[Session {date_str}]")
             for e in session_entries[-per_session:]:
-                parts.append(f"  You: {e['user']}\n  Nate: {e['ai']}")
+                # QUANTUM-CRYSTAL-ARCH — "You:" made the model treat the client's lines as its own
+                _spk = "Client" if (os.getenv("ENABLE_MAIN_CHAT_STRIDE") or "").strip().lower() in ("1", "true", "yes", "on") else "You"
+                parts.append(f"  {_spk}: {e['user']}\n  Nate: {e['ai']}")
         return "\n".join(parts) if parts else "No prior history."
 
     def recall_full(self, p: dict, limit: int = 100) -> List[dict]:
@@ -10604,6 +10606,7 @@ class AzureCortex:
             print(f">>> [LENGTH-CAP] max_tokens={_len_cap} (mode={'depth' if _len_cap==1500 else 'default'})")  # FIX-LEN
             # FIX-THERAPEUTIC-CONTROLLER — pre-flight: state-dependent prompt + cap
             _ttc_audit_meta = None
+            _stride_hist = None  # QUANTUM-CRYSTAL-ARCH — stride turns; None unless ENABLE_MAIN_CHAT_STRIDE
             _ttc_recent_narrs: list = []
             try:
                 from app.services.therapeutic_controller import prepare_therapeutic_context as _ttc_pre
@@ -10695,6 +10698,31 @@ class AzureCortex:
                     _GARBLE_STREAK_LIMIT = 2
                     _MAX_CHARS_WORKERS = 4000
                     _clean_prefix = ""
+                    # QUANTUM-CRYSTAL-ARCH — stride: real turns + four budgets. Flag off leaves this prompt.
+                    try:
+                        from app.services.main_chat_payload import maybe_apply_stride as _stride_apply
+                        _sp_s, _stride_hist, _cap_s = await _stride_apply(
+                            enabled_role=_role, dojo_type=dojo_type, uid=uid, profile=profile,
+                            user_text=user_text, depth=_depth, db_pool=db_pool,
+                            extra_blocks=[relational_context, checkin_context, intake_context,
+                                          fsf_context, reconnect_context, trial_context_block],
+                            attachment_block=vault_context, prior_prompt=system_prompt,
+                            plan_block=plan_context_block, crystal_block=crystal_context,
+                            history_block=pg_history_context, critical_block=_critical_recall_context,
+                            live_turns=_chat_live_turns.get(uid) or [], panel_ctx=_sse_panel_ctx or "",
+                            max_tokens=_len_cap,
+                            autonomic_state=(_ttc_audit_meta or {}).get("autonomic_state", "") if _ttc_audit_meta else "",
+                            session_id=self._ensure_session_id(uid),
+                            stance_addendum=(_adaptive_payload or {}).get("system_addendum") or "",
+                            safety_suffix=_pop_sfx or "", ios_mode=bool(_ios_wellness_mode),
+                            has_vision=bool(_vault_image_data_url),
+                        )
+                        if _sp_s:
+                            system_prompt = _sp_s
+                            _len_cap = _cap_s
+                            print(f">>> [STRIDE] system={len(system_prompt)} hist={len(_stride_hist or [])} cap={_len_cap}")
+                    except Exception as _stride_err:
+                        print(f">>> [STRIDE] non-fatal: {type(_stride_err).__name__}: {_stride_err}")
                     async for delta, provider in _sovereign_stream(
                         system_prompt, user_text,
                         odpe_signal=_dojo_signal,  # QUANTUM-CRYSTAL-ARCH: DOJO tier override
@@ -10703,6 +10731,8 @@ class AzureCortex:
                         image_data_url=_vault_image_data_url,
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C pseudonymization
                         program_id=_program_id,  # gap-fix (bee-hiv-only): cohort-gate
+                        history_messages=_stride_hist,
+                        session_stick_key=self._ensure_session_id(uid) if _stride_hist is not None else None,
                     ):
                         if _prev_prov and provider != _prev_prov:
                             full_response, _chunk_buf, _raw_accum = "", "", ""
@@ -10790,6 +10820,7 @@ class AzureCortex:
                                 domain="clinical",
                                 known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                                 program_id=_program_id,  # gap-fix (bee-hiv-only)
+                                history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
                             )
                             if _fb_resp:
                                 full_response = _fb_resp
@@ -10902,6 +10933,7 @@ class AzureCortex:
                             max_tokens=300, domain="clinical",
                             known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                             program_id=_program_id,  # gap-fix (bee-hiv-only)
+                            history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
                         )
                     elif _race_inference:
                         full_response, _provider_used = await _race_inference(
@@ -11421,9 +11453,15 @@ class AzureCortex:
                 try:
                     if uid not in _chat_live_turns:
                         _chat_live_turns[uid] = []
+                    _ai_store = _final_response
+                    try:  # QUANTUM-CRYSTAL-ARCH — a broken reply is stored short so the next turn cannot copy it
+                        from app.services.main_chat_payload import ai_text_for_next_turn as _ai_next
+                        _ai_store = _ai_next(_final_response)
+                    except Exception:
+                        pass
                     _chat_live_turns[uid].append({
                         "user_text": user_text,
-                        "ai_text": _final_response,
+                        "ai_text": _ai_store,
                     })
                     if len(_chat_live_turns[uid]) > _CHAT_LIVE_TURN_LIMIT:
                         _chat_live_turns[uid] = _chat_live_turns[uid][-_CHAT_LIVE_TURN_LIMIT:]

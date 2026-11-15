@@ -59,8 +59,20 @@ def allow_plan_heavy(mode: str) -> bool:
     return not is_faster(mode)
 
 
+def _stride_on() -> bool:
+    import os
+    return (os.getenv("ENABLE_MAIN_CHAT_STRIDE") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def allow_plan_context(mode: str) -> bool:
-    """QUANTUM-CRYSTAL-ARCH: Faster skips all plan_ctx (active + cycle + sandbox)."""
+    """QUANTUM-CRYSTAL-ARCH: Faster skips all plan_ctx (active + cycle + sandbox).
+
+    Stride keeps the plan step at both depths. Length and memory size still differ.
+    """
+    if _stride_on():
+        return True
     return not is_faster(mode)
 
 
@@ -73,6 +85,9 @@ def crystal_recall_timeout_s(mode: str) -> float | None:
         return None
     import os
 
+    if (os.getenv("ENABLE_MAIN_CHAT_STRIDE") or "").strip().lower() in ("1", "true", "yes", "on"):
+        # Longer than the 2.5s abort that dropped memory mid-session. Cache covers a miss.
+        return 8.0
     raw = (os.getenv("BRIDGE_FASTER_CRYSTAL_TIMEOUT_S") or "2.5").strip()
     try:
         val = float(raw)

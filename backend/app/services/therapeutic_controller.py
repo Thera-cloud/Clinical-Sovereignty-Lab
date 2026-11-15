@@ -134,6 +134,24 @@ TOKEN_CAPS = {
 
 _LABILE_WINDOW_TMC = {"THRESHOLD", "BREAKTHROUGH", "RECURRENCE"}
 
+
+def stride_teaching_allowed(user_text: str, autonomic_state: str) -> bool:
+    """Teach only when the client is in window, or they asked. Safety stays above both.
+
+    The three-layer refusal bypass in the chat path is unchanged. This only
+    decides whether the stride prompt may teach on a steady turn.
+    """
+    state = (autonomic_state or "").strip().lower()
+    if state in ("shutdown", "activated"):
+        return False
+    if re.search(
+        r"\b(?:how do i|how can i|teach me|help me understand|how do i heal|how can i heal)\b",
+        user_text or "",
+        re.I,
+    ):
+        return True
+    return state in ("", "in_window", "regulated")
+
 # ─────────────── v1.2 sealed reference (additivity verification) ───────────────
 # DO NOT MODIFY registers without updating fixtures. Banned-phrase pins
 # (`_PHASE_V1_2_BANNED_PHRASES`) may be empty; hard-ban list is

@@ -1557,6 +1557,13 @@ class NateMemoryCrystallizer:
 
     async def _cluster_and_synthesize_cycle(self, now: datetime):
         """Group related fragments and synthesize into crystals."""
+        # QUANTUM-CRYSTAL-ARCH — pause while a stride chat turn is in flight
+        try:
+            from app.services.main_chat_payload import synthesis_should_wait
+            if synthesis_should_wait():
+                return
+        except Exception:
+            pass
         if len(self._harvest_buffer) < CLUSTER_MIN_ITEMS:
             return
 

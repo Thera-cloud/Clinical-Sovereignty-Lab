@@ -1645,6 +1645,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   double _chatTextScale = 1.0;
   /// `faster` = quick reply; `extra` = deep memory + six-quotient depth.
   String _chatDepthMode = 'faster';
+  final TextEditingController _standingRequestCtrl = TextEditingController();
+  bool _standingConfirmed = false;
+  bool _standingSaving = false;
+  bool _standingAvailable = false;
+  bool _standingTheraworld = false;
 
   // ── Nate Nudge state ──
   List<Map<String, dynamic>> _pendingNudges = [];
@@ -1821,6 +1826,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _loadCustomVocabulary();
     _loadChatTextScale();
     _loadChatDepthMode();
+    _loadStandingRequest();
     _initTts();
     _chatController.addListener(_onDraftChanged);
     _fetchRecap();
@@ -3706,6 +3712,116 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefsChatDepthModeKey, mode);
     } catch (_) {}
+  }
+
+  Future<void> _loadStandingRequest() async {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    if (tok.isEmpty) return;
+    try {
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/client/standing-request'),
+        headers: {'Authorization': 'Bearer $tok'},
+      );
+      if (resp.statusCode != 200 || !mounted) return;
+      final data = jsonDecode(resp.body);
+      if (data is! Map) return;
+      setState(() {
+        _standingAvailable = data['available'] == true;
+        _standingRequestCtrl.text = (data['text'] ?? '').toString();
+        _standingConfirmed = data['confirmed'] == true;
+        _standingTheraworld = data['theraworld_in_chat'] == true;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveStandingRequest({bool confirm = true}) async {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    if (tok.isEmpty || _standingSaving) return;
+    setState(() => _standingSaving = true);
+    try {
+      final resp = await http.put(
+        Uri.parse('$defaultApiBaseUrl/api/client/standing-request'),
+        headers: {
+          'Authorization': 'Bearer $tok',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'text': _standingRequestCtrl.text.trim(),
+          'confirmed': confirm,
+          'theraworld_in_chat': _standingTheraworld,
+        }),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        setState(() => _standingConfirmed = confirm && _standingRequestCtrl.text.trim().isNotEmpty);
+      } else if (resp.statusCode == 400) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('That wording could not be saved. Say it in your own plain words.'),
+        ));
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _standingSaving = false);
+    }
+  }
+
+  Widget _buildStandingRequestField() {
+    if (!_standingAvailable) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _standingRequestCtrl,
+              style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 12, fontFamily: 'DM Sans'),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'How I want Nate with me',
+                hintStyle: const TextStyle(color: Color(0xFF666666), fontSize: 12),
+                filled: true,
+                fillColor: const Color(0xFF111111),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFF333333)),
+                ),
+              ),
+              onChanged: (_) {
+                if (_standingConfirmed) setState(() => _standingConfirmed = false);
+              },
+              onSubmitted: (_) => _saveStandingRequest(),
+            ),
+          ),
+          Tooltip(
+            message: _standingTheraworld
+                ? 'Thera-World stays in this chat'
+                : 'Thera-World only when I open it',
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                Icons.auto_stories,
+                size: 18,
+                color: _standingTheraworld ? const Color(0xFF4ECDC4) : const Color(0xFF666666),
+              ),
+              onPressed: _standingSaving
+                  ? null
+                  : () {
+                      setState(() => _standingTheraworld = !_standingTheraworld);
+                      _saveStandingRequest(confirm: _standingConfirmed);
+                    },
+            ),
+          ),
+          TextButton(
+            onPressed: _standingSaving ? null : _saveStandingRequest,
+            child: Text(
+              _standingConfirmed ? 'Saved' : 'Pin',
+              style: const TextStyle(color: Color(0xFFC9A962), fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildChatDepthToggle() {
@@ -5642,6 +5758,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
     _ttsDebounceByTurn.clear();
     _latestNateTextByTurnForTts.clear();
     _turnIdToChatIndex.clear();
+    _standingRequestCtrl.dispose();
     _chatController.dispose();
     _scrollController.dispose();
     _tts.stop();
@@ -6364,6 +6481,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _buildStandingRequestField(),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Row(

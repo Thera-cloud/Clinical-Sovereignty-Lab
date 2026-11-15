@@ -25,6 +25,42 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+# Main chat sticks to the provider that answered the session. Switch only if it fails.
+_SESSION_PROVIDER: Dict[str, str] = {}
+
+
+def held_session_provider(session_key: str) -> str:
+    return _SESSION_PROVIDER.get((session_key or "").strip(), "")
+
+
+def remember_session_provider(session_key: str, provider: str) -> None:
+    key = (session_key or "").strip()
+    if not key or not provider or provider == "none":
+        return
+    if len(_SESSION_PROVIDER) > 400:
+        _SESSION_PROVIDER.clear()
+    _SESSION_PROVIDER[key] = provider
+
+
+def _window_history(history_messages: List[Dict], system_prompt: str) -> Tuple[List[Dict], str]:
+    """Prior turns that fit the window, plus the system prompt with a line for any left out."""
+    from app.websocket.cli_prompt_budget import window_cli_conversation_history
+
+    clean = [
+        {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user",
+         "content": m.get("content")}
+        for m in history_messages
+        if isinstance(m, dict) and isinstance(m.get("content"), str) and m.get("content")
+    ]
+    kept = window_cli_conversation_history(clean, insert_gap_note=False)
+    omitted = len(clean) - len(kept)
+    if omitted > 0:
+        system_prompt += (
+            f"\n\n[{omitted} earlier turns of this session are not shown. "
+            "Continue from the turns you can see.]"
+        )
+    return kept, system_prompt
+
 try:
     from app.services.provider_tracker import log_call as _track
 except ImportError:
@@ -513,6 +549,8 @@ async def generate_streaming(
     image_data_url: Optional[str] = None,
     known_names: Optional[List[str]] = None,
     program_id: Optional[str] = None,
+    history_messages: Optional[List[Dict]] = None,
+    session_stick_key: Optional[str] = None,
 ) -> AsyncIterator[Tuple[str, str]]:
     """
     Stream tokens from the ODPE-selected provider with automatic fallback.
@@ -530,11 +568,24 @@ async def generate_streaming(
     _ensure_config()
 
     primary = _resolve_provider_for_signal(odpe_signal, domain=domain)
+    # One model for this main-chat session. The held provider is tried first;
+    # the fallback chain still runs if that provider returns nothing.
+    _stick = (session_stick_key or "").strip()
+    if _stick and not image_data_url:
+        _held = held_session_provider(_stick)
+        # A session held on the light model moves up when the turn is flagged heavy, then stays up.
+        _heavy = (odpe_signal or "").upper() in ("TENSION", "DEEP_TENSION")
+        if _held and not (_held == "workers_ai" and _heavy):
+            primary = _held
     providers_to_try = [primary] + _FALLBACK_CHAIN.get(primary, [])
     seen = set()
 
     _t0 = time.monotonic()
     _chars_out = 0
+    _hist: List[Dict] = []
+    if history_messages and not image_data_url:
+        from app.websocket.cli_prompt_budget import window_cli_conversation_history
+        _hist, system_prompt = _window_history(history_messages, system_prompt)
 
     # Slice 3 + gap-fix (bee-hiv-only): pseudonymize outbound / restore
     # inbound. Cohort-gated via program_id — non-strict users get zero
@@ -568,8 +619,11 @@ async def generate_streaming(
         seen.add(provider)
 
         try:
+            _hist_chars = sum(
+                len(m.get("content") or "") for m in _hist if isinstance(m.get("content"), str)
+            )
             _sp, _um = trim_prompt_to_ceiling(
-                system_prompt, user_message, provider, max_tokens
+                system_prompt, user_message, provider, max_tokens, history_chars=_hist_chars,
             )
             if image_data_url and provider in ("azure", "grok"):
                 messages = [
@@ -580,11 +634,12 @@ async def generate_streaming(
                     ]},
                 ]
             else:
-                messages = [
-                    {"role": "system", "content": _sp},
+                messages = [{"role": "system", "content": _sp}] + _hist + [
                     {"role": "user", "content": _um},
                 ]
-            _chars_in = len(_sp) + len(_um)
+            _chars_in = sum(
+                len(m.get("content")) for m in messages if isinstance(m.get("content"), str)
+            )
 
             # Slice 3 + C (Bee HIV+): replace direct identifiers with tokens
             # before send. known_names is the participant's own name pulled
@@ -621,6 +676,7 @@ async def generate_streaming(
                         if _tail:
                             yield (_tail, "sovereign")
                     _sovereign_stats["total_sovereign"] += 1
+                    remember_session_provider(_stick, "sovereign")
                     asyncio.ensure_future(_track(provider="sovereign", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                     return
                 finally:
@@ -645,6 +701,7 @@ async def generate_streaming(
                     if _tail:
                         yield (_tail, "workers_ai")
                 _sovereign_stats["total_workers_ai"] += 1
+                remember_session_provider(_stick, "workers_ai")
                 asyncio.ensure_future(_track(provider="workers_ai", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return
 
@@ -667,6 +724,7 @@ async def generate_streaming(
                     if _tail:
                         yield (_tail, "azure")
                 _sovereign_stats["total_azure_fallback"] += 1
+                remember_session_provider(_stick, "azure")
                 asyncio.ensure_future(_track(provider="azure", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return
 
@@ -692,6 +750,7 @@ async def generate_streaming(
                             if _tail:
                                 yield (_tail, "grok")
                         _sovereign_stats["total_grok"] += 1
+                        remember_session_provider(_stick, "grok")
                         asyncio.ensure_future(_track(provider="grok", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                         return
                     except RateLimitError as rl:
@@ -724,6 +783,7 @@ async def generate_complete(
     known_names: Optional[List[str]] = None,
     program_id: Optional[str] = None,
     image_data_url: Optional[str] = None,
+    history_messages: Optional[List[Dict]] = None,
 ) -> Tuple[str, str]:
     """
     Non-streaming generation with ODPE routing. Returns (full_text, provider).
@@ -747,6 +807,11 @@ async def generate_complete(
 
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
+    _hist: List[Dict] = []
+    if history_messages and not image_data_url:
+        _hist, system_prompt = _window_history(history_messages, system_prompt)
+    _hist_chars = sum(len(m["content"]) for m in _hist)
+
     if image_data_url:
         providers_to_try = []
         if _GROK_URL and _GROK_KEY:
@@ -767,7 +832,7 @@ async def generate_complete(
 
         try:
             _sp, _um = trim_prompt_to_ceiling(
-                system_prompt, user_message, provider, max_tokens
+                system_prompt, user_message, provider, max_tokens, history_chars=_hist_chars,
             )
             if image_data_url and provider in ("azure", "grok"):
                 messages = [
@@ -778,11 +843,10 @@ async def generate_complete(
                     ]},
                 ]
             else:
-                messages = [
-                    {"role": "system", "content": _sp},
+                messages = [{"role": "system", "content": _sp}] + _hist + [
                     {"role": "user", "content": _um},
                 ]
-            _chars_in = len(_sp) + len(_um)
+            _chars_in = len(_sp) + len(_um) + _hist_chars
 
             if _book is not None:
                 messages = _pseudo_messages(messages, _book, known_names=known_names)
@@ -886,8 +950,11 @@ def _trim_messages_for_ollama(messages: List[Dict], max_system_chars: int) -> Li
     for m in messages:
         content = m.get("content", "")
         if m["role"] == "system" and len(content) > max_system_chars:
+            from app.websocket.cli_prompt_budget import shrink_memory_segment
+            content = shrink_memory_segment(content, max_system_chars)
             original_len = len(content)
-            content = content[:max_system_chars]
+            if len(content) > max_system_chars:
+                content = content[:max_system_chars]
             last_period = content.rfind(".")
             if last_period > max_system_chars * 0.8:
                 content = content[: last_period + 1]

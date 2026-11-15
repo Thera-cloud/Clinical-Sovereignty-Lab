@@ -32,19 +32,48 @@ _TRAIL_NOTICE = (
 )
 
 
+_MEM_OPEN = "<!--MEM-->"
+_MEM_CLOSE = "<!--/MEM-->"
+
+
+def shrink_memory_segment(system_prompt: str, max_chars: int) -> str:
+    """Shrink only the <!--MEM--> block. Head and tail stay.
+
+    Returns the original string when there is no memory block.
+    """
+    if not system_prompt or len(system_prompt) <= max_chars:
+        return system_prompt
+    start = system_prompt.find(_MEM_OPEN)
+    end = system_prompt.find(_MEM_CLOSE)
+    if start == -1 or end == -1 or end < start:
+        return system_prompt
+    head = system_prompt[:start]
+    tail = system_prompt[end + len(_MEM_CLOSE):]
+    fixed = len(head) + len(tail) + len(_MEM_OPEN) + len(_MEM_CLOSE)
+    room = max_chars - fixed
+    body = system_prompt[start + len(_MEM_OPEN):end]
+    if room < 80:
+        body = "\n[background memory omitted so the live conversation stays]\n"
+    elif len(body) > room:
+        body = body[: max(0, room - 40)] + "\n[older memory trimmed]\n"
+    return head + _MEM_OPEN + body + _MEM_CLOSE + tail
+
+
 def trim_prompt_to_ceiling(
     system_prompt: str,
     user_message: str,
     provider: str,
     max_response_tokens: int = 2000,
+    history_chars: int = 0,
 ) -> Tuple[str, str]:
     """
-    Trim system_prompt so system + user_message fits the provider TTFT/context budget.
+    Trim system_prompt so system + user_message + history fits the provider budget.
     user_message is not shortened (caller's responsibility to window history).
+    A <!--MEM--> block is reduced before any other cut.
     """
     ceiling = PROVIDER_PROMPT_CEILINGS.get(provider, 32_000)
     response_reserve = max(0, max_response_tokens) * 4
-    um_len = len(user_message or "")
+    um_len = len(user_message or "") + max(0, history_chars)
     available = ceiling - response_reserve - um_len
 
     if available <= 256:
@@ -58,6 +87,12 @@ def trim_prompt_to_ceiling(
 
     if len(system_prompt) <= available:
         return system_prompt, user_message
+
+    shrunk = shrink_memory_segment(system_prompt, available)
+    if shrunk != system_prompt and len(shrunk) <= available:
+        return shrunk, user_message
+    if shrunk != system_prompt:
+        system_prompt = shrunk
 
     trimmed = system_prompt[:available]
     last_nl = trimmed.rfind("\n")
@@ -127,7 +162,12 @@ def trim_system_for_non_system_budget(
     return trimmed
 
 
-def window_cli_conversation_history(messages: List[dict], max_chars: int = CLI_MAX_HISTORY_CHARS) -> List[dict]:
+def window_cli_conversation_history(
+    messages: List[dict],
+    max_chars: int = CLI_MAX_HISTORY_CHARS,
+    gap_note: str = "",
+    insert_gap_note: bool = True,
+) -> List[dict]:
     """
     Sliding window over chat messages **excluding** the system prompt message.
 
@@ -176,11 +216,11 @@ def window_cli_conversation_history(messages: List[dict], max_chars: int = CLI_M
                 )
                 budget = 0
         out = list(first) + pruned_recent
-        if len(out) < len(messages):
+        if insert_gap_note and len(out) < len(messages):
             omitted = max(0, len(messages) - len(out))
             out.insert(1, {
                 "role": "user",
-                "content": (
+                "content": gap_note.format(omitted=omitted) if gap_note else (
                     f"[{omitted} earlier turns trimmed. Use tool calls to re-read any files from earlier turns.]"
                 ),
             })
@@ -196,11 +236,11 @@ def window_cli_conversation_history(messages: List[dict], max_chars: int = CLI_M
             remaining -= msg_len
 
     windowed = list(first) + middle + list(recent)
-    if len(windowed) < len(messages):
+    if insert_gap_note and len(windowed) < len(messages):
         omitted = len(messages) - len(windowed)
         windowed.insert(1, {
             "role": "user",
-            "content": (
+            "content": gap_note.format(omitted=omitted) if gap_note else (
                 f"[{omitted} earlier turns omitted. Use tool calls to re-read files from earlier turns.]"
             ),
         })

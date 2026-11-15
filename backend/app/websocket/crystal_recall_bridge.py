@@ -1258,7 +1258,8 @@ async def crystallize_from_conversation(
     crystal_text = (
         f"{name_tag} expressed: \"{user_snippet}\""
     )
-    if nate_snippet:
+    # QUANTUM-CRYSTAL-ARCH — stride stores the client's words only, so recall cannot replay Nate
+    if nate_snippet and (_os.getenv("ENABLE_MAIN_CHAT_STRIDE") or "").strip().lower() not in ("1", "true", "yes", "on"):
         crystal_text += f" — Nate reflected: \"{nate_snippet}\""
 
     content_hash = hashlib.sha256(crystal_text.encode()).hexdigest()
@@ -1398,6 +1399,11 @@ async def crystallize_from_conversation(
             notify_user(hardware_id, source=_src)
         except Exception:
             pass
+        try:  # QUANTUM-CRYSTAL-ARCH — next recall should not serve the line just forged
+            from app.services.main_chat_payload import mark_recall_dirty
+            mark_recall_dirty(hardware_id)
+        except Exception:
+            pass
         return content_hash
     except Exception as e:
         logger.warning("crystallize_from_conversation: %s", e)
@@ -1461,7 +1467,8 @@ async def crystallize_session_summary(
                 f"SESSION SUMMARY ({name_tag}, {len(user_texts)} turns, {origin_surface}): "
                 f"Client discussed: {all_user[:600]}."
             )
-            if nate_texts:
+            # QUANTUM-CRYSTAL-ARCH — stride keeps the session crystal on the client's words
+            if nate_texts and (_os.getenv("ENABLE_MAIN_CHAT_STRIDE") or "").strip().lower() not in ("1", "true", "yes", "on"):
                 session_crystal += f" Nate reflected: {' '.join(nate_texts)[:400]}."
             if themes:
                 session_crystal += f" Themes: {', '.join(themes)}."
