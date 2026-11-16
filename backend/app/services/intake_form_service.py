@@ -645,7 +645,12 @@ async def is_client_assigned_to_coach(conn, *, client_username: str, coach: Dict
         str(profile_data.get("assigned_coach") or "").strip(),
         str(profile_data.get("coach_username") or "").strip(),
     }
-    return (coach_hw and coach_hw in assigned_ids) or (coach_username and coach_username in assigned_names)
+    return (coach_hw and coach_hw in assigned_ids) or (coach_username and coach_username in assigned_names) or await _master_sees_assistant_client(conn, coach, profile_data)
+
+
+async def _master_sees_assistant_client(conn, coach, profile_data) -> bool:
+    from app.services.coach_client_messenger import coach_may_view_client_conn
+    return await coach_may_view_client_conn(conn, coach, profile_data)
 
 
 async def mark_section2_complete(

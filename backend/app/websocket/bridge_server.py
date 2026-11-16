@@ -2199,6 +2199,42 @@ def _handle_registry_reload():
             new_loop.close()
 
 
+async def _pull_coaches_into_registry(registry, hardware_id=None, pending_only=False):
+    """QUANTUM-CRYSTAL-ARCH: signup writes Postgres before the bridge cache reloads."""
+    if not db_pool or not _pg_user_store or not getattr(_pg_user_store, "is_ready", False):
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            if hardware_id:
+                rows = await conn.fetch(
+                    "SELECT username FROM users WHERE hardware_id = $1 AND role = 'COACH' AND deleted_at IS NULL",
+                    hardware_id,
+                )
+            elif pending_only:
+                rows = await conn.fetch(
+                    "SELECT username FROM users WHERE role = 'COACH' "
+                    "AND subscription_status = 'PENDING_VERIFICATION' AND deleted_at IS NULL"
+                )
+            else:
+                return
+        for row in rows:
+            uname = row["username"]
+            present = any(
+                isinstance(v, dict) and (
+                    (v.get("credentials") or {}).get("username") == uname
+                    or (v.get("profile") or {}).get("username") == uname
+                )
+                for v in registry.values()
+            )
+            if present:
+                continue
+            reloaded = await _pg_user_store.reload_user(uname)
+            if reloaded:
+                registry[reloaded[0]] = reloaded[1]
+    except Exception as e:
+        print(f"[Coach cache] PG reload failed: {e}")
+
+
 def _handle_payment_confirmed(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
     """Push payment confirmation to connected client via WebSocket."""
     data = json.loads(raw_data)
@@ -3561,6 +3597,9 @@ def authenticate_user(username: str, password: str, expected_role: str = None) -
     
     if p.get("account_status") == "DELETED":
         return None, "ACCOUNT_DELETED"
+    # QUANTUM-CRYSTAL-ARCH: a declined coach stays pending and cannot enter.
+    if p.get("role") == "COACH" and p.get("certification_status") == "REJECTED":
+        return None, "ACCOUNT_REJECTED"
     if p.get("subscription_status") == "PENDING_VERIFICATION":
         return None, "ACCOUNT_PENDING_APPROVAL"
     # Consent version check: flag for update but do NOT block login
@@ -14256,6 +14295,7 @@ async def handle_client(websocket, path=None):
                         "INVALID_PASSWORD": "Incorrect username or password",
                         "WRONG_PORTAL": _wrong_portal_msg,
                         "ACCOUNT_PENDING_APPROVAL": "Your account is pending admin approval. You'll be notified when approved.",
+                        "ACCOUNT_REJECTED": "This coach application was declined. Your client login, if you have one, is a separate username.",
                         "ACCOUNT_DELETED": "This account has been removed.",
                     }
                     friendly = friendly_messages.get(res, res)
@@ -14411,7 +14451,7 @@ async def handle_client(websocket, path=None):
                         await websocket.send(json.dumps({"type": "error", "message": "Paid plans require payment first. Please use the order review flow."}))
                         continue
                     if _stripe_first and d.get("role") == "COACH" and d.get("selected_dojos"):
-                        await websocket.send(json.dumps({"type": "error", "message": "Coach registration requires payment. Please use the order review flow."}))
+                        await websocket.send(json.dumps({"type": "error", "message": "Coach signup finishes at coach.sovereignsanctuary.net. Use a new username. Your client login stays separate."}))
                         continue
                     print(f">>> [REG] Processing register_request for username={d.get('username')}, role={d.get('role')}")
                     # QUANTUM-CRYSTAL-ARCH — Public Trial Funnel: server-captured IP for
@@ -18423,6 +18463,7 @@ async def handle_client(websocket, path=None):
             elif t == "admin_get_pending_coaches":
                 if current_profile and current_profile.get("role") == "ADMIN":
                     registry = load_registry()
+                    await _pull_coaches_into_registry(registry, pending_only=True)
                     pending = []
                     for k, v in registry.items():
                         p = v.get("profile", {}) if isinstance(v, dict) else {}
@@ -18553,6 +18594,7 @@ async def handle_client(websocket, path=None):
                     coach_id = d.get("coach_id", "").strip()
                     print(f"[Admin Approve] Received coach_id='{coach_id}'")
                     registry = load_registry()
+                    await _pull_coaches_into_registry(registry, hardware_id=coach_id)
                     found = False
                     # Collect all hardware_ids for debug
                     all_hw_ids = []
@@ -18565,7 +18607,7 @@ async def handle_client(websocket, path=None):
                             v["profile"]["subscription_status"] = "ACTIVE"
                             v["profile"]["certification_status"] = "APPROVED"
                             v["profile"]["coach_verified"] = True
-                            saved = save_registry(registry)
+                            saved = await save_registry_async(registry, changed_keys=[k])
                             if saved:
                                 await websocket.send(json.dumps({
                                     "type": "coach_approved", 
@@ -18624,15 +18666,17 @@ async def handle_client(websocket, path=None):
                     reason = d.get("reason", "")
                     print(f"[Admin Reject] Received coach_id='{coach_id}', reason='{reason}'")
                     registry = load_registry()
+                    await _pull_coaches_into_registry(registry, hardware_id=coach_id)
                     found = False
                     for k, v in registry.items():
                         if v.get("profile", {}).get("hardware_id") == coach_id:
-                            v["profile"]["subscription_status"] = "REJECTED"
+                            # Column stays pending. REJECTED is not a legal subscription_status.
+                            v["profile"]["subscription_status"] = "PENDING_VERIFICATION"
                             v["profile"]["certification_status"] = "REJECTED"
                             if reason:
                                 v["profile"]["rejection_reason"] = reason
                             v["profile"]["rejected_at"] = str(datetime.datetime.now())
-                            saved = save_registry(registry)
+                            saved = await save_registry_async(registry, changed_keys=[k])
                             if saved:
                                 await websocket.send(json.dumps({
                                     "type": "coach_rejected",
@@ -18745,6 +18789,12 @@ async def handle_client(websocket, path=None):
             # === CLIENT: REQUEST UPGRADE TO COACH ===
             elif t == "request_coach_upgrade":
                 if current_profile and current_profile.get("role") == "CLIENT":
+                    # QUANTUM-CRYSTAL-ARCH: never convert this client row into a coach.
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Create a separate coach username at the coach website. This client login stays a client login.",
+                    }))
+                    continue
                     hw_id = current_profile.get("hardware_id", "")
                     registry = load_registry()
                     target_key = None
@@ -18819,6 +18869,12 @@ async def handle_client(websocket, path=None):
             # === ADMIN: APPROVE COACH UPGRADE ===
             elif t == "admin_approve_upgrade":
                 if current_profile and current_profile.get("role") == "ADMIN":
+                    # QUANTUM-CRYSTAL-ARCH: approving an upgrade must not change the client role.
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Approve the separate coach application. Do not convert this client login.",
+                    }))
+                    continue
                     client_hw_id = d.get("hardware_id", "").strip()
                     registry = load_registry()
                     found = False
@@ -20495,6 +20551,10 @@ async def handle_client(websocket, path=None):
                         if v.get("profile", {}).get("hardware_id") == client_id:
                             client_profile = v["profile"]
                             break
+                    if client_profile and current_profile.get("role") == "COACH":
+                        from app.services.coach_client_messenger import coach_may_view_client
+                        if not await coach_may_view_client(db_pool, current_profile, client_profile, current_username):
+                            client_profile = None
                     if client_profile:
                         client_metrics = metrics_engine.load_metrics(client_profile)
                         client_ns = client_metrics.get("nevedal_state", {})
@@ -20523,6 +20583,10 @@ async def handle_client(websocket, path=None):
                         if v.get("profile", {}).get("hardware_id") == client_id:
                             client_profile = v["profile"]
                             break
+                    if client_profile and current_profile.get("role") == "COACH":
+                        from app.services.coach_client_messenger import coach_may_view_client
+                        if not await coach_may_view_client(db_pool, current_profile, client_profile, current_username):
+                            client_profile = None
                     if client_profile:
                         client_metrics = metrics_engine.load_metrics(client_profile)
                         zoom_sessions = client_metrics.get("zoom_sessions", [])
@@ -20577,19 +20641,25 @@ async def handle_client(websocket, path=None):
                             session_client_ids = set()
                             session_client_meta = {}
 
-                    # QUANTUM-CRYSTAL-ARCH: assistant inherits master-coach clients
+                    # QUANTUM-CRYSTAL-ARCH: master sees assistant clients. An assistant does not inherit the master.
                     master_coach_ids = set()
                     if not is_admin and db_pool:
                         try:
                             async with db_pool.acquire() as _hconn:
-                                _master_rows = await _hconn.fetch(
-                                    """SELECT master_coach_id FROM coach_hierarchy
-                                       WHERE assistant_id = ANY($1::text[]) AND status = 'active'""",
+                                _asst_rows = await _hconn.fetch(
+                                    """SELECT ch.assistant_id, u.username, u.hardware_id
+                                       FROM coach_hierarchy ch
+                                       LEFT JOIN users u
+                                         ON u.hardware_id = ch.assistant_id
+                                         OR u.username = ch.assistant_id
+                                       WHERE ch.master_coach_id = ANY($1::text[])
+                                         AND ch.status = 'active'""",
                                     [x for x in (coach_id, coach_username) if x],
                                 )
-                                for _mr in _master_rows:
-                                    if _mr["master_coach_id"]:
-                                        master_coach_ids.add(_mr["master_coach_id"])
+                                for _mr in _asst_rows:
+                                    for _col in ("assistant_id", "username", "hardware_id"):
+                                        if _mr[_col]:
+                                            master_coach_ids.add(_mr[_col])
                         except Exception:
                             master_coach_ids = set()
 
@@ -20635,7 +20705,6 @@ async def handle_client(websocket, path=None):
                                 (p.get("coach_id") and p.get("coach_id") == coach_id)
                                 or (p.get("assigned_coach_id") and p.get("assigned_coach_id") == coach_id)
                                 or (p.get("assigned_coach") and coach_username and p.get("assigned_coach") == coach_username)
-                                or (p.get("hardware_id") in session_client_ids)
                                 or (master_coach_ids and (
                                     (p.get("coach_id") and p.get("coach_id") in master_coach_ids)
                                     or (p.get("assigned_coach_id") and p.get("assigned_coach_id") in master_coach_ids)
@@ -20705,8 +20774,8 @@ async def handle_client(websocket, path=None):
                             "total_sessions": int(ns.get("session_count") or 0),
                         })
 
-                    # Ensure any scheduled-session clients show up even if registry is missing/mismatched.
-                    if not is_admin and session_client_ids:
+                    # QUANTUM-CRYSTAL-ARCH: a past session is not a current assignment.
+                    if False and not is_admin and session_client_ids:
                         try:
                             seen = {((c or {}).get("id") or "").strip() for c in (clients or []) if isinstance(c, dict)}
                             for cid in sorted(session_client_ids):
@@ -20854,6 +20923,13 @@ async def handle_client(websocket, path=None):
                             "context": "brief",
                         }))
                         continue
+
+                    # QUANTUM-CRYSTAL-ARCH: brief is limited to assigned clients, or a master's assistants.
+                    if current_profile.get("role") == "COACH":
+                        from app.services.coach_client_messenger import coach_may_view_client
+                        if not await coach_may_view_client(db_pool, current_profile, client_profile, current_username):
+                            await websocket.send(json.dumps({"type": "error", "message": "COACH_NOT_ASSIGNED"}))
+                            continue
 
                     if client_profile:
                         metrics = parietal.load_metrics(client_profile)
@@ -21315,6 +21391,21 @@ async def handle_client(websocket, path=None):
                                 _cpi_uname,
                             )
                             if not _cpi_ok:
+                                _cpi_row = await _cpi_conn.fetchrow(
+                                    """SELECT profile_data FROM users
+                                       WHERE (hardware_id = $1 OR username = $1)
+                                         AND role = 'CLIENT'""",
+                                    _cpi_client,
+                                )
+                                _cpi_pd = _cpi_row["profile_data"] if _cpi_row else None
+                                if isinstance(_cpi_pd, str):
+                                    _cpi_pd = json.loads(_cpi_pd)
+                                if isinstance(_cpi_pd, dict):
+                                    from app.services.coach_client_messenger import coach_may_view_client_conn
+                                    _cpi_ok = await coach_may_view_client_conn(
+                                        _cpi_conn, current_profile, _cpi_pd, current_username
+                                    )
+                            if not _cpi_ok:
                                 await websocket.send(json.dumps({"type": "error", "message": "NOT_ASSIGNED_COACH"}))
                                 continue
                         _cpi_rows = await _cpi_conn.fetch(
@@ -21366,6 +21457,10 @@ async def handle_client(websocket, path=None):
                         if v.get("profile", {}).get("hardware_id") == client_id:
                             client_profile_hist = v["profile"]
                             break
+                    if client_profile_hist and current_profile.get("role") == "COACH":
+                        from app.services.coach_client_messenger import coach_may_view_client
+                        if not await coach_may_view_client(db_pool, current_profile, client_profile_hist, current_username):
+                            client_profile_hist = None
                     if client_profile_hist:
                         memories = hippocampus.recall_full(client_profile_hist, limit=d.get("limit", 50))
                         await websocket.send(json.dumps({
@@ -21393,6 +21488,15 @@ async def handle_client(websocket, path=None):
                 if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
                     await websocket.send(json.dumps({"type": "error", "message": "COACH_ONLY"}))
                     continue
+
+                # QUANTUM-CRYSTAL-ARCH: notes follow the same assignment wall as the client list.
+                if current_profile.get("role") == "COACH":
+                    from app.services.coach_client_messenger import coach_may_view_note_request
+                    if not await coach_may_view_note_request(
+                        db_pool, current_profile, d, load_registry(), current_username
+                    ):
+                        await websocket.send(json.dumps({"type": "error", "message": "COACH_NOT_ASSIGNED"}))
+                        continue
 
                 def _folder_key(family_id: str, client_id: str) -> str:
                     fid = (family_id or "").strip()
@@ -21574,6 +21678,20 @@ async def handle_client(websocket, path=None):
                                    ) LIMIT 1""",
                                 coach_hw, client_hw, _ov_uname,
                             )
+                            if not assigned:
+                                _ov_row = await conn.fetchrow(
+                                    """SELECT profile_data FROM users
+                                       WHERE (hardware_id = $1 OR username = $1) AND role = 'CLIENT'""",
+                                    client_hw,
+                                )
+                                _ov_pd = _ov_row["profile_data"] if _ov_row else None
+                                if isinstance(_ov_pd, str):
+                                    _ov_pd = json.loads(_ov_pd)
+                                if isinstance(_ov_pd, dict):
+                                    from app.services.coach_client_messenger import coach_may_view_client_conn
+                                    assigned = await coach_may_view_client_conn(
+                                        conn, current_profile, _ov_pd, current_username
+                                    )
                             if not assigned:
                                 await websocket.send(json.dumps({"type": "error", "message": "NOT_ASSIGNED_COACH"}))
                                 continue
@@ -21965,6 +22083,12 @@ async def handle_client(websocket, path=None):
                     if not client_profile_sa:
                         await websocket.send(json.dumps({"type": "session_assistant_data", "error": "Client not found"}))
                         continue
+
+                    if current_profile.get("role") == "COACH":
+                        from app.services.coach_client_messenger import coach_may_view_client
+                        if not await coach_may_view_client(db_pool, current_profile, client_profile_sa, current_username):
+                            await websocket.send(json.dumps({"type": "error", "message": "COACH_NOT_ASSIGNED"}))
+                            continue
 
                     metrics_sa = parietal.load_metrics(client_profile_sa)
                     ns = metrics_sa.get("nevedal_state", {})
@@ -23934,6 +24058,11 @@ If 'challenge', respectfully push the coach's thinking."""
                                     assigned_ok = False
 
                             if not assigned_ok:
+                                from app.services.coach_client_messenger import coach_may_view_family
+                                assigned_ok = await coach_may_view_family(
+                                    db_pool, current_profile, family_id, load_registry(), current_username
+                                )
+                            if not assigned_ok:
                                 await websocket.send(json.dumps({"type": "error", "message": "COACH_NOT_ASSIGNED"}))
                                 continue
 
@@ -24013,6 +24142,11 @@ If 'challenge', respectfully push the coach's thinking."""
                             or (client_profile.get("assigned_coach_id") and client_profile.get("assigned_coach_id") == _coach_hw)
                             or (client_profile.get("assigned_coach") and client_profile.get("assigned_coach") == current_username)
                         )
+                        if not assigned:
+                            from app.services.coach_client_messenger import coach_may_view_client
+                            assigned = await coach_may_view_client(
+                                db_pool, current_profile, client_profile, current_username
+                            )
                         if not assigned:
                             await websocket.send(json.dumps({"type": "error", "message": "COACH_NOT_ASSIGNED"}))
                             continue

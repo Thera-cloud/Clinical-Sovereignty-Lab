@@ -134,53 +134,24 @@ async def _write_population(
 
 
 async def _coach_owns_client(pool, coach: Dict, client_username: str) -> bool:
-    coach_hw = coach.get("hardware_id") or ""
-    coach_user = coach.get("username") or ""
-    role = (coach.get("role") or "").upper()
-    if role == "ADMIN":
-        return True
+    """Assigned coach, or a master viewing an assistant's client."""
+    from app.services.coach_client_messenger import coach_may_view_client
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT 1 FROM users
+            SELECT profile_data FROM users
              WHERE username = $1 AND role = 'CLIENT' AND deleted_at IS NULL
-               AND (
-                 profile_data->>'coach_id' = $2
-                 OR profile_data->>'assigned_coach_id' = $2
-                 OR profile_data->>'assigned_coach' = $3
-               )
             """,
             client_username,
-            coach_hw,
-            coach_user,
         )
-        if row is not None:
-            return True
-        # QUANTUM-CRYSTAL-ARCH — assistant may act for master's assigned clients
-        masters = await conn.fetch(
-            """
-            SELECT master_coach_id FROM coach_hierarchy
-             WHERE assistant_id = ANY($1::text[]) AND status = 'active'
-            """,
-            [x for x in (coach_hw, coach_user) if x],
-        )
-        master_ids = [r["master_coach_id"] for r in masters if r["master_coach_id"]]
-        if not master_ids:
-            return False
-        row2 = await conn.fetchrow(
-            """
-            SELECT 1 FROM users
-             WHERE username = $1 AND role = 'CLIENT' AND deleted_at IS NULL
-               AND (
-                 profile_data->>'coach_id' = ANY($2::text[])
-                 OR profile_data->>'assigned_coach_id' = ANY($2::text[])
-                 OR profile_data->>'assigned_coach' = ANY($2::text[])
-               )
-            """,
-            client_username,
-            master_ids,
-        )
-        return row2 is not None
+    if row is None:
+        return False
+    profile = row["profile_data"]
+    if isinstance(profile, str):
+        profile = json.loads(profile)
+    if not isinstance(profile, dict):
+        return False
+    return await coach_may_view_client(pool, coach, profile)
 
 
 @router.get("/health")

@@ -3696,28 +3696,20 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           const SizedBox(height: 20),
 
           if (!_isCoachOnly) ...[
-          // --- Become a Coach ---
           _sectionHeader('BECOME A COACH', Icons.school),
           _settingsCard([
-            if (isNativeIOS)
-              _actionRow(
-                Icons.open_in_new,
-                'Coach mentoring plans',
-                'Purchased at coach.sovereignsanctuary.net',
-                () => launchUrl(
-                  Uri.parse('https://coach.sovereignsanctuary.net'),
-                  mode: LaunchMode.externalApplication,
-                ),
-              )
-            else if (_profile['upgrade_to_coach_status'] == 'PENDING')
-              _infoRow('Status', 'Upgrade pending admin approval')
-            else if (_profile['upgrade_to_coach_status'] == 'REJECTED')
-              _actionRow(Icons.refresh, 'Re-apply as Coach', 'Previous request was declined', _requestCoachUpgrade)
-            else
-              _actionRow(Icons.trending_up, 'Upgrade to Coach', 'Access DOJOs, mentoring, and client tools', _requestCoachUpgrade),
+            _actionRow(
+              Icons.open_in_new,
+              'Create a coach login',
+              'Separate username at the coach website. This client login stays for Little Nate.',
+              () => launchUrl(
+                Uri.parse('https://coach.sovereignsanctuary.net'),
+                mode: LaunchMode.externalApplication,
+              ),
+            ),
           ]),
           const SizedBox(height: 20),
-          ], // end !_isCoachOnly guard (Become a Coach)
+          ],
 
           // --- Account ---
           _sectionHeader('ACCOUNT', Icons.manage_accounts),

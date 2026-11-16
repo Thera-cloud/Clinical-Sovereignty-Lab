@@ -3130,33 +3130,11 @@ class StripeWebhookHandler:
             print(f">>> [STRIPE] Coach upgrade missing username in metadata")
             return
         try:
-            import json as _json
-            dojos = _json.loads(metadata.get("selected_dojos", "[]"))
-            coaching_fee = float(metadata.get("coaching_fee", 0))
-            zoom_link = metadata.get("zoom_link", "")
-            email = metadata.get("email", "")
-            phone = metadata.get("phone", "")
-
-            upgrade_data = {
-                "selected_dojos": dojos,
-                "coaching_fee": coaching_fee,
-                "zoom_link": zoom_link,
-                "email": email,
-                "phone": phone,
-                "stripe_subscription_id": session.get("subscription", ""),
-                "stripe_customer_id": session.get("customer", ""),
-            }
-
-            await self.db.execute(
-                """UPDATE users SET profile_data = jsonb_set(
-                    jsonb_set(profile_data, '{upgrade_to_coach_status}', '"PAID_PENDING"'),
-                    '{coach_upgrade_data}', $1::jsonb
-                ) WHERE username = $2""",
-                _json.dumps(upgrade_data),
-                username,
+            print(
+                f">>> [STRIPE] Coach upgrade payment for {username} was not applied. "
+                "Client logins stay clients. Refund this Checkout in Stripe."
             )
-            print(f">>> [STRIPE] Coach upgrade payment received for {username}, "
-                  f"status=PAID_PENDING, dojos={dojos}")
+            return
         except Exception as e:
             print(f">>> [STRIPE] Coach upgrade processing failed for {username}: {e}")
 

@@ -59,8 +59,8 @@ async def _check_report_tier(
     return user_id
 
 
-@router.post("/generate", dependencies=[Depends(require_coach)])
-async def generate_report(request: Request):
+@router.post("/generate")
+async def generate_report(request: Request, viewer: dict = Depends(require_coach)):
     """
     Generate a Nevedal research report.
 
@@ -99,6 +99,36 @@ async def generate_report(request: Request):
                 raise HTTPException(400, f"Could not resolve user: {sid}")
 
     from app.services.nevedal_report_generator import NevedalReportGenerator
+
+    if (viewer.get("role") or "").upper() == "COACH":
+        from app.services.coach_client_messenger import coach_may_view_client_conn
+        async with db.acquire() as conn:
+            for sid in subject_ids:
+                row = await conn.fetchrow(
+                    "SELECT profile_data, role FROM users WHERE id = $1",
+                    sid,
+                )
+                if not row or (row["role"] or "").upper() != "CLIENT":
+                    continue
+                profile = row["profile_data"]
+                if isinstance(profile, str):
+                    profile = json.loads(profile)
+                if not isinstance(profile, dict) or not await coach_may_view_client_conn(conn, viewer, profile):
+                    raise HTTPException(403, "COACH_NOT_ASSIGNED")
+            if family_id:
+                members = await conn.fetch(
+                    """SELECT profile_data FROM users
+                       WHERE role = 'CLIENT' AND profile_data->>'family_id' = $1""",
+                    str(family_id),
+                )
+                if not members:
+                    raise HTTPException(403, "COACH_NOT_ASSIGNED")
+                for member in members:
+                    profile = member["profile_data"]
+                    if isinstance(profile, str):
+                        profile = json.loads(profile)
+                    if not isinstance(profile, dict) or not await coach_may_view_client_conn(conn, viewer, profile):
+                        raise HTTPException(403, "COACH_NOT_ASSIGNED")
 
     gen = NevedalReportGenerator(db)
 

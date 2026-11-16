@@ -412,9 +412,25 @@ async def _auto_populate_folders(conn, coach_id: str):
     clients = await conn.fetch(
         """SELECT username, profile_data->>'name' as name, profile_data->>'family_id' as family_id
            FROM users WHERE role = 'CLIENT'
-           AND (profile_data->>'coach_id' = $1
+           AND (
+                profile_data->>'coach_id' = $1
                 OR profile_data->>'assigned_coach_id' = $1
-                OR profile_data->>'assigned_coach' = $1)""",
+                OR profile_data->>'assigned_coach' = $1
+                OR profile_data->>'coach_id' IN (
+                    SELECT assistant_id FROM coach_hierarchy
+                    WHERE master_coach_id = $1 AND status = 'active'
+                )
+                OR profile_data->>'assigned_coach_id' IN (
+                    SELECT assistant_id FROM coach_hierarchy
+                    WHERE master_coach_id = $1 AND status = 'active'
+                )
+                OR profile_data->>'assigned_coach' IN (
+                    SELECT COALESCE(u.username, ch.assistant_id)
+                    FROM coach_hierarchy ch
+                    LEFT JOIN users u ON u.hardware_id = ch.assistant_id
+                    WHERE ch.master_coach_id = $1 AND ch.status = 'active'
+                )
+           )""",
         coach_id,
     )
 

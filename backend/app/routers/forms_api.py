@@ -420,6 +420,11 @@ async def generate_form(req: FormGenerateRequest, request: Request, user: Dict =
                     profile = client_row["profile_data"]
                     if isinstance(profile, str):
                         profile = json.loads(profile)
+                    from app.services.coach_client_messenger import coach_may_view_client_conn
+                    if (user.get("role") or "").upper() == "COACH" and not await coach_may_view_client_conn(
+                        conn, user, profile or {}
+                    ):
+                        raise HTTPException(403, "COACH_NOT_ASSIGNED")
                     prefill.update({
                         "legal_name": profile.get("name", ""),
                         "client_name": profile.get("name", ""),

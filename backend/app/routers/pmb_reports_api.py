@@ -1126,7 +1126,19 @@ async def request_pmb_report(
         coach_hw = user.get("hardware_id", "")
         client_coach_id = client["coach_id"] or ""
         client_assigned = client["assigned_coach"] or ""
-        if not is_admin and coach_hw != client_coach_id and coach_username.lower() != client_assigned.lower():
+        direct = is_admin or coach_hw == client_coach_id or coach_username.lower() == client_assigned.lower()
+        if not direct:
+            full = await conn.fetchrow(
+                "SELECT profile_data FROM users WHERE username = $1",
+                client["username"],
+            )
+            profile = full["profile_data"] if full else None
+            if isinstance(profile, str):
+                import json
+                profile = json.loads(profile)
+            from app.services.coach_client_messenger import coach_may_view_client_conn
+            direct = isinstance(profile, dict) and await coach_may_view_client_conn(conn, user, profile)
+        if not direct:
             raise HTTPException(403, "You are not assigned to this client")
 
         pending = await conn.fetchval(

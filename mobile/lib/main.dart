@@ -8678,6 +8678,22 @@ class _SignUpWizardState extends State<SignUpWizard> {
        return;
     }
 
+    // Coach plans are paid on the website. iOS cannot open Stripe in-app.
+    // A new username is required. The existing client login is left as-is.
+    if (_effectiveRole == "COACH" && isNativeIOS) {
+      await launchUrl(
+        Uri.parse('https://coach.sovereignsanctuary.net'),
+        mode: LaunchMode.externalApplication,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Coach signup finishes on the coach website. Use a new username. Your client login stays separate.'),
+          duration: Duration(seconds: 8),
+        ));
+      }
+      return;
+    }
+
     if (_hasFamilyJoinContext && _isPaidTier) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text("Payment required for this family member. Continue to payment on the review step."),
@@ -10321,7 +10337,10 @@ class _SignUpWizardState extends State<SignUpWizard> {
                     SizedBox(width: 12),
                     Text("CREATING ACCOUNT...", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ])
-                : Text(_isPaidTier ? "REVIEW ORDER" : "CREATE ACCOUNT",
+                : Text(
+                    _effectiveRole == 'COACH' && isNativeIOS
+                        ? "OPEN COACH SIGNUP"
+                        : (_isPaidTier ? "REVIEW ORDER" : "CREATE ACCOUNT"),
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
             )
           ],
@@ -10525,6 +10544,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
       if (_effectiveRole == 'COACH') {
         body['selected_dojos'] = _selectedDojos;
+        body['coach_ethics_accepted'] = true;
       }
 
       if (_discountValidated && _discountCodeCtrl.text.trim().isNotEmpty) {

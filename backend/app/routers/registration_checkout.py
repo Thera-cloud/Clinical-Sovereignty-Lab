@@ -486,6 +486,9 @@ class PrepareRequest(BaseModel):
     # Coach upgrade fields
     flow: Optional[str] = None
     auth_token: Optional[str] = None
+    # Coach signup (separate username). Stored on the new COACH row.
+    w9_data: Optional[dict] = None
+    coach_ethics_accepted: Optional[bool] = None
 
 
 async def _resolve_parent_username(
@@ -720,6 +723,12 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
     invite = (body.coach_invite_token or "").strip()
     if invite:
         profile_fields["coach_invite_token"] = invite
+    if role == "COACH":
+        if body.coach_ethics_accepted:
+            profile_fields["coach_ethics_accepted"] = True
+        w9 = body.w9_data if isinstance(body.w9_data, dict) else None
+        if w9 and str(w9.get("legal_name") or "").strip():
+            profile_fields["w9_data"] = w9
 
     # ------------------------------------------------------------------
     # Dependent path: a CLIENT signing up under a parent on Sovereign Circle.
@@ -987,7 +996,8 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
                     body.discount_code.strip().upper(),
                 )
                 if disc:
-                    if not promo_applies_to_plan(disc["applicable_tiers"], body.tier):
+                    promo_plan = body.tier or ("COACH" if role == "COACH" else None)
+                    if not promo_applies_to_plan(disc["applicable_tiers"], promo_plan):
                         raise HTTPException(
                             400,
                             "This discount code is not valid for the selected plan",
@@ -1012,7 +1022,7 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
                     SET password_hash = $2, email = $3, payload = $4::jsonb,
                         tier = $5, selected_dojos = $6::jsonb,
                         discount_code = $7, pricing_snapshot = $8::jsonb,
-                        expires_at = NOW() + INTERVAL '2 hours',
+                        expires_at = NOW() + INTERVAL '24 hours',
                         created_at = NOW()
                     WHERE id = $1
                     """,
@@ -1031,8 +1041,9 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
                     """
                     INSERT INTO pending_signups
                         (role, username, password_hash, email, payload, tier,
-                         selected_dojos, discount_code, pricing_snapshot)
-                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)
+                         selected_dojos, discount_code, pricing_snapshot, expires_at)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb,
+                            NOW() + INTERVAL '24 hours')
                     RETURNING id
                     """,
                     role,
@@ -1113,6 +1124,10 @@ async def coach_upgrade_checkout(
 ):
     if not user:
         raise HTTPException(401, "Authentication required")
+    raise HTTPException(
+        400,
+        "Create a separate coach username at the coach website. This client login stays a client login.",
+    )
 
     username = user.get("username", "")
     hw_id = user.get("hardware_id", "")

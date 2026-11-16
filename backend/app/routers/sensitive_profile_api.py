@@ -630,6 +630,31 @@ async def require_clinician_for_user(
                 "_token_session_hash": _token_session_hash(credentials),
             }
 
+        # QUANTUM-CRYSTAL-ARCH: a master may open an assistant's assigned client.
+        client_row = await conn.fetchrow(
+            "SELECT profile_data FROM users WHERE username = $1 AND role = 'CLIENT'",
+            user_id,
+        )
+        client_profile = client_row["profile_data"] if client_row else None
+        if isinstance(client_profile, str):
+            client_profile = json.loads(client_profile)
+        if isinstance(client_profile, dict):
+            from app.services.coach_client_messenger import coach_may_view_client_conn
+            if await coach_may_view_client_conn(
+                conn,
+                {
+                    "role": principal.get("role") or "COACH",
+                    "username": coach_username,
+                    "hardware_id": coach_hardware_id,
+                },
+                client_profile,
+            ):
+                return {
+                    **principal,
+                    "_target_user_id": user_id,
+                    "_token_session_hash": _token_session_hash(credentials),
+                }
+
     raise HTTPException(
         status_code=403,
         detail={"reason": "not_assigned", "user_id": user_id},

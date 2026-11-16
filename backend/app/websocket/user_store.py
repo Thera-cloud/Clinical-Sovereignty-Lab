@@ -241,7 +241,9 @@ class UserStore:
                 "FAMILY_PLAN_ACTIVE", "SUSPENDED", "CANCELLED"
             }
             if sub_status not in allowed_statuses:
-                sub_status = "ACTIVE"
+                # REJECTED is not a users.subscription_status value. Keep the
+                # row pending so a declined coach cannot sign in.
+                sub_status = "PENDING_VERIFICATION" if sub_status == "REJECTED" else "ACTIVE"
 
             family_id_str = profile.get("family_id", "")
 
@@ -371,7 +373,15 @@ class UserStore:
                         email = EXCLUDED.email,
                         hardware_id = EXCLUDED.hardware_id,
                         consent_version = COALESCE(EXCLUDED.consent_version, users.consent_version),
-                        subscription_status = COALESCE(users.subscription_status, EXCLUDED.subscription_status),
+                        -- Coach approval is a bridge write. Keep the column DB-owned
+                        -- except for the one forward step PENDING_VERIFICATION -> ACTIVE.
+                        subscription_status = CASE
+                            WHEN users.subscription_status = 'PENDING_VERIFICATION'
+                             AND EXCLUDED.subscription_status = 'ACTIVE'
+                             AND COALESCE(EXCLUDED.profile_data->>'subscription_status', '') = 'ACTIVE'
+                            THEN EXCLUDED.subscription_status
+                            ELSE COALESCE(users.subscription_status, EXCLUDED.subscription_status)
+                        END,
                         family_id = COALESCE(EXCLUDED.family_id, users.family_id),
                         -- Enrollment owns program_id; bridge cache must never clear it.
                         program_id = users.program_id,
@@ -435,6 +445,21 @@ class UserStore:
                                                 'custom_session_rate_set_by',
                                                 'custom_session_rate_set_at'
                                             ])
+                                            AND NOT (
+                                                (
+                                                    key IN (
+                                                        'subscription_status',
+                                                        'certification_status',
+                                                        'coach_verified'
+                                                    )
+                                                    AND COALESCE(users.profile_data->>'subscription_status', '') = 'PENDING_VERIFICATION'
+                                                    AND COALESCE(EXCLUDED.profile_data->>'subscription_status', '') = 'ACTIVE'
+                                                )
+                                                OR (
+                                                    key = 'certification_status'
+                                                    AND COALESCE(EXCLUDED.profile_data->>'certification_status', '') = 'REJECTED'
+                                                )
+                                            )
                                         ),
                                         '{}'::jsonb
                                     ) AS m

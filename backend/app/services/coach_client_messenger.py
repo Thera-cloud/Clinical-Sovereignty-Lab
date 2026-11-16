@@ -61,6 +61,168 @@ def _client_assigned_to_coach(
     return False
 
 
+def coach_can_see_client(coach_profile, client_profile, supervised_ids=None) -> bool:
+    """Assigned coach, or a master viewing an assistant's assigned client.
+
+    An assistant does not inherit the master's other clients.
+    """
+    role = (coach_profile.get("role") or "").upper()
+    if role == "ADMIN":
+        return True
+    if role != "COACH":
+        return False
+    if _client_assigned_to_coach(client_profile, coach_profile):
+        return True
+    supervised = set()
+    for raw in supervised_ids or ():
+        text = str(raw or "").strip()
+        if text:
+            supervised.add(text)
+            supervised.add(text.lower())
+    if not supervised:
+        return False
+    for key in ("coach_id", "assigned_coach_id", "assigned_coach"):
+        value = str((client_profile or {}).get(key) or "").strip()
+        if value and (value in supervised or value.lower() in supervised):
+            return True
+    return False
+
+
+async def load_supervised_assistant_ids(conn, coach_profile) -> set:
+    """Hardware ids and usernames of this coach's active assistants."""
+    ids = [
+        x for x in (
+            str(coach_profile.get("hardware_id") or "").strip(),
+            str(coach_profile.get("username") or "").strip(),
+        ) if x
+    ]
+    if not ids:
+        return set()
+    rows = await conn.fetch(
+        """
+        SELECT ch.assistant_id, u.username, u.hardware_id
+        FROM coach_hierarchy ch
+        LEFT JOIN users u
+          ON u.hardware_id = ch.assistant_id OR u.username = ch.assistant_id
+        WHERE ch.master_coach_id = ANY($1::text[])
+          AND ch.status = 'active'
+        """,
+        ids,
+    )
+    out = set()
+    for row in rows:
+        for key in ("assistant_id", "username", "hardware_id"):
+            value = row[key]
+            if value:
+                out.add(str(value).strip())
+    return out
+
+
+def _coach_with_username(coach_profile, coach_username: str = ""):
+    if coach_username and not (coach_profile or {}).get("username"):
+        merged = dict(coach_profile or {})
+        merged["username"] = coach_username
+        return merged
+    return coach_profile or {}
+
+
+async def coach_may_view_client_conn(conn, coach_profile, client_profile, coach_username: str = "") -> bool:
+    coach = _coach_with_username(coach_profile, coach_username)
+    if coach_can_see_client(coach, client_profile):
+        return True
+    if (coach.get("role") or "").upper() != "COACH":
+        return False
+    supervised = await load_supervised_assistant_ids(conn, coach)
+    return coach_can_see_client(coach, client_profile, supervised)
+
+
+async def coach_may_view_client(db_pool, coach_profile, client_profile, coach_username: str = "") -> bool:
+    coach = _coach_with_username(coach_profile, coach_username)
+    if coach_can_see_client(coach, client_profile):
+        return True
+    if not db_pool or (coach.get("role") or "").upper() != "COACH":
+        return False
+    async with db_pool.acquire() as conn:
+        return await coach_may_view_client_conn(conn, coach, client_profile)
+
+
+def _registry_client(registry, client_id: str):
+    wanted = (client_id or "").strip()
+    if not wanted or not registry:
+        return None
+    for entry in registry.values():
+        profile = (entry or {}).get("profile") or {}
+        if wanted in (
+            profile.get("hardware_id"),
+            profile.get("username"),
+            (entry or {}).get("username"),
+        ):
+            return profile
+    return None
+
+
+async def coach_may_view_family(db_pool, coach_profile, family_id: str, registry, coach_username: str = "") -> bool:
+    """A family folder is visible only when every member is assigned to this coach
+    or to one of this coach's assistants."""
+    family_id = (family_id or "").strip()
+    if not family_id:
+        return False
+    members = []
+    for entry in (registry or {}).values():
+        profile = (entry or {}).get("profile") or {}
+        if profile.get("role") != "CLIENT":
+            continue
+        if profile.get("account_status") == "DELETED":
+            continue
+        if str(profile.get("family_id") or "") == family_id:
+            members.append(profile)
+    if not members:
+        return False
+    for profile in members:
+        if not await coach_may_view_client(db_pool, coach_profile, profile, coach_username):
+            return False
+    return True
+
+
+async def coach_may_view_note_request(db_pool, coach_profile, data, registry, coach_username: str = "") -> bool:
+    role = (coach_profile.get("role") or "").upper()
+    if role == "ADMIN":
+        return True
+    if role != "COACH":
+        return False
+    data = data or {}
+    folder = str(data.get("folder_id") or "").strip()
+    client_id = str(data.get("client_id") or "").strip()
+    family_id = str(data.get("family_id") or "").strip()
+    if folder.startswith("client:"):
+        client_id = client_id or folder.split(":", 1)[1].strip()
+    elif folder.startswith("family:"):
+        family_id = family_id or folder.split(":", 1)[1].strip()
+    if family_id:
+        return await coach_may_view_family(db_pool, coach_profile, family_id, registry, coach_username)
+    if not client_id:
+        return False
+    profile = _registry_client(registry, client_id)
+    if profile is None and db_pool:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT profile_data FROM users
+                WHERE (hardware_id = $1 OR username = $1)
+                  AND role = 'CLIENT' AND deleted_at IS NULL
+                """,
+                client_id,
+            )
+        if row:
+            profile = row["profile_data"]
+            if isinstance(profile, str):
+                import json
+                profile = json.loads(profile)
+    return bool(profile) and await coach_may_view_client(
+        db_pool, coach_profile, profile, coach_username
+    )
+
+
 async def _emit_message_audit(
     db_pool,
     *,
@@ -128,7 +290,7 @@ async def send_direct_client_message(
     if not client:
         return {"status": "error", "reason": "client_not_found"}
     client_pd = client["profile_data"]
-    if not _client_assigned_to_coach(client_pd, coach_profile):
+    if not await coach_may_view_client(db_pool, coach_profile, client_pd):
         return {"status": "error", "reason": "client_not_assigned"}
 
     coach_name = (
