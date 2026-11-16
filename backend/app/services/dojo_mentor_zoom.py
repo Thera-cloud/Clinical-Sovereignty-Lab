@@ -146,14 +146,19 @@ class DojoMentorZoom:
 
         mentor_engine = getattr(self.app_state, "dojo_mentor_engine", None)
         if mentor_engine:
-            await mentor_engine.start_session(
-                session_id=session_id,
-                coach_user_id=coach_user_id,
-                client_user_id=client_user_id,
-                session_mode=session_mode,
-                active_dojos=active_dojos,
-                zoom_meeting_id=meeting_data.get("meeting_id"),
-            )
+            try:
+                await mentor_engine.start_session(
+                    session_id=session_id,
+                    coach_user_id=coach_user_id,
+                    client_user_id=client_user_id,
+                    session_mode=session_mode,
+                    active_dojos=active_dojos,
+                    zoom_meeting_id=meeting_data.get("meeting_id"),
+                )
+            except Exception as exc:
+                self._active_sessions[session_id]["mentoring_active"] = False
+                logger.warning("DOJO mentor not started: %s", exc)
+                return {"error": str(exc)}
 
         logger.info(
             "DOJO mentor session started: session=%s coach=%s mode=%s dojos=%s",

@@ -742,11 +742,39 @@ async def generate_quiz(body: GenerateQuizRequest, request: Request):
 
 @router.get("/mesh/methods/{dojo_type}")
 async def get_training_methods(dojo_type: str, request: Request):
-    """Get DOJO-specific training methods (or all if dojo_type is 'all')."""
+    """Paid DOJOs only for a coach. Admin and other roles still receive the catalog."""
     engine = _get_mesh_engine(request)
+    catalog = engine.get_methods() if dojo_type == "all" else engine.get_methods(dojo_type)
+    pool = getattr(request.app.state, "db_pool", None)
+    user_id = getattr(request.state, "user_id", None)
+    if pool is None or not user_id:
+        return catalog
+    try:
+        row = await pool.fetchrow(
+            """SELECT role, username, profile_data FROM users
+                WHERE username = $1 OR hardware_id = $1
+                LIMIT 1""",
+            str(user_id),
+        )
+    except Exception as exc:
+        logger.warning("mesh methods profile lookup skipped: %s", exc)
+        return catalog
+    if not row or str(row["role"] or "").upper() != "COACH":
+        return catalog
+    from app.services.coach_dojo_access import active_dojo_keys
+    from app.services.coach_payment_hold import blocked_dojos_for
+
+    blocked = []
+    try:
+        blocked = await blocked_dojos_for(pool, row["username"])
+    except Exception as exc:
+        logger.warning("mesh methods hold lookup skipped: %s", exc)
+    paid = set(active_dojo_keys(row["profile_data"], blocked))
     if dojo_type == "all":
-        return engine.get_methods()
-    return engine.get_methods(dojo_type)
+        return {key: value for key, value in catalog.items() if key in paid}
+    if dojo_type not in paid:
+        raise HTTPException(403, "DOJO_NOT_SUBSCRIBED")
+    return catalog
 
 
 # ══════════════════════════════════════════════════════════════════════════════

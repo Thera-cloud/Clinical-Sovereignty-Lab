@@ -12,6 +12,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../services/dojo_mentor_service.dart';
 
 // Conditional BLE import
 import 'community_mesh_ble.dart' if (dart.library.html) 'community_mesh_ble_stub.dart'
@@ -159,9 +160,8 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
   bool _discoveryTimedOut = false;
 
   // Available DOJO types and methods
-  final List<String> _dojoTypes = [
-    'therapist', 'judge', 'business', 'mcat', 'cnc', 'teacher', 'project_pm', 'coach_nate',
-  ];
+  List<String> get _dojoTypes =>
+      DojoMentorService.availableDojosFromProfile(widget.profile);
   final Map<String, String> _dojoLabels = {
     'therapist': 'Therapist', 'judge': 'Judge', 'business': 'Business',
     'mcat': 'MCAT', 'cnc': 'CNC', 'teacher': 'Teacher', 'project_pm': 'Project PM',

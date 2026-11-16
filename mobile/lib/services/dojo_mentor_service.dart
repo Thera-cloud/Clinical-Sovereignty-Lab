@@ -47,6 +47,7 @@ const kValidDojos = [
   'cnc',
   'teacher',
   'project_pm',
+  'coach_nate',
 ];
 
 /// Human-readable labels for DOJO chips.
@@ -58,6 +59,7 @@ const kDojoLabels = {
   'cnc': 'CNC',
   'teacher': 'Teacher',
   'project_pm': 'Project PM',
+  'coach_nate': 'Coach Nate',
 };
 
 // =============================================================================
@@ -103,22 +105,48 @@ class DojoMentorService extends ChangeNotifier {
   // DOJO SUBSCRIPTIONS FROM PROFILE
   // ---------------------------------------------------------------------------
 
-  /// Compute which DOJOs are available for this coach from profile_data['dojo_subscriptions'].
-  /// Returns list of DOJO keys that have status == 'active'.
+  /// Paid DOJO keys. A missing map uses selected_dojos. Neither means none.
   static List<String> availableDojosFromProfile(Map<String, dynamic> profile) {
-    final subs = profile['dojo_subscriptions'];
-    if (subs == null || subs is! Map) return List.from(kValidDojos);
-
-    final available = <String>[];
-    for (final key in kValidDojos) {
-      final val = subs[key];
-      if (val is Map && (val['status'] ?? '') == 'active') {
-        available.add(key);
-      } else if (val == true) {
-        available.add(key);
+    final blocked = <String>{};
+    final rawBlocked = profile['coach_hold_blocked_dojos'];
+    if (rawBlocked is List) {
+      for (final item in rawBlocked) {
+        blocked.add(item.toString());
       }
     }
-    return available.isEmpty ? ['therapist'] : available;
+    final subs = profile['dojo_subscriptions'];
+    final keys = <String>[];
+    if (subs is Map && subs.isNotEmpty) {
+      final today = DateTime.now();
+      final day = DateTime(today.year, today.month, today.day);
+      subs.forEach((key, val) {
+        if (val is Map) {
+          final status = (val['status'] ?? '').toString();
+          if (status == 'active') {
+            keys.add(key.toString());
+          } else if (status == 'cancelled') {
+            final end = val['access_end_date']?.toString() ?? '';
+            if (end.isEmpty) {
+              keys.add(key.toString());
+            } else {
+              final parsed = DateTime.tryParse(end);
+              if (parsed != null && !parsed.isBefore(day)) {
+                keys.add(key.toString());
+              }
+            }
+          }
+        } else if (val == true) {
+          keys.add(key.toString());
+        }
+      });
+    } else {
+      final selected = profile['selected_dojos'];
+      if (selected is List) {
+        keys.addAll(selected.map((item) => item.toString()));
+      }
+    }
+    final known = kValidDojos.toSet();
+    return keys.where((key) => known.contains(key) && !blocked.contains(key)).toList();
   }
 
   /// Set the WebSocket channel. Call when overlay mounts with the coach's socket.

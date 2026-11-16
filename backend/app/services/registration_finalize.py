@@ -264,6 +264,8 @@ async def finalize_signup(
         new_profile["dojo_subscriptions"] = _build_dojo_subscriptions(
             selected_dojos, dojo_discount
         )
+        if username.strip().lower() != "coachn":
+            new_profile["coach_payment_hold_eligible"] = True
         if "judge" in [d.lower() for d in selected_dojos]:
             new_profile["judge_nate_bar_id"] = f"JNBAR-{secrets.token_hex(4).upper()}"
 
@@ -377,6 +379,13 @@ async def finalize_signup(
         )
     except Exception as _nl_err:
         logger.warning("newsletter opt-in skipped for %s: %s", username, _nl_err)
+
+    if role == "COACH" and username.strip().lower() != "coachn":
+        try:
+            from app.services.coach_payment_hold import link_new_coach_to_coachn
+            await link_new_coach_to_coachn(db_pool, hardware_id)
+        except Exception as link_err:
+            logger.warning("CoachN link skipped for %s: %s", username, link_err)
 
     if role == "COACH" and isinstance(w9_doc, dict):
         try:

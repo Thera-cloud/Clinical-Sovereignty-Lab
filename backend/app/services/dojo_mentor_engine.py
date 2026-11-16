@@ -72,7 +72,18 @@ MASTER_PERSONA: Dict[str, str] = {
         "stakeholder management, risk mitigation, resource planning, and delivery "
         "excellence. You blend strategic vision with tactical execution."
     ),
+    "coach_nate": (
+        "You are a master coach supervising a live session. You watch for rapport, "
+        "focused listening, the questions the coach asks, and feedback that stays "
+        "with the client's own goals. You do not switch into a clinical, legal, "
+        "or medical lens. When this DOJO is the active subscription, your notes "
+        "train the coach in coaching skill only."
+    ),
 }
+
+
+class DojoMentorUnavailable(Exception):
+    """The requested DOJO is not on the paid map, or the model did not answer."""
 
 VALID_DOJOS = frozenset(MASTER_PERSONA.keys())
 VALID_SESSION_MODES = frozenset({"coach_client", "coach_students", "judge_debate", "lawyer_client"})
@@ -114,7 +125,9 @@ class DojoMentorEngine:
         """
         active = [d for d in active_dojos if d in VALID_DOJOS]
         if not active:
-            active = ["therapist"]  # fallback
+            raise DojoMentorUnavailable(
+                "This DOJO is not on the paid subscription. Wait until that model is available."
+            )
 
         parts: List[str] = []
 
@@ -198,7 +211,10 @@ class DojoMentorEngine:
         """
         Generate mentor observation/suggestion/answer via Azure OpenAI Chat Completions.
         """
-        system = self.build_mentor_system_prompt(active_dojos, client_context, session_mode)
+        try:
+            system = self.build_mentor_system_prompt(active_dojos, client_context, session_mode)
+        except DojoMentorUnavailable as exc:
+            return str(exc)
 
         if coach_question:
             user_content = (
@@ -283,7 +299,9 @@ class DojoMentorEngine:
         mode = session_mode if session_mode in VALID_SESSION_MODES else "coach_client"
         dojos = [d for d in active_dojos if d in VALID_DOJOS]
         if not dojos:
-            dojos = ["therapist"]
+            raise DojoMentorUnavailable(
+                "This DOJO is not on the paid subscription. Wait until that model is available."
+            )
 
         try:
             async with self.db_pool.acquire() as conn:

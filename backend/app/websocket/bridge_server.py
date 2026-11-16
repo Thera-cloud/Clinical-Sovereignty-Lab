@@ -13609,6 +13609,14 @@ async def handle_client(websocket, path=None):
                             pass
 
             # Abuse status check: block held/banned users (except login/logout)
+            # QUANTUM-CRYSTAL-ARCH — expired coach DOJO hold stops the coach portal
+            try:
+                from app.services.coach_payment_hold import message_locked as _coach_hold_locked
+                if await _coach_hold_locked(db_pool, current_profile, t, str(SESSIONS_FILE)):
+                    await websocket.send(json.dumps({"type": "coach_payment_required", "message": "COACH_PAYMENT_REQUIRED"}))
+                    continue
+            except Exception as _cph:
+                print(f">>> [COACH HOLD] skipped: {_cph}")
             if current_profile and uid and t not in ("login_request", "logout", "ping"):
                 try:
                     from .abuse_manager import AbuseManager as _AM
@@ -14216,6 +14224,12 @@ async def handle_client(websocket, path=None):
                         overlay_family_token_balance(res, load_registry())
                     except Exception as _tok_ov:
                         print(f"[bridge] family token overlay skip: {_tok_ov}")
+                    # QUANTUM-CRYSTAL-ARCH — coach DOJO hold fields on the login profile
+                    try:
+                        from app.services.coach_payment_hold import fields_for_login as _coach_hold_fields
+                        res.update(await _coach_hold_fields(db_pool, res, str(SESSIONS_FILE)))
+                    except Exception as _lhf:
+                        print(f">>> [COACH HOLD] login view skipped: {_lhf}")
                     login_payload = {"type": "login_success", "token": tok, "profile": res}
                     # SOVEREIGN-VOICE — attach session recovery token
                     if _gen_recovery:
@@ -15562,6 +15576,14 @@ async def handle_client(websocket, path=None):
                                         continue
                                 except Exception as _hold_e:
                                     print(f">>> [BOOKING] payment hold check failed: {_hold_e}")
+                                # QUANTUM-CRYSTAL-ARCH — new-coach DOJO hold pauses new bookings
+                                try:
+                                    from app.services.coach_payment_hold import new_booking_paused as _coach_booking_paused
+                                    if await _coach_booking_paused(db_pool, coach_id, str(SESSIONS_FILE), client_name, scheduled_start):
+                                        await websocket.send(json.dumps({"type": "error", "message": "COACH_BOOKING_PAUSED", "detail": "New bookings with this coach are paused. The request was sent to the supervising coach."}))
+                                        continue
+                                except Exception as _cbh:
+                                    print(f">>> [COACH HOLD] booking check skipped: {_cbh}")
 
                                 # QUANTUM-CRYSTAL-ARCH: duration from booked window (never leave 0)
                                 _book_dur = 50
@@ -32899,7 +32921,7 @@ IMPORTANT:
                             for _rk, _rv in registry.items():
                                 _rp = (_rv or {}).get("profile", {})
                                 _rc = (_rv or {}).get("credentials", {})
-                                if _rc.get("username") == _target_username and _rp.get("role") == "COACH":
+                                if (_rc.get("username") or "").lower() == str(_target_username).lower() and _rp.get("role") == "COACH":
                                     _target_hw = _rp.get("hardware_id", "")
                                     _target_key = _rk
                                     break
@@ -32908,15 +32930,22 @@ IMPORTANT:
                             else:
                                 if db_pool:
                                     async with db_pool.acquire() as _hconn:
-                                        await _hconn.execute(
-                                            """INSERT INTO coach_hierarchy (master_coach_id, assistant_id, status)
-                                               VALUES ($1, $2, 'pending_admin')
-                                               ON CONFLICT (master_coach_id, assistant_id)
-                                               DO UPDATE SET status = 'pending_admin', invited_at = NOW(), revoked_at = NULL""",
+                                        # QUANTUM-CRYSTAL-ARCH — a revoked pair stays revoked
+                                        _link_status = await _hconn.fetchval(
+                                            "SELECT status FROM coach_hierarchy WHERE master_coach_id = $1 AND assistant_id = $2",
                                             current_hardware_id, _target_hw,
                                         )
+                                        if _link_status != "revoked":
+                                            await _hconn.execute(
+                                                """INSERT INTO coach_hierarchy (master_coach_id, assistant_id, status)
+                                                   VALUES ($1, $2, 'pending_admin')
+                                                   ON CONFLICT (master_coach_id, assistant_id)
+                                                   DO UPDATE SET status = 'pending_admin', invited_at = NOW(), revoked_at = NULL""",
+                                                current_hardware_id, _target_hw,
+                                            )
                                     await websocket.send(json.dumps({
-                                        "type": "coach_hierarchy_invited",
+                                        "type": "coach_hierarchy_error" if _link_status == "revoked" else "coach_hierarchy_invited",
+                                        "message": "This assistant link was revoked." if _link_status == "revoked" else "",
                                         "assistant_username": _target_username,
                                         "assistant_id": _target_hw,
                                         "needs_admin_approval": True,
@@ -32938,12 +32967,14 @@ IMPORTANT:
                                        WHERE master_coach_id = $1 AND assistant_id = $2 AND status = 'pending'""",
                                     _master_id, current_hardware_id,
                                 )
+                            _accepted = str(_res).rsplit(" ", 1)[-1] == "1"  # QUANTUM-CRYSTAL-ARCH
                             await websocket.send(json.dumps({
-                                "type": "coach_hierarchy_accepted",
+                                "type": "coach_hierarchy_accepted" if _accepted else "coach_hierarchy_error",
                                 "master_coach_id": _master_id,
+                                "message": "" if _accepted else "Invitation is waiting on approval.",
                             }))
                             for _ws, _wp in connected_clients.items():
-                                if _wp and _wp.get("hardware_id") == _master_id:
+                                if _accepted and _wp and _wp.get("hardware_id") == _master_id:
                                     try:
                                         await _ws.send(json.dumps({
                                             "type": "coach_hierarchy_assistant_joined",

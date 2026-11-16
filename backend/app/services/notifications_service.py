@@ -349,6 +349,21 @@ TEMPLATES = {
 """
     },
     
+    "coach_hold_notice": {
+        "subject": "{{ subject_line }}",
+        "html": """
+<!DOCTYPE html>
+<html>
+<body style="font-family: Georgia, serif; background: #050505; color: #F5F5F5; padding: 40px;">
+    <div style="max-width: 600px; margin: 0 auto; background: #111111; padding: 32px;">
+        <p style="color: #C9A962; letter-spacing: 3px;">SANCTUARY</p>
+        <p style="color: #F5F5F5; line-height: 1.7; white-space: pre-wrap;">{{ body_text }}</p>
+    </div>
+</body>
+</html>
+"""
+    },
+
     # -------------------------------------------------------------------------
     # FAMILY INVITATION
     # -------------------------------------------------------------------------

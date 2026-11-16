@@ -2335,6 +2335,12 @@ class StripeWebhookHandler:
                     period_end = datetime.fromtimestamp(per["end"], tz=timezone.utc)
 
             uname = await self.db.fetchval("SELECT username FROM users WHERE id = $1", user_id)
+            if invoice.get("id"):
+                try:
+                    from app.services.coach_payment_hold import mark_hold_paid
+                    await mark_hold_paid(self.db, str(invoice.get("id")))
+                except Exception:
+                    _logger.exception("coach hold paid mark skipped id=%s", invoice.get("id"))
             if uname:
                 await self._apply_subscription_grant(
                     uname,
@@ -2442,6 +2448,12 @@ class StripeWebhookHandler:
                               f"({failure_count} payment failures)")
             except Exception as watchlist_err:
                 print(f">>> [STRIPE] Watchlist integration error: {watchlist_err}")
+
+            try:
+                from app.services.coach_payment_hold import open_hold_from_invoice
+                await open_hold_from_invoice(self.db, invoice, user_id)
+            except Exception as hold_err:
+                print(f">>> [STRIPE] Coach payment hold skipped: {hold_err}")
     
     async def _handle_pending_signup(self, session: Dict, pending_signup_id: str, event_id: str = ""):
         """Finalize a Stripe-first registration after payment.""" # QUANTUM-CRYSTAL-ARCH
