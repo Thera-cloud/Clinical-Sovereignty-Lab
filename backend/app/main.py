@@ -1853,6 +1853,14 @@ async def lifespan(app: FastAPI):
                                                        )""",
                                                 _del_uid,
                                             )
+                                            # QUANTUM-CRYSTAL-ARCH — standing request is account data
+                                            await _pc.execute(
+                                                """DELETE FROM main_chat_stride_state
+                                                   WHERE username IN (
+                                                       SELECT username FROM users WHERE hardware_id = $1
+                                                   )""",
+                                                _del_uid,
+                                            )
                                             await _pc.execute(
                                                 "UPDATE users SET deleted_at = NOW(), name = 'Deleted User', "
                                                 "email = NULL, phone = NULL, profile_data = '{}' "

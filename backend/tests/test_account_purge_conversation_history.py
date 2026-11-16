@@ -23,8 +23,9 @@ def test_purge_deletes_conversation_history():
     assert "DELETE FROM nevedal_metrics" in block
     # Must run before users anonymize so username/id lookups still resolve
     ch_i = block.index("DELETE FROM conversation_history")
+    stride_i = block.index("DELETE FROM main_chat_stride_state")
     anon_i = block.index("name = 'Deleted User'")
-    assert ch_i < anon_i
+    assert ch_i < stride_i < anon_i
 
 
 def test_data_deletion_page_promises_conversation_history():

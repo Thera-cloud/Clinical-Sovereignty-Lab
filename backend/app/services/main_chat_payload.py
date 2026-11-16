@@ -33,6 +33,11 @@ _MORE_PHRASES = (
     "is there more", "there's more", "keep going", "go on",
     "say more", "continue", "finish that", "don't stop",
 )
+_CLOSE_RE = re.compile(
+    r"\b(?:thank you|thanks|see you|goodbye|good night|goodnight|"
+    r"that'?s all|that is all|i(?:'| a)?m done|talk later|signing off)\b",
+    re.I,
+)
 
 _MEM_OPEN = "<!--MEM-->"
 _MEM_CLOSE = "<!--/MEM-->"
@@ -275,6 +280,14 @@ def asked_for_more(user_text: str) -> bool:
     return any(phrase in lower for phrase in _MORE_PHRASES)
 
 
+def closing_turn(user_text: str) -> bool:
+    """A short goodbye stays short. A long disclosure that also says thanks does not."""
+    text = (user_text or "").strip()
+    if not text or len(text) >= 400 or asked_for_more(text):
+        return False
+    return bool(_CLOSE_RE.search(text))
+
+
 def repair_prior_turns(history: Optional[List[dict]], current_user: str) -> Tuple[List[dict], str]:
     """Prior turns end on an assistant message. A trailing user turn joins the current one.
 
@@ -511,7 +524,9 @@ def assemble_stride_prompt(
     cap = incoming
     guarded = fragile or incoming < 600
     resend_exempt = resend or asked_for_more(user_text)
-    short_turn = len((user_text or "").strip()) < 160 and not resend_exempt
+    short_turn = (
+        len((user_text or "").strip()) < 160 or closing_turn(user_text)
+    ) and not resend_exempt
     if faster:
         cap = min(cap, 900)
     elif not guarded and not short_turn:
@@ -633,8 +648,8 @@ def advance_standing_state(uid: str, user_text: str, state: Dict[str, Any]) -> b
     return False
 
 
-# Main-chat rows only. Voice, reconnect, and hybrid-resume writers share this table.
-# Untagged rows from before the surface mark are kept only when they are not those writers.
+# Main-chat rows only. Voice, reconnect, hybrid-resume, and trial-merge writers
+# share this table and do not set surface=bridge_chat.
 _READBACK_SQL = """
 SELECT user_text, ai_text FROM conversation_history
 WHERE user_id = ANY($1) AND created_at > NOW() - INTERVAL '45 minutes'
@@ -644,7 +659,7 @@ WHERE user_id = ANY($1) AND created_at > NOW() - INTERVAL '45 minutes'
   AND session_id NOT LIKE 'reconnect:%'
   AND session_id NOT LIKE 'CA%'
   AND COALESCE(user_text, '') NOT LIKE '[HYBRID_RESUME]%'
-  AND COALESCE(metadata->>'surface', '') IN ('', 'bridge_chat')
+  AND COALESCE(metadata->>'surface', '') = 'bridge_chat'
 ORDER BY created_at DESC, id DESC LIMIT 16
 """
 
@@ -680,9 +695,19 @@ async def _live_with_readback(
         _rehydrated[uid] = held
     if not held or not held[1]:
         return live_turns
-    seen = [(t.get("user_text") or "").strip() for t in live_turns]
+    seen = []
+    for turn in live_turns:
+        for key in ("user_text", "user_text_verbatim"):
+            line = (turn.get(key) or "").strip()
+            if line and line not in seen:
+                seen.append(line)
     older = [t for t in held[1] if not _same_user_line(t.get("user_text") or "", seen)]
     return (older + live_turns)[-16:]
+
+
+def _fold_user_line(text: str) -> str:
+    folded = re.sub(r"\[content filtered\]", " ", text or "", flags=re.I)
+    return re.sub(r"\s+", " ", folded).strip()
 
 
 def _same_user_line(text: str, seen: List[str]) -> bool:
@@ -690,13 +715,20 @@ def _same_user_line(text: str, seen: List[str]) -> bool:
     body = (text or "").strip()
     if not body:
         return False
+    folded = _fold_user_line(body)
     for other in seen:
         if not other:
             continue
         if body == other:
             return True
+        other_folded = _fold_user_line(other)
+        if folded and folded == other_folded:
+            return True
         n = min(len(body), len(other), 48)
         if n >= 24 and body[:n] == other[:n]:
+            return True
+        short, long = (folded, other_folded) if len(folded) <= len(other_folded) else (other_folded, folded)
+        if len(short) >= 24 and short in long:
             return True
     return False
 

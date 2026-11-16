@@ -429,7 +429,7 @@ def _stance_persist(uid: str, role, state) -> None:
         print(f">>> [STANCE] persist error (non-fatal): {_stp_err}")
 
 
-async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, st_state, t_start, history_messages=None):
+async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, st_state, t_start, history_messages=None, session_stick_key=None):
     # QUANTUM-CRYSTAL-ARCH — ITEM 9: one-shot WITNESS-only regen when a guard guts the reply
     if not gutted or _stance_mod is None:
         return prior
@@ -441,7 +441,9 @@ async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, s
         _hard = ("\n\nCRITICAL: Respond with WITNESS only — a single grounded reflective "
                  "sentence. No list, no menu of options, no question, no action plan.")
         _sys = (system_prompt or "") + _hard
-        _regen = await _stance_regen_llm(_sys, user_text, history_messages)  # QUANTUM-CRYSTAL-ARCH — stride turns
+        _regen = await _stance_regen_llm(
+            _sys, user_text, history_messages, session_stick_key=session_stick_key,
+        )  # QUANTUM-CRYSTAL-ARCH — stride turns, same session model
         if not _regen or not _regen.strip():
             return prior
         _regen, _ = _stance_mod.apply_post_generation_guards(
@@ -453,8 +455,24 @@ async def _stance_maybe_regen(gutted, system_prompt, user_text, prior, st_dec, s
         return prior
 
 
-async def _stance_regen_llm(system_prompt, user_text, history_messages=None):
+async def _stance_regen_llm(system_prompt, user_text, history_messages=None, session_stick_key=None):
     # QUANTUM-CRYSTAL-ARCH — ITEM 9: minimal single-shot completion for hardened witness regen
+    # The session model speaks this sentence. It does not move the stick.
+    # Azure remains the fallback when stride is off or that call fails.
+    if session_stick_key:
+        try:
+            from app.services.sovereign_chat_client import generate_complete as _regen_complete
+            _text, _prov = await _regen_complete(
+                system_prompt, user_text,
+                max_tokens=220, temperature=0.3, domain="clinical",
+                history_messages=history_messages,
+                session_stick_key=session_stick_key,
+                remember_session=False,
+            )
+            if (_text or "").strip():
+                return _text
+        except Exception as _stick_err:
+            print(f">>> [STANCE] session-model regen failed: {_stick_err}")
     try:
         import aiohttp as _aio
         from app.websocket.inference_race import chat_messages as _chat_messages
@@ -10821,6 +10839,7 @@ class AzureCortex:
                                 known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                                 program_id=_program_id,  # gap-fix (bee-hiv-only)
                                 history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
+                                session_stick_key=self._ensure_session_id(uid) if _stride_hist is not None else None,  # QUANTUM-CRYSTAL-ARCH
                             )
                             if _fb_resp:
                                 full_response = _fb_resp
@@ -10861,6 +10880,7 @@ class AzureCortex:
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                         program_id=_program_id,  # gap-fix (bee-hiv-only)
                         history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
+                        session_stick_key=self._ensure_session_id(uid) if _stride_hist is not None else None,  # QUANTUM-CRYSTAL-ARCH
                     )
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Primary inference failed: {_sov_err}")
@@ -10936,6 +10956,7 @@ class AzureCortex:
                             known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                             program_id=_program_id,  # gap-fix (bee-hiv-only)
                             history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
+                            session_stick_key=self._ensure_session_id(uid) if _stride_hist is not None else None,  # QUANTUM-CRYSTAL-ARCH
                         )
                     elif _race_inference:
                         full_response, _provider_used = await _race_inference(
@@ -11017,6 +11038,7 @@ class AzureCortex:
                         domain="clinical",
                         known_names=_known_names,  # QUANTUM-CRYSTAL-ARCH: Slice C
                         program_id=_program_id,  # gap-fix (bee-hiv-only)
+                        session_stick_key=self._ensure_session_id(uid) if _stride_hist is not None else None,  # QUANTUM-CRYSTAL-ARCH
                     )
                     if _tr_resp and len(_tr_resp.strip()) >= _orig_chars * 1.3:
                         full_response = _tr_resp
@@ -11106,6 +11128,7 @@ class AzureCortex:
                             _st_gutted, system_prompt, user_text, full_response,
                             _st_dec2, _st_state2, _t_inf_start,
                             history_messages=_stride_hist,  # QUANTUM-CRYSTAL-ARCH — stride turns
+                            session_stick_key=self._ensure_session_id(uid) if _stride_hist is not None else None,  # QUANTUM-CRYSTAL-ARCH
                         )
                         await _stance_log_guard_telemetry(
                             db_pool, uid,
@@ -11471,6 +11494,7 @@ class AzureCortex:
                         pass
                     _chat_live_turns[uid].append({
                         "user_text": user_text,
+                        "user_text_verbatim": _qg_verbatim_user_text,  # QUANTUM-CRYSTAL-ARCH — dedupe against the stored line
                         "ai_text": _ai_store,
                     })
                     if len(_chat_live_turns[uid]) > _CHAT_LIVE_TURN_LIMIT:

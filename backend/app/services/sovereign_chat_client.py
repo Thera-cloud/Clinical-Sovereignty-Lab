@@ -810,6 +810,8 @@ async def generate_complete(
     program_id: Optional[str] = None,
     image_data_url: Optional[str] = None,
     history_messages: Optional[List[Dict]] = None,
+    session_stick_key: Optional[str] = None,
+    remember_session: bool = True,
 ) -> Tuple[str, str]:
     """
     Non-streaming generation with ODPE routing. Returns (full_text, provider).
@@ -820,6 +822,14 @@ async def generate_complete(
     _ensure_config()
 
     primary = _resolve_provider_for_signal(odpe_signal, domain=domain)
+    # Same stick as generate_streaming: hold the session model, and let a
+    # heavy turn move a light session up. Image turns do not move the stick.
+    _stick = (session_stick_key or "").strip()
+    if _stick and not image_data_url:
+        _held = held_session_provider(_stick)
+        _heavy = (odpe_signal or "").upper() in ("TENSION", "DEEP_TENSION")
+        if _held and not (_held == "workers_ai" and _heavy):
+            primary = _held
     providers_to_try = [primary] + _FALLBACK_CHAIN.get(primary, [])
     seen = set()
     _t0 = time.monotonic()
@@ -888,6 +898,8 @@ async def generate_complete(
                     text = await _complete_ollama(messages, model, temperature, max_tokens,
                                                  _timeout_for_model(model))
                     _sovereign_stats["total_sovereign"] += 1
+                    if remember_session and not image_data_url:
+                        remember_session_provider(_stick, "sovereign")
                     asyncio.ensure_future(_track(provider="sovereign", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                     return (_restore(text), "sovereign")
                 finally:
@@ -896,12 +908,16 @@ async def generate_complete(
             elif provider == "workers_ai" and _WORKERS_AI_URL and _WORKERS_AI_TOKEN:
                 text = await _complete_workers_ai(messages, temperature, max_tokens)
                 _sovereign_stats["total_workers_ai"] += 1
+                if remember_session and not image_data_url:
+                    remember_session_provider(_stick, "workers_ai")
                 asyncio.ensure_future(_track(provider="workers_ai", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return (_restore(text), "workers_ai")
 
             elif provider == "azure" and _AZURE_ENDPOINT and _AZURE_KEY:
                 text = await _complete_azure(messages, temperature, max_tokens)
                 _sovereign_stats["total_azure_fallback"] += 1
+                if remember_session and not image_data_url:
+                    remember_session_provider(_stick, "azure")
                 asyncio.ensure_future(_track(provider="azure", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return (_restore(text), "azure")
 
@@ -910,6 +926,8 @@ async def generate_complete(
                     try:
                         text = await _complete_grok(messages, temperature, max_tokens)
                         _sovereign_stats["total_grok"] += 1
+                        if remember_session and not image_data_url:
+                            remember_session_provider(_stick, "grok")
                         asyncio.ensure_future(_track(provider="grok", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                         return (_restore(text), "grok")
                     except RateLimitError as rl:
