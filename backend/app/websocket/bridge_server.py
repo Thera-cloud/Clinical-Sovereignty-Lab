@@ -2043,6 +2043,7 @@ REGISTRY_RELOAD_CHANNEL = "nate:registry_reload"
 PAYMENT_CONFIRMED_CHANNEL = "nate:payment_confirmed"  # QUANTUM-CRYSTAL-ARCH
 SESSION_NEGOTIATION_CHANNEL = "nate:session_negotiation"  # QUANTUM-CRYSTAL-ARCH
 COMMITMENT_TOUCH_CHANNEL = "nate:commitment_touch"  # QUANTUM-CRYSTAL-ARCH
+_CACHE_SYNC_LOOP = None  # QUANTUM-CRYSTAL-ARCH: loop that owns the Postgres pool
 
 
 def _cache_sync_blocking_listener():
@@ -2148,10 +2149,14 @@ def _handle_user_reload(raw_data: str):
         return
 
     import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
+    # QUANTUM-CRYSTAL-ARCH: this handler runs on the Redis thread. A fresh
+    # loop cannot use the bridge pool ("Future attached to a different loop").
+    loop = _CACHE_SYNC_LOOP
+    if loop is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
 
     async def _do_reload():
         try:
@@ -2172,12 +2177,7 @@ def _handle_user_reload(raw_data: str):
     if loop and loop.is_running():
         loop.call_soon_threadsafe(lambda: loop.create_task(_do_reload()))
     else:
-        import concurrent.futures
-        new_loop = asyncio.new_event_loop()
-        try:
-            new_loop.run_until_complete(_do_reload())
-        finally:
-            new_loop.close()
+        print(f"[USER RELOAD] {username} skipped — bridge loop not ready", flush=True)
 
 
 def _handle_registry_reload():
@@ -2195,15 +2195,11 @@ def _handle_registry_reload():
             _registry_cache = loaded
             print(f"[REGISTRY RELOAD] Reloaded {len(loaded)} entries from PG", flush=True)
 
-    try:
-        loop = asyncio.get_running_loop()
+    loop = _CACHE_SYNC_LOOP  # QUANTUM-CRYSTAL-ARCH
+    if loop and loop.is_running():
         loop.call_soon_threadsafe(lambda: loop.create_task(_do_full_reload()))
-    except RuntimeError:
-        new_loop = asyncio.new_event_loop()
-        try:
-            new_loop.run_until_complete(_do_full_reload())
-        finally:
-            new_loop.close()
+    else:
+        print("[REGISTRY RELOAD] skipped — bridge loop not ready", flush=True)
 
 
 async def _pull_coaches_into_registry(registry, hardware_id=None, pending_only=False):
@@ -2315,7 +2311,9 @@ def _handle_commitment_touch_fanout(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
 
 async def _balance_sync_listener():
     """Start the blocking Redis pub/sub listener in a daemon thread."""
+    global _CACHE_SYNC_LOOP
     import threading
+    _CACHE_SYNC_LOOP = asyncio.get_running_loop()  # QUANTUM-CRYSTAL-ARCH
     t = threading.Thread(target=_cache_sync_blocking_listener, daemon=True, name="cache_sync")
     t.start()
 
