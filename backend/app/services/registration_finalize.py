@@ -224,7 +224,10 @@ async def finalize_signup(
         "discount_code": discount_code,
     }
 
+    w9_doc = None
     if role == "COACH":
+        if isinstance(profile_fields, dict):
+            w9_doc = profile_fields.pop("w9_doc", None)
         new_profile["subscription_status"] = "PENDING_VERIFICATION"
         new_profile["assigned_clients"] = []
         new_profile["specializations"] = profile_fields.get("specializations", [])
@@ -374,6 +377,16 @@ async def finalize_signup(
         )
     except Exception as _nl_err:
         logger.warning("newsletter opt-in skipped for %s: %s", username, _nl_err)
+
+    if role == "COACH" and isinstance(w9_doc, dict):
+        try:
+            from app.services.api_server import _get_auth_redis
+            from app.services.coach_w9_vault import stash_w9_doc
+
+            redis = await _get_auth_redis()
+            await stash_w9_doc(redis, hardware_id, w9_doc)
+        except Exception as w9_err:
+            logger.warning("w9 stash skipped for %s: %s", username, w9_err)
 
     return True, "REGISTRATION_SUCCESS"
 

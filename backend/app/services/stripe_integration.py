@@ -169,6 +169,61 @@ def _tier_from_subscription_payload(sub: Dict[str, Any]) -> str:
     return _tier_from_stripe_price_id(pid)
 
 
+def _stripe_period(sub: Dict[str, Any]):
+    """Period bounds. API 2025-12-15.clover keeps them on the subscription item."""
+    start = sub.get("current_period_start")
+    end = sub.get("current_period_end")
+    if not end:
+        items = (sub.get("items") or {}).get("data") or []
+        if items:
+            start = start or items[0].get("current_period_start")
+            end = items[0].get("current_period_end")
+    return start, end
+
+
+def _invoice_subscription_id(invoice: Dict[str, Any]):
+    """Subscription id. Newer invoices nest it under parent.subscription_details."""
+    sid = invoice.get("subscription")
+    if isinstance(sid, dict):
+        sid = sid.get("id")
+    if sid:
+        return sid
+    parent = invoice.get("parent") or {}
+    details = parent.get("subscription_details") or {}
+    sid = details.get("subscription")
+    if isinstance(sid, dict):
+        return sid.get("id")
+    return sid or None
+
+
+def _user_sub_status(stripe_status: str) -> str:
+    """Map a Stripe subscription status onto users.subscription_status."""
+    return {
+        "active": "ACTIVE",
+        "trialing": "TRIAL_ACTIVE",
+        "past_due": "GRACE_PERIOD",
+        "unpaid": "GRACE_PERIOD",
+        "incomplete": "GRACE_PERIOD",
+        "canceled": "CANCELLED",
+        "cancelled": "CANCELLED",
+        "incomplete_expired": "CANCELLED",
+        "paused": "SUSPENDED",
+    }.get((stripe_status or "").lower(), "ACTIVE")
+
+
+def _table_sub_status(stripe_status: str) -> str:
+    s = (stripe_status or "").lower()
+    if s == "active":
+        return "ACTIVE"
+    if s in ("canceled", "cancelled", "incomplete_expired"):
+        return "CANCELLED"
+    if s in ("past_due", "unpaid", "incomplete"):
+        return "PAST_DUE"
+    if s == "trialing":
+        return "TRIALING"
+    return "ACTIVE"
+
+
 # =============================================================================
 # CORPORATE TIERS (Hybrid: flat platform fee + employee subsidy)
 # =============================================================================
@@ -2194,9 +2249,9 @@ class StripeWebhookHandler:
                 _logger.exception(
                     "session invoice.paid mark failed id=%s", invoice.get("id")
                 )
-            if not invoice.get("subscription"):
+            if not _invoice_subscription_id(invoice):
                 return
-        subscription_id = invoice.get("subscription")
+        subscription_id = _invoice_subscription_id(invoice)
         try:
             if not subscription_id:
                 return
@@ -2221,16 +2276,43 @@ class StripeWebhookHandler:
             )
 
             sub = stripe.Subscription.retrieve(subscription_id)
-            await self.db.execute(
+            start_ts, end_ts = _stripe_period(sub)
+            updated = await self.db.execute(
                 """
                 UPDATE subscriptions
-                SET current_period_start = to_timestamp($1), current_period_end = to_timestamp($2), status = 'ACTIVE'
+                SET current_period_start = COALESCE(to_timestamp(NULLIF($1, 0)), current_period_start),
+                    current_period_end = COALESCE(to_timestamp(NULLIF($2, 0)), current_period_end),
+                    status = 'ACTIVE'
                 WHERE stripe_subscription_id = $3
                 """,
-                sub["current_period_start"],
-                sub["current_period_end"],
+                int(start_ts or 0),
+                int(end_ts or 0),
                 subscription_id,
             )
+            if str(updated).endswith("0"):
+                await self.db.execute(
+                    """
+                    INSERT INTO subscriptions (
+                        user_id, stripe_subscription_id, stripe_customer_id,
+                        tier, status, current_period_start, current_period_end
+                    )
+                    VALUES ($1, $2, $3, $4, 'ACTIVE',
+                            to_timestamp(NULLIF($5, 0)), to_timestamp(NULLIF($6, 0)))
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                        stripe_customer_id = EXCLUDED.stripe_customer_id,
+                        tier = EXCLUDED.tier,
+                        status = 'ACTIVE',
+                        current_period_start = COALESCE(EXCLUDED.current_period_start, subscriptions.current_period_start),
+                        current_period_end = COALESCE(EXCLUDED.current_period_end, subscriptions.current_period_end)
+                    """,
+                    user_id,
+                    subscription_id,
+                    customer_id,
+                    _tier_from_subscription_payload(sub),
+                    int(start_ts or 0),
+                    int(end_ts or 0),
+                )
 
             sub_row = await self.db.fetchrow(
                 "SELECT tier FROM subscriptions WHERE stripe_subscription_id = $1",
@@ -2289,19 +2371,28 @@ class StripeWebhookHandler:
         )
         
         if user_id:
+            err = invoice.get("last_payment_error") or {}
+            reason = ""
+            if isinstance(err, dict):
+                reason = str(err.get("code") or err.get("decline_code") or "")[:120]
             await self.db.execute(
                 """
-                INSERT INTO payment_history (user_id, stripe_invoice_id, amount_cents, status, event_type)
-                VALUES ($1, $2, $3, 'FAILED', 'invoice.payment_failed')
+                INSERT INTO payment_history (
+                    user_id, stripe_invoice_id, amount_cents, status, event_type, failure_reason
+                )
+                VALUES ($1, $2, $3, 'FAILED', 'invoice.payment_failed', $4)
                 """,
-                user_id, invoice['id'], invoice['amount_due']
+                user_id, invoice['id'], invoice['amount_due'], reason or None,
             )
-            
-            # Update subscription status
-            await self.db.execute(
-                "UPDATE subscriptions SET status = 'PAST_DUE' WHERE user_id = $1",
-                user_id
-            )
+
+            # Only the subscription on this invoice. A manual invoice must not
+            # mark every subscription for the customer past due.
+            failed_sub = _invoice_subscription_id(invoice)
+            if failed_sub:
+                await self.db.execute(
+                    "UPDATE subscriptions SET status = 'PAST_DUE' WHERE stripe_subscription_id = $1",
+                    failed_sub,
+                )
             
             # Send payment failed email
             try:
@@ -2445,7 +2536,7 @@ class StripeWebhookHandler:
 
         if ok:
             await self.db.execute(
-                "UPDATE pending_signups SET status='completed', consumed_at=NOW() WHERE id=$1",
+                "UPDATE pending_signups SET status='completed', consumed_at=NOW(), payload = payload - 'w9_doc' WHERE id=$1",
                 signup_uuid,
             )
             session_meta = session.get("metadata") or {}
@@ -3129,14 +3220,24 @@ class StripeWebhookHandler:
         if not username:
             print(f">>> [STRIPE] Coach upgrade missing username in metadata")
             return
+        print(
+            f">>> [STRIPE] Coach upgrade payment for {username} was not applied. "
+            "Client logins stay clients."
+        )
+        sub_id = session.get("subscription")
+        if isinstance(sub_id, dict):
+            sub_id = sub_id.get("id")
+        intent_id = session.get("payment_intent")
+        if isinstance(intent_id, dict):
+            intent_id = intent_id.get("id")
         try:
-            print(
-                f">>> [STRIPE] Coach upgrade payment for {username} was not applied. "
-                "Client logins stay clients. Refund this Checkout in Stripe."
-            )
-            return
+            if sub_id:
+                stripe.Subscription.cancel(sub_id)
+            if intent_id and session.get("payment_status") == "paid":
+                stripe.Refund.create(payment_intent=intent_id)
+            print(f">>> [STRIPE] Coach upgrade for {username} canceled and refunded")
         except Exception as e:
-            print(f">>> [STRIPE] Coach upgrade processing failed for {username}: {e}")
+            print(f">>> [STRIPE] Coach upgrade refund failed for {username}: {e}")
 
     def _get_trial_redis(self):
         """Get Redis client for trial signup keys (via wisdom_mesh)."""
@@ -3226,11 +3327,9 @@ class StripeWebhookHandler:
 
         subscription_id = subscription["id"]
         tier_norm = _tier_from_subscription_payload(subscription)
-        new_status = (
-            "ACTIVE"
-            if subscription["status"] == "active"
-            else subscription["status"].upper()
-        )
+        new_status = _table_sub_status(subscription.get("status") or "")
+        user_status = _user_sub_status(subscription.get("status") or "")
+        _start, period_end = _stripe_period(subscription)
 
         old_row = await self.db.fetchrow(
             """
@@ -3242,6 +3341,12 @@ class StripeWebhookHandler:
             subscription_id,
         )
         old_tier = normalize_tier(old_row["old_tier"]) if old_row else TIER_TRIAL
+        if (
+            tier_norm in (TIER_TRIAL, "TRIAL")
+            and old_tier not in (TIER_TRIAL, "TRIAL")
+            and user_status != "CANCELLED"
+        ):
+            tier_norm = old_tier
         uname = old_row["username"] if old_row else None
         is_client = old_row and (old_row.get("role") == "CLIENT")
 
@@ -3250,14 +3355,14 @@ class StripeWebhookHandler:
             UPDATE subscriptions SET
                 tier = $1,
                 status = $2,
-                current_period_end = to_timestamp($3),
+                current_period_end = COALESCE(to_timestamp(NULLIF($3, 0)), current_period_end),
                 cancel_at_period_end = $4
             WHERE stripe_subscription_id = $5
             """,
             tier_norm,
             new_status,
-            subscription["current_period_end"],
-            subscription["cancel_at_period_end"],
+            int(period_end or 0),
+            subscription.get("cancel_at_period_end"),
             subscription_id,
         )
 
@@ -3269,12 +3374,13 @@ class StripeWebhookHandler:
                       || jsonb_build_object(
                            'tier', $1::text,
                            'subscription_plan', $1::text,
+                           'subscription_status', $2::text,
                            'can_access_nate', $4::boolean
                          )
                 WHERE username = $3
                 """,
                 tier_norm,
-                new_status,
+                user_status,
                 uname,
                 can_access_nate(tier_norm),
             )

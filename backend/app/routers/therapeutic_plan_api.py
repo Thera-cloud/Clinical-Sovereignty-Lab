@@ -116,6 +116,15 @@ async def list_coach_plans(
             WHERE (
                 p.coach_id = $1
                 OR p.coach_id = $2
+                OR p.coach_id IN (
+                    SELECT assistant_id FROM coach_hierarchy
+                    WHERE master_coach_id IN ($1, $2) AND status = 'active'
+                )
+                OR p.coach_id IN (
+                    SELECT u2.username FROM coach_hierarchy ch
+                    JOIN users u2 ON u2.hardware_id = ch.assistant_id
+                    WHERE ch.master_coach_id IN ($1, $2) AND ch.status = 'active'
+                )
                 OR (
                     COALESCE(p.source, 'coach') = 'cycle_skill'
                     AND (
@@ -123,6 +132,14 @@ async def list_coach_plans(
                         OR u.profile_data->>'assigned_coach_id' = $1
                         OR LOWER(COALESCE(u.profile_data->>'assigned_coach', ''))
                             = LOWER($2)
+                        OR u.profile_data->>'coach_id' IN (
+                            SELECT assistant_id FROM coach_hierarchy
+                            WHERE master_coach_id IN ($1, $2) AND status = 'active'
+                        )
+                        OR u.profile_data->>'assigned_coach_id' IN (
+                            SELECT assistant_id FROM coach_hierarchy
+                            WHERE master_coach_id IN ($1, $2) AND status = 'active'
+                        )
                     )
                 )
             )
@@ -205,6 +222,31 @@ async def assign_plan(
         if not title or not total_steps or not steps:
             raise HTTPException(422, "title, total_steps, and step_definitions required")
 
+        if (coach.get("role") or "").upper() == "COACH":
+            client = await conn.fetchrow(
+                """
+                SELECT profile_data FROM users
+                WHERE username = $1 OR hardware_id = $1
+                LIMIT 1
+                """,
+                body.user_id,
+            )
+            if not client:
+                raise HTTPException(404, "Client not found")
+            profile = client["profile_data"] or {}
+            if isinstance(profile, str):
+                try:
+                    profile = json.loads(profile)
+                except Exception:
+                    profile = {}
+            from app.services.coach_client_messenger import coach_may_view_client_conn
+
+            allowed = await coach_may_view_client_conn(
+                conn, coach, profile, coach.get("username") or ""
+            )
+            if not allowed:
+                raise HTTPException(403, "COACH_NOT_ASSIGNED")
+
         row = await conn.fetchrow(
             """
             INSERT INTO nate_therapeutic_plans
@@ -283,8 +325,27 @@ async def advance_plan(
             raise HTTPException(404, "Active plan not found")
         if plan["coach_id"] and plan["coach_id"] != coach_hw:
             role = (coach.get("role") or "").upper()
+            coach_uname = (coach.get("username") or "").strip()
             if role != "ADMIN":
-                raise HTTPException(403, "Not plan owner")
+                master = await conn.fetchval(
+                    """
+                    SELECT 1 FROM coach_hierarchy ch
+                    LEFT JOIN users u
+                      ON u.hardware_id = ch.assistant_id OR u.username = ch.assistant_id
+                    WHERE ch.status = 'active'
+                      AND ch.master_coach_id IN ($1, $2)
+                      AND (
+                          ch.assistant_id = $3
+                          OR u.hardware_id = $3
+                          OR u.username = $3
+                      )
+                    """,
+                    coach_hw,
+                    coach_uname,
+                    plan["coach_id"],
+                )
+                if not master:
+                    raise HTTPException(403, "Not plan owner")
 
         new_step = min(int(plan["current_step"]) + 1, int(plan["total_steps"]))
         log_entry = {

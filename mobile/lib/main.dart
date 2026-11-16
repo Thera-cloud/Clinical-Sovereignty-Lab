@@ -10573,6 +10573,12 @@ class _SignUpWizardState extends State<SignUpWizard> {
           'signature': _w9SignatureCtrl.text.trim(),
           'signed_date': DateTime.now().toIso8601String(),
         };
+        if (_w9DocBase64 != null && _w9DocFileName != null) {
+          body['w9_doc'] = {
+            'filename': _w9DocFileName,
+            'data': _w9DocBase64,
+          };
+        }
       }
 
       final resp = await http.post(uri,

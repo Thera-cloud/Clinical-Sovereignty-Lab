@@ -2154,6 +2154,13 @@ def _handle_user_reload(raw_data: str):
         loop = None
 
     async def _do_reload():
+        try:
+            from app.services.coach_w9_vault import consume_pending_w9
+            pool = getattr(_pg_user_store, "pool", None) or getattr(_pg_user_store, "_pool", None)
+            if pool:
+                await consume_pending_w9(pool, VAULT_ROOT, username)
+        except Exception as w9_err:
+            print(f"[USER RELOAD] W-9 file skipped for {username}: {w9_err}", flush=True)
         result = await _pg_user_store.reload_user(username)
         if result:
             reg_key, entry = result
@@ -14450,7 +14457,7 @@ async def handle_client(websocket, path=None):
                     if _stripe_first and _reg_tier in ("STANDARD", "TOP_TIER"):
                         await websocket.send(json.dumps({"type": "error", "message": "Paid plans require payment first. Please use the order review flow."}))
                         continue
-                    if _stripe_first and d.get("role") == "COACH" and d.get("selected_dojos"):
+                    if _stripe_first and d.get("role") == "COACH":
                         await websocket.send(json.dumps({"type": "error", "message": "Coach signup finishes at coach.sovereignsanctuary.net. Use a new username. Your client login stays separate."}))
                         continue
                     print(f">>> [REG] Processing register_request for username={d.get('username')}, role={d.get('role')}")

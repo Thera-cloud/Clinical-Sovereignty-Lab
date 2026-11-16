@@ -488,6 +488,7 @@ class PrepareRequest(BaseModel):
     auth_token: Optional[str] = None
     # Coach signup (separate username). Stored on the new COACH row.
     w9_data: Optional[dict] = None
+    w9_doc: Optional[dict] = None
     coach_ethics_accepted: Optional[bool] = None
 
 
@@ -729,6 +730,13 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
         w9 = body.w9_data if isinstance(body.w9_data, dict) else None
         if w9 and str(w9.get("legal_name") or "").strip():
             profile_fields["w9_data"] = w9
+        w9_doc = body.w9_doc if isinstance(body.w9_doc, dict) else None
+        doc_data = (w9_doc or {}).get("data") or ""
+        if w9_doc and w9_doc.get("filename") and doc_data and len(doc_data) <= 12_000_000:
+            profile_fields["w9_doc"] = {
+                "filename": str(w9_doc.get("filename"))[:80],
+                "data": doc_data,
+            }
 
     # ------------------------------------------------------------------
     # Dependent path: a CLIENT signing up under a parent on Sovereign Circle.
