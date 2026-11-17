@@ -287,12 +287,33 @@ async def link_new_coach_to_coachn(db, assistant_hardware_id: str) -> None:
 
 async def _expire_due(db, username: str) -> None:
     rows = await db.fetch(
+        """SELECT coach_username, coach_hardware_id
+             FROM coach_payment_holds
+            WHERE LOWER(coach_username) = LOWER($1)
+              AND status = 'open'
+              AND deadline_at <= NOW()""",
+        username,
+    )
+    if not rows:
+        return
+    master = await _coachn(db)
+    if not master:
+        logger.warning("coach hold transfer skipped: CoachN missing")
+        await db.execute(
+            """UPDATE coach_payment_holds
+                  SET status = 'expired'
+                WHERE LOWER(coach_username) = LOWER($1)
+                  AND status = 'open'
+                  AND deadline_at <= NOW()""",
+            username,
+        )
+        return
+    await db.execute(
         """UPDATE coach_payment_holds
               SET status = 'expired', transferred_at = NOW(), session_sync = 'move'
             WHERE LOWER(coach_username) = LOWER($1)
               AND status = 'open'
-              AND deadline_at <= NOW()
-            RETURNING coach_username, coach_hardware_id""",
+              AND deadline_at <= NOW()""",
         username,
     )
     for row in rows:
@@ -468,15 +489,16 @@ async def _notify_opened(db, coach_row, invoice_id: str) -> None:
         "New bookings are paused until the invoice is paid."
     )
     await _send_email(coach_row["email"], "Coach payment was not captured", body_coach)
+    if master:
+        await _send_email(master["email"], "Assistant coach payment was not captured", body_coach)
+        docket = "Scheduled sessions:\n" + ("\n".join(schedule) if schedule else "None.")
+        await _send_email(master["email"], "Assistant coach schedule", docket)
     _sms(
         coach_row["phone"],
         "Your coach subscription payment was not captured. You have 48 hours to update it. Check your email.",
     )
     if master:
-        await _send_email(master["email"], "Assistant coach payment was not captured", body_coach)
         _sms(master["phone"], "An assistant coach payment was not captured. Check email for the schedule.")
-        docket = "Scheduled sessions:\n" + ("\n".join(schedule) if schedule else "None.")
-        await _send_email(master["email"], "Assistant coach schedule", docket)
     await db.execute(
         """UPDATE coach_payment_holds
               SET docket_sent_at = NOW()
@@ -509,16 +531,34 @@ async def _docket_lines(db, username: str, hardware_id: str) -> List[str]:
     return lines
 
 
+_BOOKING_NOTICE_KEYS = set()
+
+
+def _booking_notice_key(coach_username: str, client_name: str, when_text: str) -> str:
+    return "|".join([
+        str(coach_username or "").strip().lower(),
+        str(client_name or "").strip().lower(),
+        str(when_text or "").strip().lower(),
+    ])
+
+
 async def _email_booking_request(db, client_name: str, when_text: str, coach_username: str) -> None:
     master = await _coachn(db)
     if not master or not master["email"]:
+        return
+    key = _booking_notice_key(coach_username, client_name, when_text)
+    if key in _BOOKING_NOTICE_KEYS:
         return
     who = client_name or "A client"
     text = (
         f"{who} asked to book {when_text or 'a session'} with {coach_username}. "
         "New bookings are paused until that coach's invoice is paid."
     )
-    await _send_email(master["email"], "Booking request while a coach payment is open", text)
+    sent = await _send_email(master["email"], "Booking request while a coach payment is open", text)
+    if sent:
+        if len(_BOOKING_NOTICE_KEYS) > 500:
+            _BOOKING_NOTICE_KEYS.clear()
+        _BOOKING_NOTICE_KEYS.add(key)
 
 
 async def _email_clients_transferred(db, old_username: str) -> None:
@@ -536,9 +576,9 @@ async def _email_clients_transferred(db, old_username: str) -> None:
         await _send_email(row["email"], "A note about your coach", text)
 
 
-async def _send_email(to_email: str, subject: str, text: str) -> None:
+async def _send_email(to_email: str, subject: str, text: str) -> bool:
     if not to_email:
-        return
+        return False
     try:
         from app.services.notifications_service import EmailService
 
@@ -547,8 +587,10 @@ async def _send_email(to_email: str, subject: str, text: str) -> None:
             "subject_line": subject,
             "body_text": text,
         })
+        return True
     except Exception as exc:
         logger.warning("coach hold email skipped: %s", exc)
+        return False
 
 
 def _sms(phone: str, body: str) -> None:

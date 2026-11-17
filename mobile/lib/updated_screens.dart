@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart'
-    show kDebugMode, kIsWeb, debugPrint, VoidCallback;
+    show kDebugMode, kIsWeb, debugPrint, defaultTargetPlatform, TargetPlatform, VoidCallback;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart';
@@ -6963,6 +6963,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   List<Map<String, dynamic>> _selectedFolderNotes = [];
   bool _notesLoading = false;
   bool _isLoading = true;
+  bool _coachPaymentWall = false;
   String _statusMessage = "Initializing...";
 
   // Client filter/search state (shared across Clients, Insights, Briefings)
@@ -10749,6 +10750,32 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     }));
   }
 
+  Future<void> _openCoachPaymentWall() async {
+    if (mounted) setState(() => _coachPaymentWall = true);
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      await launchUrl(
+        Uri.parse('https://coach.sovereignsanctuary.net'),
+        mode: LaunchMode.externalApplication,
+      );
+      return;
+    }
+    final token = _authToken ?? widget.currentUserProfile['token']?.toString() ?? '';
+    if (token.isEmpty) return;
+    try {
+      final resp = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/portal'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final url = jsonDecode(resp.body)['portal_url'];
+        if (url != null) await launchCheckoutUrl(url.toString());
+      }
+    } catch (_) {}
+  }
+
   void _handleSocketMessage(dynamic message) {
     try {
       final data = jsonDecode(message);
@@ -10784,8 +10811,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         }
         final profile = data['profile'] as Map<String, dynamic>?;
         _coachHardwareId = profile?['hardware_id']?.toString();
+        if (profile != null && profile['coach_hold_blocked_dojos'] != null) {
+          widget.currentUserProfile['coach_hold_blocked_dojos'] =
+              profile['coach_hold_blocked_dojos'];
+        }
+        if (profile?['coach_payment_required'] == true) {
+          if (mounted) setState(() => _coachPaymentWall = true);
+          _openCoachPaymentWall();
+          return;
+        }
         _pushDojoIframeAuthIfNeeded();
         _fetchDashboard();
+      } else if (data['type'] == 'coach_payment_required') {
+        if (mounted) setState(() => _coachPaymentWall = true);
+        _openCoachPaymentWall();
       } else if (data['type'] == 'coach_clients') {
         if (mounted) {
           setState(() {
@@ -14096,6 +14135,31 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   @override
   Widget build(BuildContext context) {
+    if (_coachPaymentWall) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0A0F),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Payment is required before Coach Command opens.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFFFD700), fontSize: 18),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _openCoachPaymentWall,
+                  child: const Text('Update payment'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final isMobile = MediaQuery.of(context).size.width < 768;
 
     final scaffold = Scaffold(

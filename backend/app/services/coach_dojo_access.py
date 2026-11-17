@@ -51,6 +51,16 @@ def active_dojo_keys(profile: Any, blocked: Optional[Iterable[str]] = None) -> L
     return [key for key in keys if key not in blocked_set]
 
 
+def gate_mentor_start(profile: Any, requested: Any, blocked: Optional[Iterable[str]] = None):
+    """Paid keys the coach asked for. An empty result is an error, not a therapist fallback."""
+    paid = set(active_dojo_keys(profile, blocked))
+    asked = [str(item) for item in (requested or []) if item]
+    allowed = [key for key in asked if key in paid]
+    if not allowed:
+        return [], "DOJO_NOT_SUBSCRIBED"
+    return allowed, ""
+
+
 def patch_future_sessions(
     sessions: List[Dict[str, Any]],
     old_ids: Iterable[str],

@@ -105,6 +105,20 @@ class DojoMentorService extends ChangeNotifier {
   // DOJO SUBSCRIPTIONS FROM PROFILE
   // ---------------------------------------------------------------------------
 
+  /// Date-only access_end_date stays on the local calendar day.
+  static DateTime? accessEndDay(String raw) {
+    final end = raw.trim();
+    if (end.length >= 10 && end[4] == '-' && end[7] == '-') {
+      final y = int.tryParse(end.substring(0, 4));
+      final m = int.tryParse(end.substring(5, 7));
+      final d = int.tryParse(end.substring(8, 10));
+      if (y != null && m != null && d != null) return DateTime(y, m, d);
+    }
+    final parsed = DateTime.tryParse(end);
+    if (parsed == null) return null;
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
   /// Paid DOJO keys. A missing map uses selected_dojos. Neither means none.
   static List<String> availableDojosFromProfile(Map<String, dynamic> profile) {
     final blocked = <String>{};
@@ -129,7 +143,7 @@ class DojoMentorService extends ChangeNotifier {
             if (end.isEmpty) {
               keys.add(key.toString());
             } else {
-              final parsed = DateTime.tryParse(end);
+              final parsed = accessEndDay(end);
               if (parsed != null && !parsed.isBefore(day)) {
                 keys.add(key.toString());
               }

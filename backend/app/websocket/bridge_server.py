@@ -2166,6 +2166,15 @@ def _handle_user_reload(raw_data: str):
                 await consume_pending_w9(pool, VAULT_ROOT, username)
         except Exception as w9_err:
             print(f"[USER RELOAD] W-9 file skipped for {username}: {w9_err}", flush=True)
+        # QUANTUM-CRYSTAL-ARCH — paid/expired holds patch sessions.json on this reload
+        try:
+            if os.getenv("ENABLE_COACH_PAYMENT_HOLD", "true").strip().lower() in ("1", "true", "yes", "on"):
+                from app.services.coach_payment_hold import sync_hold_sessions as _sync_hold_sessions
+                _hold_pool = getattr(_pg_user_store, "pool", None) or getattr(_pg_user_store, "_pool", None)
+                if _hold_pool:
+                    await _sync_hold_sessions(_hold_pool, str(SESSIONS_FILE))
+        except Exception as _hold_sync_err:
+            print(f"[USER RELOAD] hold session file skipped: {_hold_sync_err}", flush=True)
         result = await _pg_user_store.reload_user(username)
         if result:
             reg_key, entry = result
@@ -32790,13 +32799,39 @@ IMPORTANT:
                         _client_id = d.get("client_id")
                         _mode = d.get("session_mode", "coach_client")
                         _dojos = d.get("active_dojos", [])
+                        # QUANTUM-CRYSTAL-ARCH — server paid map, not the client list
+                        if os.getenv("ENABLE_DOJO_PAID_START", "true").strip().lower() in ("1", "true", "yes", "on"):
+                            from app.services.coach_dojo_access import gate_mentor_start as _gate_mentor_start
+                            _blocked = []
+                            try:
+                                from app.services.coach_payment_hold import blocked_dojos_for as _blocked_dojos
+                                _who = (current_profile or {}).get("username") or ""
+                                _blocked = await _blocked_dojos(db_pool, _who)
+                            except Exception as _bd_err:
+                                print(f">>> [DOJO_MENTOR] blocked lookup skipped: {_bd_err}")
+                            _dojos, _gate_err = _gate_mentor_start(current_profile, _dojos, _blocked)
+                            if _gate_err:
+                                await websocket.send(json.dumps({
+                                    "type": "error", "handler": "dojo_mentor_start", "message": _gate_err,
+                                }))
+                                continue
                         meeting = await _dojo_zoom.create_mentored_meeting(
                             uid, topic=d.get("topic", "Coaching Session"),
                             session_mode=_mode, active_dojos=_dojos,
                         )
-                        await _dojo_zoom.start_mentor_session(
+                        if isinstance(meeting, dict) and meeting.get("error"):
+                            await websocket.send(json.dumps({
+                                "type": "error", "handler": "dojo_mentor_start", "message": meeting["error"],
+                            }))
+                            continue
+                        _started = await _dojo_zoom.start_mentor_session(
                             _session_id, uid, _client_id, _mode, _dojos, meeting,
                         )
+                        if isinstance(_started, dict) and _started.get("error"):
+                            await websocket.send(json.dumps({
+                                "type": "error", "handler": "dojo_mentor_start", "message": _started["error"],
+                            }))
+                            continue
                         await websocket.send(json.dumps({
                             "type": "dojo_mentor_started",
                             "session_id": _session_id,
