@@ -152,13 +152,29 @@
     </header>
     <div class="main-layout">
         <div class="chat-section">
-            <div class="mode-tabs" id="modeTabs">
-                <button class="mode-tab active" onclick="setDojoMode('therapist', this)">🧠 Therapist</button>
-                <button class="mode-tab" onclick="setDojoMode('project_pm', this)">📋 Project PM</button>
-                <button class="mode-tab" onclick="setDojoMode('business', this)">💼 Business</button>
-                <button class="mode-tab" onclick="setDojoMode('cnc', this)">⚙️ CNC</button>
-                <button class="mode-tab" onclick="setDojoMode('mcat', this)">🩺 MCAT</button>
-                <button class="mode-tab" onclick="setDojoMode('teacher', this)">📚 Teacher</button>
+            <div id="coachNateCard" style="display:none; margin: 0 0 10px; padding: 10px 12px; border: 1px solid #C9A962; border-radius: 8px; color: #E8D5A3; font-size: 13px;">
+                Coach Nate uses the coaching-skill supervisor on the Training tab, not this simulator.
+                <div id="coachNateEthics" style="margin-top: 6px; color: #C9A962;">Sign Coach Ethics v1.0_2026 in Settings before those drills open.</div>
+                <button type="button" id="coachNateOpen" style="margin-top: 8px;" onclick="openCoachNate()">Open Coach Nate drills</button>
+            </div>
+            <div class="mode-tabs" id="modeTabs" style="display:none;">
+                <button class="mode-tab active" data-mode="therapist" onclick="setDojoMode('therapist', this)">🧠 Therapist</button>
+                <button class="mode-tab" data-mode="project_pm" onclick="setDojoMode('project_pm', this)">📋 Project PM</button>
+                <button class="mode-tab" data-mode="business" onclick="setDojoMode('business', this)">💼 Business</button>
+                <button class="mode-tab" data-mode="cnc" onclick="setDojoMode('cnc', this)">⚙️ CNC</button>
+                <button class="mode-tab" data-mode="mcat" onclick="setDojoMode('mcat', this)">🩺 MCAT</button>
+                <button class="mode-tab" data-mode="teacher" onclick="setDojoMode('teacher', this)">📚 Teacher</button>
+                <button class="mode-tab" data-mode="judge" onclick="setDojoMode('judge', this)">⚖️ Judge</button>
+            </div>
+            <div id="sessionKindBar" style="display:flex; gap:8px; margin: 8px 0;">
+                <button type="button" id="kindPractice" onclick="setSessionKind('practice')">Practice</button>
+                <button type="button" id="kindSimulation" onclick="setSessionKind('simulation')">Simulation</button>
+            </div>
+            <div id="judgeTools" style="display:none; margin: 0 0 10px; padding: 8px; border: 1px solid #333; border-radius: 8px;">
+                <input type="text" id="lexisSearchInput" placeholder="Search case law or statutes" style="width:100%; margin-bottom:6px;">
+                <button type="button" onclick="lexisSearch('cases')">Cases</button>
+                <button type="button" onclick="lexisSearch('statutes')">Statutes</button>
+                <div id="lexisResults" style="max-height:160px; overflow:auto; font-size:12px;"></div>
             </div>
             <div class="persona-bar">
                 <div class="persona-label" id="personaLabel">Select Test Persona</div>
@@ -329,6 +345,8 @@
         var socket = null;
         var currentPersona = "HOSTILE";
         var currentMode = "therapist";
+        var currentSessionKind = "simulation";
+        var allowedDojoKeys = [];
         var currentTestId = null;
         var messages = [];
         var latencies = [];
@@ -385,6 +403,14 @@
                 { id: "TECH_AI_INTEGRATION", label: "💻 Tech & AI" },
                 { id: "COMMUNICATION", label: "💬 Communication" },
                 { id: "CULTURAL_COMPETENCY", label: "🌍 Cultural Comp." }
+            ],
+            judge: [
+                { id: "BAR_EXAM_PREP", label: "📜 BAR Exam Prep" },
+                { id: "CASE_ANALYSIS", label: "📋 Case Analysis" },
+                { id: "COURTROOM_SIMULATION", label: "⚖️ Courtroom Sim" },
+                { id: "JUDICIAL_REASONING", label: "🏛️ Judicial Reasoning" },
+                { id: "ORAL_ARGUMENT", label: "🎤 Oral Argument" },
+                { id: "ETHICS_COMPLIANCE", label: "📖 Ethics & Compliance" }
             ]
         };
 
@@ -394,7 +420,8 @@
             business: "BUSINESS MODE — Business Acumen Coaching",
             cnc: "CNC MODE — Machining Expertise Training",
             mcat: "MCAT MODE — Medical Admissions Test Prep (Target: 517)",
-            teacher: "TEACHER MODE — Master Teacher Mentoring (8 Domains)"
+            teacher: "TEACHER MODE — Master Teacher Mentoring (8 Domains)",
+            judge: "JUDGE MODE — Judicial training"
         };
 
         function setDojoMode(mode, btn) {
@@ -430,7 +457,8 @@
                 business: "Select Business Scenario",
                 cnc: "Select CNC Challenge",
                 mcat: "Select MCAT Section",
-                teacher: "Select Teaching Domain"
+                teacher: "Select Teaching Domain",
+                judge: "Select Legal Scenario"
             };
             document.getElementById("personaLabel").textContent = labels[mode] || "Select Persona";
             
@@ -441,6 +469,8 @@
             document.getElementById("analysisCNC").style.display = (mode === "cnc") ? "" : "none";
             document.getElementById("analysisMCAT").style.display = (mode === "mcat") ? "" : "none";
             document.getElementById("analysisTeacher").style.display = (mode === "teacher") ? "" : "none";
+            var judgeTools = document.getElementById("judgeTools");
+            if (judgeTools) judgeTools.style.display = (mode === "judge") ? "" : "none";
             
             // Reset chat hint
             var hints = {
@@ -449,7 +479,8 @@
                 business: "Test business coaching scenarios with Little Nate",
                 cnc: "Discuss CNC machining challenges, processes, and troubleshooting",
                 mcat: "Practice MCAT questions and test your medical knowledge",
-                teacher: "Explore teaching scenarios across all 8 competency domains"
+                teacher: "Explore teaching scenarios across all 8 competency domains",
+                judge: "Practice legal argument in the Judge DOJO"
             };
             document.querySelector(".input-hint").textContent = "💡 " + (hints[mode] || hints.therapist);
             
@@ -581,6 +612,62 @@
                 });
         }
 
+        function openCoachNate() {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: "ln_open_coach_nate", source: "night_school_dojo" }, window.location.origin);
+            }
+        }
+
+        function setSessionKind(kind) {
+            currentSessionKind = kind === "practice" ? "practice" : "simulation";
+            var practice = document.getElementById("kindPractice");
+            var simulation = document.getElementById("kindSimulation");
+            if (practice) practice.style.outline = currentSessionKind === "practice" ? "1px solid #C9A962" : "";
+            if (simulation) simulation.style.outline = currentSessionKind === "simulation" ? "1px solid #C9A962" : "";
+        }
+
+        function applyDojoGate(profile) {
+            var role = ((profile || {}).role || "").toString().toUpperCase();
+            currentUserRole = role || currentUserRole;
+            var list = (profile || {}).active_dojos;
+            if (!Array.isArray(list)) list = role === "ADMIN" ? ["therapist","project_pm","business","cnc","mcat","teacher","judge","coach_nate"] : [];
+            allowedDojoKeys = list.map(function(key) { return String(key).toLowerCase(); });
+            var first = null;
+            var tabs = document.getElementById("modeTabs");
+            if (tabs) tabs.style.display = "";
+            document.querySelectorAll("#modeTabs .mode-tab").forEach(function(tab) {
+                var mode = tab.getAttribute("data-mode");
+                var show = role === "ADMIN" || allowedDojoKeys.indexOf(mode) !== -1;
+                tab.style.display = show ? "" : "none";
+                if (show && !first) first = tab;
+            });
+            var card = document.getElementById("coachNateCard");
+            if (card) card.style.display = (role === "ADMIN" || allowedDojoKeys.indexOf("coach_nate") !== -1) ? "" : "none";
+            var ethics = document.getElementById("coachNateEthics");
+            var signed = (profile || {}).coach_ethics_version === "v1.0_2026";
+            if (ethics) ethics.style.display = signed ? "none" : "";
+            var openNate = document.getElementById("coachNateOpen");
+            if (openNate) openNate.textContent = signed ? "Open Coach Nate drills" : "Open the ethics agreement";
+            var none = document.getElementById("dojoNone");
+            if (!first && role !== "ADMIN") {
+                if (!none) {
+                    document.getElementById("modeTabs").insertAdjacentHTML("afterend", '<p id="dojoNone">No paid DOJO is on this account.</p>');
+                }
+            } else if (none) {
+                none.remove();
+            }
+            if (first) setDojoMode(first.getAttribute("data-mode"), first);
+            setSessionKind(currentSessionKind);
+        }
+
+        function lexisSearch(searchType) {
+            if (currentMode !== "judge" || (allowedDojoKeys.indexOf("judge") === -1 && currentUserRole !== "ADMIN")) return;
+            var query = (document.getElementById("lexisSearchInput").value || "").trim();
+            if (!query || !socket || socket.readyState !== WebSocket.OPEN) return;
+            document.getElementById("lexisResults").textContent = "Searching";
+            socket.send(JSON.stringify({ type: "judge_lexis_search", search_type: searchType, query: query }));
+        }
+
         function init() {
             updateBackButton();
             // Coach Command iframe: parent sends ln_dojo_auth via postMessage (no URL token).
@@ -605,7 +692,8 @@
                     socket.send(JSON.stringify({
                         type: "auth",
                         token: tokenParam,
-                        hardware_id: hwParam
+                        hardware_id: hwParam,
+                        client_context: "dojo"
                     }));
                     return;
                 }
@@ -654,6 +742,18 @@
                 updateBackButton();
                 
                 console.log(">>> Dojo authenticated as " + role + " (fromCoachCommand: " + isFromCoachCommand + ")");
+                applyDojoGate(data.profile || {});
+                return;
+            }
+
+            if (data.type === "error") {
+                addMessage("nate", data.message || "DOJO_TURN_FAILED");
+                return;
+            }
+
+            if (data.type === "judge_lexis_results") {
+                var box = document.getElementById("lexisResults");
+                if (box) box.textContent = JSON.stringify(data.results || data.cases || data, null, 2).slice(0, 2000);
                 return;
             }
 
@@ -809,12 +909,17 @@
             
             // Send to Nate with simulation context including mode
             var modeLabel = currentMode.toUpperCase();
+            if (allowedDojoKeys.indexOf(currentMode) === -1 && currentUserRole !== "ADMIN") {
+                addMessage("nate", "DOJO_NOT_SUBSCRIBED");
+                return;
+            }
             socket.send(JSON.stringify({
-                type: "ask_nate_coaching",
-                query: "[DOJO SIMULATION - " + modeLabel + " / " + currentPersona + " PERSONA] " + text,
-                client_id: "SIMULATION",
-                mode: currentMode,
-                persona: currentPersona
+                type: "dojo_turn",
+                dojo_type: currentMode,
+                session_kind: currentSessionKind,
+                text: text,
+                persona: currentPersona,
+                client_context: "dojo"
             }));
         }
         

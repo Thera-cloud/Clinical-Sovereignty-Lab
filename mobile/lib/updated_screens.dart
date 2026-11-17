@@ -7165,6 +7165,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         if (_tabController.index == 4) {
           _tabController.animateTo(0);
         }
+      }, onCoachNate: () {
+        if (!mounted) return;
+        _tabController.animateTo(7);
       });
     }
   }

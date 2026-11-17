@@ -9092,6 +9092,7 @@ class AzureCortex:
         # context (e.g. "dojo" iframe). Without this filter, both parent and
         # iframe sockets receive the response and the iframe shows duplicates.
         _ctx = client_context  # local alias used in every _send below
+        _dojo_drill = (user_text or "").startswith("[DOJO PRACTICE]") or (user_text or "").startswith("[DOJO SIMULATION")  # QUANTUM-CRYSTAL-ARCH
         _turn_id = str(uuid.uuid4())  # QUANTUM-CRYSTAL-ARCH: merge stream + finalize into one client bubble per turn
         # QUANTUM-CRYSTAL-ARCH — Faster/Extra chat depth (client toggle)
         try:
@@ -9176,7 +9177,7 @@ class AzureCortex:
             return
 
         # QUANTUM-CRYSTAL-ARCH: SI coach alert BEFORE clinical gate (banner must not be skipped)
-        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
+        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION") and not user_text.startswith("[DOJO PRACTICE]"):
             try:
                 if db_pool:
                     from app.services.suicide_ideation_coach_alert import maybe_dispatch_si_coach_alert
@@ -9216,7 +9217,7 @@ class AzureCortex:
                 print(f">>> [SI_COACH_ALERT ERROR] {_si_alert_e!r}")
 
         # QUANTUM-CRYSTAL-ARCH: Clinical runtime gate (CLIENT only, pre-inference)
-        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION"):
+        if _role == "CLIENT" and not user_text.startswith("[SEARCH SYNTHESIS]") and not user_text.startswith("[DOJO SIMULATION") and not user_text.startswith("[DOJO PRACTICE]"):
             try:
                 # L3b — false-positive feedback against last soft gate fire
                 try:
@@ -9282,8 +9283,7 @@ class AzureCortex:
             except Exception as _gate_e:
                 print(f">>> [CLINICAL GATE ERROR] {_gate_e!r} — falling through to normal pipeline")
 
-        # Check if this is a Dojo simulation - skip token deduction for training
-        is_dojo_simulation = user_text.startswith("[DOJO SIMULATION")
+        is_dojo_simulation = _dojo_drill  # QUANTUM-CRYSTAL-ARCH
         
         if is_dojo_simulation:
             print(f">>> [DOJO] Simulation mode - tokens NOT deducted for {profile.get('name')}")
@@ -10645,6 +10645,11 @@ class AzureCortex:
             print(f">>> [PROMPT CAP] Trimming system prompt from {len(system_prompt)} to {_SP_CAP} chars")
             system_prompt = system_prompt[:_SP_CAP] + "\n\n[Context truncated for performance. Focus on the user's current message.]"
         print(f">>> [SYSTEM PROMPT] {len(system_prompt)} chars, uid={uid}")
+        if _dojo_drill:  # QUANTUM-CRYSTAL-ARCH
+            from app.services.dojo_night_school import drill_preface as _drill_preface
+            _preface = _drill_preface(user_text)
+            if _preface:
+                system_prompt = _preface + "\n\n" + system_prompt
 
         # QUANTUM-CRYSTAL-ARCH — Layer 9 L1: sanitize user input before LLM
         # SECURITY-DEFENSE: detection flags/routes; storage must stay verbatim.
@@ -11480,7 +11485,7 @@ class AzureCortex:
                 _provider_used == "failed"
                 or (_final_response or "").strip().startswith("I'm having trouble connecting")
             )
-            if not _is_search_synthesis:  # QUANTUM-CRYSTAL-ARCH — skip crystallizing search dumps
+            if not _is_search_synthesis and not _dojo_drill:  # QUANTUM-CRYSTAL-ARCH — skip crystallizing search dumps and DOJO drills
                 try:
                     asyncio.create_task(crystallize_from_conversation(
                         db_pool, uid, _qg_verbatim_user_text, _final_response,
@@ -14239,6 +14244,11 @@ async def handle_client(websocket, path=None):
                         res.update(await _coach_hold_fields(db_pool, res, str(SESSIONS_FILE)))
                     except Exception as _lhf:
                         print(f">>> [COACH HOLD] login view skipped: {_lhf}")
+                    try:  # QUANTUM-CRYSTAL-ARCH
+                        from app.services.dojo_night_school import attach_active_dojos as _attach_dojos
+                        await _attach_dojos(res, db_pool)
+                    except Exception as _ad_err:
+                        print(f">>> [DOJO] active list skipped: {_ad_err}")
                     login_payload = {"type": "login_success", "token": tok, "profile": res}
                     # SOVEREIGN-VOICE — attach session recovery token
                     if _gen_recovery:
@@ -14436,6 +14446,11 @@ async def handle_client(websocket, path=None):
                                     print(f">>> [WARN] Could not save subscription updates for {hw_id}: {e}")
                         
                         print(f">>> Auth success: {hw_id} as {current_profile.get('role')}")
+                        try:  # QUANTUM-CRYSTAL-ARCH
+                            from app.services.dojo_night_school import attach_active_dojos as _attach_dojos
+                            await _attach_dojos(current_profile, db_pool)
+                        except Exception as _ad_err:
+                            print(f">>> [DOJO] active list skipped: {_ad_err}")
                         await websocket.send(json.dumps({"type": "auth_success", "profile": current_profile}))
                         # Push current metrics immediately on reconnect
                         try:
@@ -28544,6 +28559,30 @@ Coach Reflection on Session {session_id}:
                         "message": message,
                         "user_id": target_user_id
                     }))
+            # === NIGHT SCHOOL DRILL ===
+            elif t == "dojo_turn":  # QUANTUM-CRYSTAL-ARCH
+                if os.getenv("ENABLE_DOJO_SESSION_KIND", "true").strip().lower() not in ("1", "true", "yes", "on"):
+                    await websocket.send(json.dumps({"type": "error", "handler": "dojo_turn", "message": "DOJO_TURN_DISABLED"}))
+                    continue
+                try:
+                    from app.services.coach_payment_hold import blocked_dojos_for as _blocked_dojos
+                    from app.services.dojo_night_school import prepare_turn as _prepare_turn
+                    _blocked = []
+                    try:
+                        _blocked = await _blocked_dojos(db_pool, (current_profile or {}).get("username") or "")
+                    except Exception:
+                        _blocked = []
+                    _prep = _prepare_turn(current_profile, _blocked, d.get("dojo_type") or d.get("mode"), d.get("session_kind"), d.get("text") or d.get("query") or "", d.get("persona") or "")
+                    if _prep.get("error"):
+                        await websocket.send(json.dumps({"type": "error", "handler": "dojo_turn", "message": _prep["error"]}))
+                        continue
+                    _origin_ctx = getattr(websocket, "_eviction_context", "main")
+                    await cortex.process_interaction(
+                        current_profile, _prep["user_text"], dojo_type=_prep["dojo_type"], client_context=_origin_ctx,
+                    )
+                except Exception as _dt_err:
+                    print(f">>> [DOJO TURN] {_dt_err}")
+                    await websocket.send(json.dumps({"type": "error", "handler": "dojo_turn", "message": "DOJO_TURN_FAILED"}))
             # === ASK NATE (COACHING) ===
             elif t == "ask_nate_coaching":
                 if current_profile:

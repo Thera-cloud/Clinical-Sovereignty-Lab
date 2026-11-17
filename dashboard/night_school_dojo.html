@@ -1413,8 +1413,11 @@ _recoverAuth();
                         }
                     }
                 }
-                // Use computed active if available, fall back to selected_dojos
-                var effectiveDojos = computedActive.length > 0 ? computedActive : selectedDojos;
+                // A map that is present wins, even when every key is expired.
+                var mapPresent = dojoSubs && typeof dojoSubs === "object" && Object.keys(dojoSubs).length > 0;
+                var effectiveDojos = mapPresent ? computedActive : selectedDojos;
+                var blocked = ((data.profile || {}).coach_hold_blocked_dojos || []).map(function(key) { return String(key).toLowerCase(); });
+                effectiveDojos = effectiveDojos.filter(function(key) { return blocked.indexOf(String(key).toLowerCase()) === -1; });
                 // Store globally for re-application
                 window._gatedDojos = effectiveDojos;
                 
@@ -1431,11 +1434,9 @@ _recoverAuth();
                 
                 // Determine which dojos this user can access
                 var allowedDojos;
-                if (role === "ADMIN" || effectiveDojos.length === 0) {
-                    // ADMIN or no subscription data: show all dojos
+                if (role === "ADMIN") {
                     allowedDojos = allModes.slice();
                 } else {
-                    // COACH with subscription-gated dojos
                     allowedDojos = effectiveDojos.slice();
                 }
                 
