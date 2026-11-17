@@ -2018,13 +2018,12 @@ _recoverAuth();
                 messageStartTime = Date.now();
                 var modeLabel = currentMode.toUpperCase();
                 socket.send(JSON.stringify({
-                    type: "ask_nate_coaching",
-                    query: "[DOJO SIMULATION - " + modeLabel + " / " + currentPersona + " PERSONA] " + text + pdfHint,
-                    client_id: "SIMULATION",
-                    mode: currentMode,
+                    type: "dojo_turn",
+                    dojo_type: currentMode,
+                    session_kind: "simulation",
+                    text: text + pdfHint,
                     persona: currentPersona,
-                    dojo_type: resolveDojoType(currentMode, currentPersona),
-                    wants_pdf: true
+                    client_context: "dojo"
                 }));
                 
                 // Flag that this response should get a PDF download button
@@ -2041,18 +2040,17 @@ _recoverAuth();
             
             // Send to Nate with simulation context including mode
             var modeLabel = currentMode.toUpperCase();
-            var queryText = "[DOJO SIMULATION - " + modeLabel + " / " + currentPersona + " PERSONA] " + text;
-            // If a case document is loaded (JUDGE mode), include it as context
+            var queryText = text;
             if (_loadedCaseText && currentMode === "judge") {
                 queryText = "[CASE DOCUMENT CONTEXT]\n" + _loadedCaseText.substring(0, 8000) + "\n[END CASE CONTEXT]\n\n" + queryText;
             }
             socket.send(JSON.stringify({
-                type: "ask_nate_coaching",
-                query: queryText,
-                client_id: "SIMULATION",
-                mode: currentMode,
+                type: "dojo_turn",
+                dojo_type: currentMode,
+                session_kind: "simulation",
+                text: queryText,
                 persona: currentPersona,
-                dojo_type: resolveDojoType(currentMode, currentPersona)
+                client_context: "dojo"
             }));
         }
         

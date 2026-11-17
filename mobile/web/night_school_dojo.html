@@ -171,6 +171,20 @@
                 <button type="button" id="kindSimulation" onclick="setSessionKind('simulation')">Simulation</button>
             </div>
             <div id="judgeTools" style="display:none; margin: 0 0 10px; padding: 8px; border: 1px solid #333; border-radius: 8px;">
+                <div>Bar ID <span id="judgeBarId">--</span></div>
+                <input type="file" id="caseFileInput" accept=".pdf" style="display:none;" onchange="handleCaseFileSelect(this)">
+                <button type="button" onclick="document.getElementById('caseFileInput').click()">Upload case PDF</button>
+                <div id="caseUploadForm" style="display:none;">
+                    <input type="text" id="caseTitleInput" placeholder="Case title">
+                    <select id="caseTypeSelect">
+                        <option value="civil">Civil</option>
+                        <option value="criminal">Criminal</option>
+                        <option value="appellate">Appellate</option>
+                        <option value="constitutional">Constitutional</option>
+                    </select>
+                    <button type="button" onclick="submitCaseUpload()">Upload</button>
+                </div>
+                <div id="caseList"></div>
                 <input type="text" id="lexisSearchInput" placeholder="Search case law or statutes" style="width:100%; margin-bottom:6px;">
                 <button type="button" onclick="lexisSearch('cases')">Cases</button>
                 <button type="button" onclick="lexisSearch('statutes')">Statutes</button>
@@ -471,6 +485,7 @@
             document.getElementById("analysisTeacher").style.display = (mode === "teacher") ? "" : "none";
             var judgeTools = document.getElementById("judgeTools");
             if (judgeTools) judgeTools.style.display = (mode === "judge") ? "" : "none";
+            if (mode === "judge") loadCaseList();
             
             // Reset chat hint
             var hints = {
@@ -648,6 +663,9 @@
             if (ethics) ethics.style.display = signed ? "none" : "";
             var openNate = document.getElementById("coachNateOpen");
             if (openNate) openNate.textContent = signed ? "Open Coach Nate drills" : "Open the ethics agreement";
+            var bar = document.getElementById("judgeBarId");
+            if (bar) bar.textContent = (profile || {}).judge_nate_bar_id || "--";
+            window._coachId = (profile || {}).hardware_id || hwParam || "";
             var none = document.getElementById("dojoNone");
             if (!first && role !== "ADMIN") {
                 if (!none) {
@@ -658,6 +676,54 @@
             }
             if (first) setDojoMode(first.getAttribute("data-mode"), first);
             setSessionKind(currentSessionKind);
+        }
+
+        var _selectedCaseFile = null;
+
+        function handleCaseFileSelect(input) {
+            if (!input.files || !input.files[0]) return;
+            _selectedCaseFile = input.files[0];
+            document.getElementById("caseUploadForm").style.display = "";
+            document.getElementById("caseTitleInput").value = _selectedCaseFile.name.replace(/\.pdf$/i, "");
+        }
+
+        function submitCaseUpload() {
+            if (!_selectedCaseFile) return;
+            var title = (document.getElementById("caseTitleInput").value || "").trim();
+            if (!title) return;
+            var body = new FormData();
+            body.append("file", _selectedCaseFile);
+            body.append("coach_id", window._coachId || hwParam || "");
+            body.append("case_title", title);
+            body.append("case_type", document.getElementById("caseTypeSelect").value);
+            var apiBase = SERVER_URL.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "");
+            dojoFetch(apiBase + "/api/dojo/upload-case", { method: "POST", body: body })
+                .then(function(r) { return r.json(); })
+                .then(function() {
+                    document.getElementById("caseUploadForm").style.display = "none";
+                    loadCaseList();
+                })
+                .catch(function() { addMessage("nate", "Case upload failed"); });
+        }
+
+        function loadCaseList() {
+            var coachId = window._coachId || hwParam;
+            var box = document.getElementById("caseList");
+            if (!coachId || !box) return;
+            var apiBase = SERVER_URL.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "");
+            dojoFetch(apiBase + "/api/dojo/cases/" + encodeURIComponent(coachId))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    box.textContent = "";
+                    var cases = (data && data.cases) || [];
+                    if (!cases.length) { box.textContent = "No cases uploaded yet."; return; }
+                    cases.forEach(function(item) {
+                        var line = document.createElement("div");
+                        line.textContent = (item.case_title || "Case") + " (" + (item.case_type || "") + ")";
+                        box.appendChild(line);
+                    });
+                })
+                .catch(function() {});
         }
 
         function lexisSearch(searchType) {

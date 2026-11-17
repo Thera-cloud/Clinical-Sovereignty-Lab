@@ -113,12 +113,14 @@ class CoachingMeshScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
   final String token;
   final bool isMaster;
+  final String? onlyDojo;
 
   const CoachingMeshScreen({
     super.key,
     required this.profile,
     required this.token,
     this.isMaster = false,
+    this.onlyDojo,
   });
 
   @override
@@ -160,8 +162,12 @@ class _CoachingMeshScreenState extends State<CoachingMeshScreen>
   bool _discoveryTimedOut = false;
 
   // Available DOJO types and methods
-  List<String> get _dojoTypes =>
-      DojoMentorService.availableDojosFromProfile(widget.profile);
+  List<String> get _dojoTypes {
+    final all = DojoMentorService.availableDojosFromProfile(widget.profile);
+    final only = widget.onlyDojo;
+    if (only == null || only.isEmpty) return all;
+    return all.where((key) => key == only).toList();
+  }
   final Map<String, String> _dojoLabels = {
     'therapist': 'Therapist', 'judge': 'Judge', 'business': 'Business',
     'mcat': 'MCAT', 'cnc': 'CNC', 'teacher': 'Teacher', 'project_pm': 'Project PM',

@@ -7122,6 +7122,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
 
   // Assistant Coaches tab state
   List<Map<String, dynamic>> _assistantMetrics = [];
+  String _myMasterLabel = '';
   bool _assistantsTabLoading = false;
   String? _expandedAssistant;
   List<Map<String, dynamic>> _expandedAssistantClients = [];
@@ -7167,7 +7168,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
         }
       }, onCoachNate: () {
         if (!mounted) return;
-        _tabController.animateTo(7);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _lazyCoachingMeshScreen(
+              isMaster: true,
+              onlyDojo: 'coach_nate',
+            ),
+          ),
+        );
       });
     }
   }
@@ -17591,6 +17600,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
           ),
         );
       }
+      final masterResp = await http.get(
+        Uri.parse('$_apiBaseUrl/api/coach/hierarchy/my-master'),
+        headers: _restHeaders(json: false),
+      );
+      if (mounted && masterResp.statusCode == 200) {
+        final master = jsonDecode(masterResp.body);
+        final name = (master['master_name'] ?? master['master_username'] ?? '')
+            .toString();
+        setState(() => _myMasterLabel = name);
+      }
     } catch (e) {
       _debugLog("Assistant metrics error: $e");
     }
@@ -18233,11 +18252,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     final roleUpper = (profile['role'] ?? '').toString().toUpperCase();
     // login_success sets _authToken; profile map may not include token. COACH/ADMIN
     // always see this tab (API returns [] for non-master coaches).
+    final username = (profile['username'] ?? '').toString().toLowerCase();
     final isMaster = _assistantMetrics.isNotEmpty ||
+        username == 'coachn' ||
         profile['is_master_coach'] == true ||
         profile['master_coach_approved'] == true ||
         profile['master_coach_approved'] == 'true' ||
-        roleUpper == 'COACH' ||
         roleUpper == 'ADMIN';
 
     if (!isMaster && !_assistantsTabLoading && _assistantMetrics.isEmpty) {
@@ -18248,14 +18268,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             Icon(Icons.supervisor_account,
                 color: Colors.white.withOpacity(0.15), size: 64),
             const SizedBox(height: 16),
-            Text('Master Coach Access',
+            Text('Your master coach',
                 style: TextStyle(
                     color: Colors.white.withOpacity(0.5),
                     fontSize: 16,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(
-              'This tab is available when you have\nassistant coaches under your supervision.',
+              _myMasterLabel.isEmpty
+                  ? 'Your master coach is assigned when your coach account is approved.'
+                  : 'Your master coach is $_myMasterLabel.',
               style:
                   TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13),
               textAlign: TextAlign.center,
@@ -22221,14 +22243,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
   }
 
   Widget _buildDojoTab() {
-    if (isNativeIOS) {
-      return const Center(
-        child: Text(
-          'Training simulations are available on the coach web portal.',
-          style: TextStyle(color: Colors.white54),
-        ),
-      );
-    }
     // =========================================================================
     // HYBRID DOJO - Night School Dojo page
     // - Mobile: Embedded WebView showing night_school_dojo.html
@@ -25988,7 +26002,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
             icon: Icons.play_circle_fill,
             iconColor: const Color(0xFFFFD700),
             title: "Start Training Session",
-            subtitle: "Create a BLE coaching mesh as master coach",
+            subtitle: "Start a drill in a DOJO on this account",
             onTap: () {
               Navigator.push(
                   context,
@@ -26140,7 +26154,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
     );
   }
 
-  Widget _lazyCoachingMeshScreen({required bool isMaster}) {
+  Widget _lazyCoachingMeshScreen({required bool isMaster, String? onlyDojo}) {
     final ethicsVersion =
         widget.currentUserProfile['coach_ethics_version'] ?? '';
     if (ethicsVersion != 'v1.0_2026') {
@@ -26203,6 +26217,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2>
       profile: meshProfile,
       token: meshToken,
       isMaster: isMaster,
+      onlyDojo: onlyDojo,
     );
   }
 

@@ -27,6 +27,7 @@ def test_bridge_w9_accepts_flutter_aliases():
 def test_hierarchy_rest_invite_pending_admin():
     src = (REPO / "backend/app/routers/coach_hierarchy_api.py").read_text()
     assert "VALUES ($1, $2, 'pending_admin')" in src
+    assert "coach_hierarchy.status IS DISTINCT FROM 'revoked'" in src
 
 
 def test_flutter_coach_command_critical_wiring():

@@ -19650,7 +19650,8 @@ async def handle_client(websocket, path=None):
             # === JUDGE: LEXISNEXIS SEARCH ===
             elif t == "judge_lexis_search":
                 if current_profile and current_profile.get("role") == "COACH":
-                    dojos = get_active_dojos(current_profile)
+                    from app.services.coach_dojo_access import active_dojo_keys as _paid_dojo_keys  # QUANTUM-CRYSTAL-ARCH
+                    dojos = _paid_dojo_keys(current_profile, current_profile.get("coach_hold_blocked_dojos") or [])
                     if 'judge' not in [dd.lower() for dd in dojos]:
                         await websocket.send(json.dumps({"type": "error", "message": "JUDGE DOJO subscription required for LexisNexis"}))
                         continue
@@ -19675,7 +19676,8 @@ async def handle_client(websocket, path=None):
             # === JUDGE: LEXISNEXIS CASE DETAIL ===
             elif t == "judge_lexis_case":
                 if current_profile and current_profile.get("role") == "COACH":
-                    dojos = get_active_dojos(current_profile)
+                    from app.services.coach_dojo_access import active_dojo_keys as _paid_dojo_keys  # QUANTUM-CRYSTAL-ARCH
+                    dojos = _paid_dojo_keys(current_profile, current_profile.get("coach_hold_blocked_dojos") or [])
                     if 'judge' not in [dd.lower() for dd in dojos]:
                         await websocket.send(json.dumps({"type": "error", "message": "JUDGE DOJO subscription required"}))
                         continue

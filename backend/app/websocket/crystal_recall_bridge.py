@@ -257,6 +257,11 @@ async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int 
                 global_crystals.append(r)
                 _seen_ids.add(r["id"])
 
+    def _drill_row(row) -> bool:  # QUANTUM-CRYSTAL-ARCH
+        text = str(row["crystal_text"] or "")
+        return text.startswith("[DOJO PRACTICE]") or text.startswith("[DOJO SIMULATION")
+    user_crystals = [r for r in user_crystals if not _drill_row(r)]
+    global_crystals = [r for r in global_crystals if not _drill_row(r)]
     _elapsed = (_t.monotonic() - _t0) * 1000
     logger.info("[CRYSTAL FAST] user_cte: %.1fms, total: %.1fms (%d user + %d global)",
                 _elapsed, _elapsed, len(user_crystals), len(global_crystals))

@@ -193,13 +193,16 @@ async def invite_assistant(body: InviteRequest, request: Request):
         if not assistant:
             raise HTTPException(404, "Coach not found")
 
-        await conn.execute(
+        result = await conn.execute(
             """INSERT INTO coach_hierarchy (master_coach_id, assistant_id, status)
                VALUES ($1, $2, 'pending_admin')
                ON CONFLICT (master_coach_id, assistant_id)
-               DO UPDATE SET status = 'pending_admin', invited_at = NOW(), revoked_at = NULL""",
+               DO UPDATE SET status = 'pending_admin', invited_at = NOW(), revoked_at = NULL
+               WHERE coach_hierarchy.status IS DISTINCT FROM 'revoked'""",
             master_hw, assistant["hardware_id"],
         )
+    if str(result).endswith("0"):
+        raise HTTPException(409, "Revoked assistant links stay revoked")
     return {"status": "invited", "assistant": body.assistant_username}
 
 
@@ -431,6 +434,31 @@ async def platform_wisdom(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════
 # PART A-extra: Assistant Metrics Overview (master coach dashboard)
 # ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/hierarchy/my-master")
+async def my_master(request: Request):
+    """The caller's own master. No peer list."""
+    pool = _get_db(request)
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
+    assistant_hw = await _resolve_hw_id(request, user_id)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT u.username, u.profile_data->>'name' AS display_name, ch.status
+               FROM coach_hierarchy ch
+               LEFT JOIN users u ON u.hardware_id = ch.master_coach_id
+               WHERE ch.assistant_id = $1 AND ch.status = 'active'
+               ORDER BY ch.accepted_at DESC NULLS LAST
+               LIMIT 1""",
+            assistant_hw,
+        )
+    if not row:
+        return {"master_username": "", "master_name": "", "status": ""}
+    return {
+        "master_username": row["username"] or "",
+        "master_name": row["display_name"] or row["username"] or "",
+        "status": row["status"] or "",
+    }
+
 
 @router.get("/hierarchy/assistant-metrics")
 async def get_assistant_metrics(request: Request, days: int = 30):
