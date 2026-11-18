@@ -13924,25 +13924,21 @@ async def handle_client(websocket, path=None):
                 return
 
             # ── PHASE 8: Mirror Shell control gate ───────────────────────
-            # SOVEREIGN-VOICE: login and credential messages wait on the mirror.
-            # External clients are not hive fibres, so they are not absorbed.
-            # HIVE_MIRROR_ENFORCE closes the socket when the decision is contain.
+            # SOVEREIGN-VOICE: HIVE_MIRROR_REFLECT returns the stored reflection.
+            # Default off. Enforce still closes a contain when reflect is off.
             try:
                 from app.services.security.mirror_shell import client_control_shell
-                _control_types = (
+                _shell = await client_control_shell()
+                _src = client_ip or uid or "GUEST"
+                if t in (
                     "login_request", "register_request", "verify_admin_passphrase",
                     "verify_sms_code", "forgot_password", "force_password_change", "auth",
-                )
-                if t in _control_types:
-                    _shell = await client_control_shell()
-                    _decision = await _shell.assess_client_control({
-                        "source_address": client_ip or uid or "GUEST",
-                        "signal_type": t,
-                        "payload_size": len(message),
-                        "external": True,
-                    })
-                    _enforce = os.getenv("HIVE_MIRROR_ENFORCE", "true").lower() in ("1", "true", "yes")
-                    if _enforce and getattr(_decision, "value", "") == "contain":
+                ) or _shell.reflection_held(id(websocket), _src):
+                    _held = await _shell.hold_external_attempt(_src, t, len(message), id(websocket))
+                    if _held.get("frame"):
+                        await websocket.send(json.dumps(_held["frame"]))
+                        return
+                    if _held.get("close"):
                         await websocket.close(1008, "Blocked by defense perimeter")
                         return
             except Exception:

@@ -46,6 +46,53 @@ async def test_control_burst_is_contained():
 
 
 @pytest.mark.asyncio
+async def test_reflect_off_closes_without_a_frame(monkeypatch):
+    monkeypatch.delenv("HIVE_MIRROR_REFLECT", raising=False)
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    held = await shell.hold_external_attempt("203.0.113.5", "login_request", 300000, 11)
+    assert held == {"close": True}
+
+
+@pytest.mark.asyncio
+async def test_reflect_returns_a_frame_without_mirror_markers(monkeypatch):
+    monkeypatch.setenv("HIVE_MIRROR_REFLECT", "true")
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    held = await shell.hold_external_attempt("203.0.113.5", "login_request", 300000, 22)
+    frame = held["frame"]
+    assert frame["status"] == "ok"
+    assert frame["type"] == "ack"
+    assert "synthetic" not in frame.get("data", {})
+    assert "_mirror_ns" not in frame
+    assert "token" not in frame
+    follow = await shell.hold_external_attempt("203.0.113.5", "chat", 40, 22)
+    assert follow["frame"]["status"] == "ok"
+    other = await shell.hold_external_attempt("203.0.113.5", "login_request", 400, 23)
+    assert other == {}
+
+
+@pytest.mark.asyncio
+async def test_one_small_login_is_not_reflected(monkeypatch):
+    monkeypatch.setenv("HIVE_MIRROR_REFLECT", "true")
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    held = await shell.hold_external_attempt("203.0.113.7", "login_request", 400, 30)
+    assert held == {}
+
+
+@pytest.mark.asyncio
+async def test_reflection_frame_cap_closes(monkeypatch):
+    monkeypatch.setenv("HIVE_MIRROR_REFLECT", "true")
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    last = {}
+    for _ in range(25):
+        last = await shell.hold_external_attempt("203.0.113.5", "login_request", 300000, 44)
+    assert last == {"close": True}
+
+
+@pytest.mark.asyncio
 async def test_external_signal_does_not_use_the_heartbeat_gate():
     shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
     await shell.initialize()

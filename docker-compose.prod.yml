@@ -473,6 +473,8 @@ services:
       - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      # SOVEREIGN-VOICE — reflection return. Off until GREEN .env sets true.
+      - HIVE_MIRROR_REFLECT=${HIVE_MIRROR_REFLECT:-false}
       # QUANTUM-CRYSTAL-ARCH — main-chat stride live turns (operator on 2026-11-15)
       - ENABLE_MAIN_CHAT_STRIDE=${ENABLE_MAIN_CHAT_STRIDE:-true}
       # QUANTUM-CRYSTAL-ARCH — paid Inner Chamber / Sovereign Circle must go Stripe-first (WS bypass blocked)

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -38,6 +39,10 @@ from app.models.hive_defense import (
 
 logger = logging.getLogger("hive.mirror_shell")
 
+_CONTROL_TYPES = frozenset({
+    "login_request", "register_request", "verify_admin_passphrase",
+    "verify_sms_code", "forgot_password", "force_password_change", "auth",
+})
 _client_shell: Optional["MirrorShell"] = None
 
 
@@ -303,6 +308,7 @@ class MirrorShell:
         self._mirror_suspicious: int = 0
         self._passed_to_real: int = 0
         self._control_hits: Dict[str, List[float]] = {}
+        self._holds: Dict[str, Dict[str, Any]] = {}
 
         self._initialized: bool = False
         logger.info("MirrorShell created (patent claim %d)", self.PATENT_CLAIM)
@@ -370,6 +376,97 @@ class MirrorShell:
         elif not self._initialized:
             logger.error("assess_client_control before initialize — %s", reason)
         return decision
+
+    def reflection_held(self, conn_id: int, source: str) -> bool:
+        """True when this socket is already inside a reflection hold."""
+        self._expire_holds()
+        return self._hold_key(conn_id, source) in self._holds
+
+    async def hold_external_attempt(
+        self,
+        source: str,
+        signal_type: str,
+        payload_size: int,
+        conn_id: int,
+    ) -> Dict[str, Any]:
+        """Answer a contained socket with a stored reflection, or close it.
+
+        HIVE_MIRROR_REFLECT defaults off. A normal login returns an empty
+        dict so the real handler runs. One failed password is not a contain.
+        # SOVEREIGN-VOICE
+        """
+        self._expire_holds()
+        key = self._hold_key(conn_id, source)
+        now = time.time()
+        held = self._holds.get(key)
+        if held:
+            if int(held.get("frames") or 0) >= 24:
+                self._holds.pop(key, None)
+                return {"close": True}
+            frame = await self._public_frame(held["namespace_id"], signal_type, payload_size)
+            if not frame:
+                self._holds.pop(key, None)
+                return {"close": True}
+            held["frames"] = int(held.get("frames") or 0) + 1
+            held["seen"] = now
+            return {"frame": frame}
+        if signal_type not in _CONTROL_TYPES:
+            return {}
+        decision = await self.assess_client_control({
+            "source_address": source,
+            "signal_type": signal_type,
+            "payload_size": payload_size,
+            "external": True,
+        })
+        if getattr(decision, "value", "") != "contain":
+            return {}
+        reflect = os.getenv("HIVE_MIRROR_REFLECT", "false").lower() in ("1", "true", "yes")
+        enforce = os.getenv("HIVE_MIRROR_ENFORCE", "true").lower() in ("1", "true", "yes")
+        if not reflect:
+            return {"close": True} if enforce else {}
+        if len(self._holds) >= 64:
+            return {"close": True} if enforce else {}
+        identity = str(source or "unknown")[:128]
+        namespace = await self._namespace_mgr.get_namespace_for_entity(identity)
+        if namespace is None or not namespace.is_active:
+            namespace = await self._namespace_mgr.create_namespace(
+                entity_identifier=identity,
+                seed_data={"purpose": "client_control_reflection"},
+            )
+        frame = await self._public_frame(namespace.namespace_id, signal_type, payload_size)
+        if not frame:
+            return {"close": True} if enforce else {}
+        self._holds[key] = {
+            "namespace_id": namespace.namespace_id,
+            "frames": 1,
+            "seen": now,
+        }
+        return {"frame": frame}
+
+    def _expire_holds(self) -> None:
+        now = time.time()
+        stale = [key for key, row in self._holds.items() if now - float(row.get("seen") or 0) > 90]
+        for key in stale:
+            self._holds.pop(key, None)
+
+    @staticmethod
+    def _hold_key(conn_id: int, source: str) -> str:
+        return f"{int(conn_id)}|{str(source or 'unknown')[:128]}"
+
+    async def _public_frame(self, namespace_id: UUID, signal_type: str, payload_size: int) -> Optional[Dict[str, Any]]:
+        raw = await self._namespace_mgr.generate_synthetic_response(
+            namespace_id,
+            str(signal_type or "control")[:64],
+            {"bytes": int(payload_size or 0)},
+        )
+        if not isinstance(raw, dict):
+            return None
+        frame = {key: value for key, value in raw.items() if key != "_mirror_ns"}
+        data = frame.get("data")
+        if isinstance(data, dict):
+            frame["data"] = {key: value for key, value in data.items() if key != "synthetic"}
+        frame["type"] = "ack"
+        return frame
 
     async def shutdown(self) -> None:
         """
