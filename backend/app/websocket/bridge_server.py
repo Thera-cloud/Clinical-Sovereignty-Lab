@@ -13943,7 +13943,7 @@ async def handle_client(websocket, path=None):
                         await websocket.send(json.dumps(_held["frame"]))
                         return
                     if _held.get("drop"):
-                        return
+                        continue  # SOVEREIGN-VOICE: keep the socket for the real login
                     if _held.get("close"):
                         await websocket.close(1008, "Blocked by defense perimeter")
                         return
