@@ -77,6 +77,24 @@ def test_prime_turn_skips_thread_until_commit():
     assert "NATE:" in thread_text(sid)
 
 
+def test_mid_thought_caption_stays_quiet():
+    import asyncio
+
+    from app.services.studio_session_service import cohost_turn
+
+    out = asyncio.run(
+        cohost_turn(
+            None,
+            "sid-quiet-cap",
+            "HOST: and then I was thinking",
+            event="caption",
+        )
+    )
+    assert out["ok"] is True
+    assert out.get("quiet") is True
+    assert (out.get("text") or "") == ""
+
+
 def test_room_html_mirrors_hold():
     from pathlib import Path
 

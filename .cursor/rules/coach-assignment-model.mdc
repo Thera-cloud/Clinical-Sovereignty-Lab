@@ -10,7 +10,7 @@ All clients are assigned to `CoachN` (Nathaniel Nevedal, role=COACH, hw=`COACH_C
 | Role | `COACH` |
 | Hardware ID | `COACH_COACHN_ID` |
 
-The previous default `hnevedal` / `COACH_HNEVEDAL_ID` was replaced on 2026-02-23. All 28 client accounts were reassigned to CoachN.
+The previous default `hnevedal` / `COACH_HNEVEDAL_ID` was replaced on 2026-02-23. `hnevedal` is an assistant coach. New clients go to CoachN unless an invite names another coach.
 
 ## How Coach Assignment Works
 

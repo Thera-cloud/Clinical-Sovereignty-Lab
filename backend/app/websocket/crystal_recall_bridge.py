@@ -89,6 +89,23 @@ _VALIDATOR_FILTER_RECALL = (_os.getenv("BRIDGE_VALIDATOR_FILTER_RECALL", "") or 
 # are never crystallised (their marker text + scene nouns re-seed the echo).
 _RECALL_DIVERSITY = (_os.getenv("CRYSTAL_RECALL_DIVERSITY", "true") or "true").strip().lower() in ("1", "true", "yes", "on")
 _PANEL_ASK_MARKERS = ("Sovereign Journey story panel", "[SSE Panel:")
+_PANEL_ASK_PAREN_RE = re.compile(
+    r"\(asking about my Sovereign Journey story panel[^)]*\)",
+    re.I,
+)
+_PANEL_TAG_RE = re.compile(r"\[SSE Panel:[^\]]*\]", re.I)
+_STORY_PANEL_TAG_RE = re.compile(r"\[Story Panel:[^\]]*\]", re.I)
+
+
+def _disclosure_beside_panel_ask(text: str) -> str:
+    """QUANTUM-CRYSTAL-ARCH: drop the system panel tag. Keep the client's own sentence."""
+    cleaned = _PANEL_ASK_PAREN_RE.sub(" ", text or "")
+    cleaned = _PANEL_TAG_RE.sub(" ", cleaned)
+    cleaned = _STORY_PANEL_TAG_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -—,.")
+    if cleaned.lower() in ("sovereign journey story panel", "story panel"):
+        return ""
+    return cleaned
 
 # QUANTUM-CRYSTAL-ARCH: L3a — outcome-weighted recall rank. Uses crystal_outcome_view
 # (C_emo attributed to prior recalls). Does NOT UPDATE confidence for clinical/defense
@@ -1226,8 +1243,11 @@ async def crystallize_from_conversation(
         pass
     # QUANTUM-CRYSTAL-ARCH — CRYSTAL_RECALL_DIVERSITY: story-panel ask turns carry
     # rewritten marker text + scene nouns; forging them re-seeds the daily echo.
+    # A personal disclosure beside the tag is kept. A turn that is only the tag is not.
     if _RECALL_DIVERSITY and any(m in (user_text or "") for m in _PANEL_ASK_MARKERS):
-        return None
+        user_text = _disclosure_beside_panel_ask(user_text)
+        if not user_text:
+            return None
     is_voice = origin_surface == "voice_call"
     effective_min_len = _MIN_USER_LEN_VOICE if is_voice else _MIN_USER_LEN
     if len(user_text) < effective_min_len:

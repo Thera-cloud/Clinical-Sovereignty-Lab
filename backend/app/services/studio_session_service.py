@@ -19,13 +19,15 @@ _LINE_STORE = 3600
 
 
 def live_reply_max_tokens(blob: str, howto: bool) -> int:
-    """Spoken length: 1 min ~210, 2 min ~420, 3 min ~630 tokens."""
+    """Live takes stay short. Howto can run longer. QUANTUM-CRYSTAL-ARCH"""
     words = len((blob or "").split())
-    if howto or words >= 80:
-        return 630
+    if howto:
+        return 280
+    if words <= 6:
+        return 72
     if words >= 40:
-        return 420
-    return 210
+        return 160
+    return 140
 
 
 async def create_session(db_pool, show_id: str, coach_id: str) -> Dict[str, Any]:
@@ -314,6 +316,14 @@ async def cohost_turn(
     kind = (event or "line").strip().lower()
     if toss:
         kind = "toss"
+    if kind == "caption" and not caption_should_ask(blob):
+        return {
+            "ok": True,
+            "text": "",
+            "quiet": True,
+            "event": "caption",
+            "provider": "quiet",
+        }
     from app.services.studio_listen_hold import prime_clear, prime_store, prime_take
     from app.services.studio_cohost_share import (
         host_space_block,
@@ -508,14 +518,12 @@ async def cohost_turn(
             "They asked how Little Nate / the app works. One clear breath for clients and coaches. "
             "Land on a statement.\n"
         )
+    host_words = len(blob.split())
+    if kind == "line" and host_words <= 5 and "?" not in blob:
+        prefix += (
+            "They only offered a short beat. One short reaction. Do not restart a speech.\n"
+        )
     prefix = prior_block + prefix
-    from app.services.studio_reply_shape import (
-        LENGTH_ASK,
-        arm_lengths,
-        is_long_question,
-        take_length,
-    )
-
     reply = (
         "Hey — Little Nate with you. Let's see where this one goes."
         if kind == "open"
@@ -523,63 +531,37 @@ async def cohost_turn(
         if kind == "caller_join"
         else "Alright, I'm in."
         if kind == "toss"
-        else "Yeah, man — that tracks."
+        else "I'm with you on that."
     )
     provider = "fallback"
-    ready = None if kind == "prime" else await take_length(sid, blob)
-    if ready:
-        reply = ready
-        provider = "length_ready"
-    elif kind != "prime" and is_long_question(blob):
-        async def _draft(cap: int, which: str) -> str:
-            from app.services.nate_inference_router import NateInferenceRouter
+    try:
+        from app.services.nate_inference_router import NateInferenceRouter
 
-            note = (
-                "SHORT version. A few sentences. Open on the point they landed on, then your take."
-                if which == "short"
-                else "DEFINED version. Finish the thought. Open on the point they landed on, then your take. Do not pad."
-            )
-            out = await NateInferenceRouter().generate(
-                prompt=prefix + blob,
-                system=system + "\n" + note,
-                domain="culture",
-                max_tokens=cap,
-                images=images or None,
-            )
-            return (out.get("text") or "").strip()
-
-        arm_lengths(
-            sid,
-            blob,
-            asyncio.create_task(_draft(210, "short")),
-            asyncio.create_task(_draft(630, "long")),
+        out = await NateInferenceRouter().generate(
+            prompt=prefix + blob,
+            system=system,
+            domain="culture",
+            max_tokens=live_reply_max_tokens(blob, howto),
+            images=images or None,
         )
-        reply = LENGTH_ASK
-        provider = "length_offer"
-    else:
-        try:
-            from app.services.nate_inference_router import NateInferenceRouter
-
-            out = await NateInferenceRouter().generate(
-                prompt=prefix + blob,
-                system=system,
-                domain="culture",
-                max_tokens=live_reply_max_tokens(blob, howto),
-                images=images or None,
-            )
-            gen = (out.get("text") or "").strip()
-            if gen:
-                reply = gen
-                provider = out.get("provider") or "router"
-        except Exception as exc:
-            logger.warning("studio cohost inference skipped: %s", exc)
+        gen = (out.get("text") or "").strip()
+        if gen:
+            reply = gen
+            provider = out.get("provider") or "router"
+    except Exception as exc:
+        logger.warning("studio cohost inference skipped: %s", exc)
     if inv6_blocks(reply):
         reply = "I'll keep this on the educational side and stay with the room."
         provider = "inv6_filter"
-    cleaned = guard_onair(sanitize_onair(reply))
-    if cleaned != reply:
+    spoken = (reply or "").strip()
+    cleaned = guard_onair(sanitize_onair(spoken))
+    if cleaned:
+        if cleaned != spoken:
+            provider = "onair_guard"
         reply = cleaned
-        provider = "onair_guard"
+    elif spoken:
+        reply = sanitize_onair(spoken)
+        provider = "onair_keep"
     # A question is fine. Two Nate turns in a row ending in one is an interview.
     if ends_with_question(reply) and ends_with_question(_last_nate_line(session_id)):
         trimmed = drop_trailing_question(reply)
@@ -587,7 +569,7 @@ async def cohost_turn(
             reply = trimmed
             provider = "onair_guard"
     if not (reply or "").strip():
-        reply = "Yeah, man — that tracks."
+        reply = "I'm with you on that."
     apply_turn(sid, speaker or "host", blob, move, reply)
     if kind == "prime":
         prime_store(sid, blob, reply)

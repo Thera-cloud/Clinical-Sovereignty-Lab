@@ -6,8 +6,16 @@ into bounded prompt context. Keeps bridge_server.py edits small and auditable.
 
 from __future__ import annotations
 
+import contextvars
 import re
 from typing import Any
+
+_vault_kind: contextvars.ContextVar[str] = contextvars.ContextVar("vault_turn_kind", default="")
+
+
+def current_vault_kind() -> str:
+    """Kind of the vault item just resolved on this task: journey, file, or empty."""
+    return _vault_kind.get()
 
 
 _VAULT_REF_RE = re.compile(r"\[Vault:([a-fA-F0-9\-]+)\]")
@@ -123,6 +131,7 @@ async def _read_image_data_url(row: Any) -> str | None:
 
 async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: str) -> tuple[str, str, str | None]:
     """Return (updated_user_text, vault_context, image_data_url)."""
+    _vault_kind.set("")
     if not db_pool or not profile or not user_text:
         return user_text, "", None
 
@@ -183,6 +192,10 @@ async def build_vault_chat_context(db_pool, profile: dict[str, Any], user_text: 
     except Exception as exc:
         print(f">>> [VAULT] Chat context query failed: {type(exc).__name__}: {exc}")
         return user_text, "", None
+
+    if rows:
+        content_type = ((rows[0]["content_type"] if rows[0] else "") or "").lower()
+        _vault_kind.set("journey" if content_type == "sse_panel" else "file")
 
     if not rows:
         if upload_ref or ai_export_ref:

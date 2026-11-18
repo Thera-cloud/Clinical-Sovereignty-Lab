@@ -10047,27 +10047,13 @@ class AzureCortex:
         _sse_panel_ctx = ""  # QUANTUM-CRYSTAL-ARCH — panel protocol E / vision
         _vault_image_data_url = None  # SOVEREIGN-VOICE: vision block for image vault items
         try:
-            # QUANTUM-CRYSTAL-ARCH: global upload/vault chat retrieval
-            from app.services.vault_chat_context import build_vault_chat_context
-            user_text, vault_context, _vault_image_data_url = await build_vault_chat_context(
-                db_pool, profile, user_text
-            )
+            # QUANTUM-CRYSTAL-ARCH: original ask picks the scene; the explicit tag picks the picture
+            from app.services.theraworld_turn import prepare_vault_and_panel
+            (
+                user_text, vault_context, _vault_image_data_url, _sse_panel_ctx,
+            ) = await prepare_vault_and_panel(db_pool, profile, user_text)
         except Exception as _ve:
             print(f">>> [VAULT] Injection error (non-fatal): {_ve}")
-        try:
-            # QUANTUM-CRYSTAL-ARCH: Sovereign Journey panel character/theme explain
-            from app.services.sse_panel_chat_context import build_sse_panel_chat_context
-            user_text, _sse_panel_ctx, _sse_panel_img = await build_sse_panel_chat_context(
-                db_pool, profile, user_text
-            )
-            if _sse_panel_ctx:
-                vault_context = (
-                    f"{vault_context}\n\n{_sse_panel_ctx}".strip() if vault_context else _sse_panel_ctx
-                )
-            if _sse_panel_img and not _vault_image_data_url:
-                _vault_image_data_url = _sse_panel_img
-        except Exception as _spe:
-            print(f">>> [SSE PANEL] Injection error (non-fatal): {_spe}")
 
         # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE context injection
         lr_context = ""

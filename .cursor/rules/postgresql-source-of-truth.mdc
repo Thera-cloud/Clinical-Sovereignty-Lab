@@ -39,4 +39,4 @@ PostgreSQL is the **only** authoritative store for user data. The JSON file (`us
 
 ## Default Coach Assignment
 
-New client registrations default to `hnevedal` / `COACH_HNEVEDAL_ID` (not the retired `CoachN`).
+New client registrations default to `CoachN` / `COACH_COACHN_ID`. `hnevedal` / `COACH_HNEVEDAL_ID` is an assistant coach and is not the registration default.

@@ -44,6 +44,10 @@ _PANEL_RELEASE_RE = re.compile(
     r"(?:panel|scene|image|picture))",
     re.I,
 )
+_CHARACTER_FOLLOW_RE = re.compile(
+    r"\b(?:that|this) (?:character|figure)\b",
+    re.I,
+)
 _SHORT_PANEL_ACK_RE = re.compile(
     r"^(?:sure|yes|yeah|yep|ok|okay|please|go on|continue|and then\??|"
     r"for me or for you\??|what(?:'s| is) next\??|"
@@ -900,9 +904,15 @@ async def _panel_row_by_id(db_pool, panel_id: str, ids: list[str]):
 
 
 async def build_sse_panel_chat_context(
-    db_pool, profile: dict[str, Any], user_text: str
+    db_pool, profile: dict[str, Any], user_text: str,
+    *, journey_open: bool = False, vault_kind: str = "",
 ) -> tuple[str, str, str | None]:
-    """Return (updated_user_text, context_block, optional_image_data_url)."""
+    """Return (updated_user_text, context_block, optional_image_data_url).
+
+    vault_kind ``file`` stops a photo or document from continuing the last scene.
+    ``journey`` is a stored journey panel, so the scene may continue.
+    ``journey_open`` resolves "that character" / "that figure" to the latest panel.
+    """
     if not db_pool or not profile or not user_text:
         return user_text, "", None
 
@@ -919,6 +929,10 @@ async def build_sse_panel_chat_context(
         return user_text, "", None
 
     followup = False
+    character_only = False
+    vault_file = vault_kind == "file" or (
+        "referring to my vault item" in (user_text or "").lower() and vault_kind != "journey"
+    )
     if not match and not legacy:
         # Explicit release beats every follow-up heuristic: the client is
         # telling us to leave the panel thread. Hand the model a release
@@ -931,9 +945,14 @@ async def build_sse_panel_chat_context(
         if (
             not followup
             and _VISUAL_FOLLOW_RE.search(user_text)
-            and "referring to my vault item" not in user_text.lower()
+            and not vault_file
         ):
             followup = await _recent_panel_thread(db_pool, ids)
+        if not followup and _CHARACTER_FOLLOW_RE.search(user_text):
+            in_thread = journey_open or await _recent_panel_thread(db_pool, ids)
+            if in_thread:
+                followup = True
+                character_only = True
         if not followup:
             return user_text, "", None
 
@@ -970,6 +989,9 @@ async def build_sse_panel_chat_context(
         picked = _prefer_scene_matched_row(row, scene_clip, cands)
         if picked is not row:
             row, stale_fallback = picked, False
+
+    if not row and character_only:
+        return user_text, "", None
 
     if not row:
         evidence = await _gather_therapeutic_evidence(db_pool, ids, [])

@@ -48,6 +48,13 @@ def test_five_verticals():
 
 def test_inv6_and_show_copy():
     assert inv6_blocks("We will diagnose you")
+    assert inv6_blocks("please diagnose this therapy case")
+    assert not inv6_blocks(
+        "without turning dinner into a therapy session, what would you tell the dad"
+    )
+    assert not inv6_blocks(
+        "they're not diagnosing or prescribing on air, just sharing a take"
+    )
     assert validate_show_copy("Clinical hour", "therapy") is not None
     assert validate_show_copy("Morning show", "education") is None
 

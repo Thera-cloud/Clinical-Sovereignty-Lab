@@ -1,4 +1,8 @@
-"""Public depth for the live show. No names, no ages, no children. QUANTUM-CRYSTAL-ARCH"""
+"""Public depth for the live show. No full names, no ages. QUANTUM-CRYSTAL-ARCH
+
+Family-table talk stays on air. Age-identified minors are dropped. Kid/dad/coach
+stay as radio words. Caller first-name + city becomes a caller from that city.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +12,16 @@ from typing import List
 
 logger = logging.getLogger("studio.public_depth")
 
-_CHILD_AGE = re.compile(
-    r"\b(?:child|children|kid|kids|son|daughter|boy|girl|teen|minor|infant|"
-    r"baby|toddler|newborn|years?\s*old|year-old|\d{1,2}\s*yo|age\s+\d+)\b",
+_AGE_ID = re.compile(
+    r"\b(?:\d{1,2}\s*(?:years?\s*old|yo|year-old)|age\s+\d+|infant|toddler|"
+    r"newborn|minor)\b",
     re.I,
+)
+_GEO_PREV = frozenset(
+    {"from", "in", "at", "near", "of", "on", "to", "into", "around", "over"}
+)
+_CALLER_FROM = re.compile(
+    r"\b([A-Z][a-z]{2,})\s+from\s+([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?)\b"
 )
 _TITLE = re.compile(r"\b(?:Mr|Mrs|Ms|Dr)\.?\s+[A-Z][a-z]+\b")
 _PAIR = re.compile(r"\b([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})\b")
@@ -23,14 +33,42 @@ _KEEP_PAIR = {
     "big nate",
     "sovereign sanctuary",
     "thera world",
+    "between moments",
+    "feedback arena",
+    "wednesday wonders",
 }
 _KEEP_WORD = {
     "Nate", "Little", "Big", "Sovereign", "Sanctuary", "Thera", "World",
     "Yeah", "Man", "Honestly", "Oh", "Nah", "The", "That", "This", "What",
     "When", "Where", "Alright", "Sorry", "Look", "Here", "There", "Then",
     "And", "But", "Well", "How", "Why", "Let", "Just", "Right", "Good",
+    "Maybe", "Anyway", "Listen", "Also", "Plus", "Wait", "Hey", "Cool",
+    "Sure", "True", "Fair", "Same", "Next", "Last", "First", "Now", "Still",
+    "See", "Okay", "Fine", "Dude", "Bro", "Dad", "Mom", "Kid", "Kids",
+    "Child", "Son", "Daughter", "Boy", "Girl", "Coach", "Host", "Caller",
+    "Brother", "Sister", "Uncle", "Aunt", "Actually", "Probably", "Basically",
+    "Seriously", "Exactly", "Totally", "Clearly", "Instead", "Rather",
+    "However", "Meanwhile", "Therefore", "Finally", "Folks", "Perhaps",
 }
 _MID = re.compile(r"(?<=[a-z]\s)([A-Z][a-z]{2,})\b")
+_ENGLISH_HEAD = frozenset(
+    {
+        "instead", "rather", "however", "meanwhile", "therefore", "finally",
+        "folks", "perhaps", "indeed", "without", "during", "before", "after",
+        "since", "while", "given", "having", "being", "going", "trying",
+        "talking", "looking", "feeling", "making", "taking", "coming",
+        "getting", "putting", "even", "never", "always", "often", "usually",
+        "sometimes", "everyone", "someone", "anyone", "nobody", "somebody",
+        "anybody", "whatever", "whenever", "wherever", "although", "because",
+        "unless", "until", "whether", "people", "kids", "coaches", "parents",
+        "another", "other", "every", "each", "most", "many", "some", "both",
+        "over", "under", "into", "onto", "from", "with", "about", "through",
+        "today", "tonight", "tomorrow", "yesterday", "later", "earlier",
+        "speaking", "asking", "telling", "saying", "thinking", "opening",
+        "welcome", "callers", "hosts", "inside", "outside", "between",
+        "among", "across", "toward", "against", "within", "beyond",
+    }
+)
 _STOP = {
     "about", "after", "again", "being", "could", "doing", "from", "have",
     "into", "just", "like", "more", "that", "their", "them", "then", "there",
@@ -47,11 +85,23 @@ def _refer(sentence: str) -> str:
         who = "a woman"
     else:
         who = "a gentleman"
+
+    def _caller(match: re.Match) -> str:
+        first = match.group(1)
+        if first in _KEEP_WORD:
+            return match.group(0)
+        return f"a caller from {match.group(2)}"
+
+    sentence = _CALLER_FROM.sub(_caller, sentence)
     sentence = _TITLE.sub(who, sentence)
 
     def _pair(match: re.Match) -> str:
         phrase = f"{match.group(1)} {match.group(2)}".lower()
         if phrase in _KEEP_PAIR:
+            return match.group(0)
+        before = sentence[: match.start()].rstrip().split()
+        last = before[-1].lower() if before else ""
+        if last in {"the", "on", "show"}:
             return match.group(0)
         return who
 
@@ -60,25 +110,37 @@ def _refer(sentence: str) -> str:
     def _mid(match: re.Match) -> str:
         if match.group(1) in _KEEP_WORD:
             return match.group(0)
+        prev = sentence[: match.start(1)].split()
+        raw = prev[-1].rstrip(".,!?:;") if prev else ""
+        last = raw.lower()
+        if last in _GEO_PREV or last in {"the", "on", "show"}:
+            return match.group(0)
+        if raw[:1].isupper() and re.fullmatch(r"[A-Z][a-z]{2,}", raw):
+            return match.group(0)
         return who
 
     sentence = _MID.sub(_mid, sentence)
     parts = sentence.split()
     head = parts[0].rstrip(".,!?:;") if parts else ""
-    if head and head not in _KEEP_WORD and re.fullmatch(r"[A-Z][a-z]{2,}", head):
+    if (
+        head
+        and head not in _KEEP_WORD
+        and head.lower() not in _ENGLISH_HEAD
+        and re.fullmatch(r"[A-Z][a-z]{2,}", head)
+    ):
         parts[0] = who + parts[0][len(head):]
         sentence = " ".join(parts)
     return sentence
 
 
 def guard_onair(text: str) -> str:
-    """Drop child and age lines. Hide names as a gentleman, a woman, or a couple."""
+    """Hide names. Drop age-identified minors. Keep family-table takes."""
     raw = _EMAIL.sub("", _PHONE.sub("", text or ""))
     raw = _SCORE.sub("", raw)
     kept: List[str] = []
     for part in re.split(r"(?<=[.!?])\s+", raw):
         line = " ".join(part.split())
-        if not line or _CHILD_AGE.search(line):
+        if not line or _AGE_ID.search(line):
             continue
         kept.append(_refer(line))
     return " ".join(kept).strip()

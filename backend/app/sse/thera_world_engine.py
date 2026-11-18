@@ -70,6 +70,55 @@ _DEFAULT_CHARACTER = ("Mirror", "with a faint reflection visible in still water 
 # meaningful cluster of crystals (>= _NPC_CLUSTER_MIN) manifests a persistent named
 # companion who recurs across panels, giving relational patterns a face in the story.
 _NPC_CLUSTER_MIN = 3
+_COMPANION_BANISH_RE = re.compile(
+    r"\b(?:go away|stop showing|do not show|don't show|banish|"
+    r"not that (?:one|figure|character)|leave me)\b",
+    re.I,
+)
+_COMPANION_ENGAGE_RE = re.compile(
+    r"\b(?:stay|come back|tell me more|i like|keep (?:them|him|her|this)|again)\b",
+    re.I,
+)
+
+
+def companion_response(name: str, texts: list) -> str:
+    """engaged, banished, or empty when this turn says nothing about the figure."""
+    name_l = (name or "").strip().lower()
+    if not name_l:
+        return ""
+    engaged = False
+    banished = False
+    for raw in texts or []:
+        low = (raw or "").lower()
+        if name_l not in low:
+            continue
+        if _COMPANION_BANISH_RE.search(low):
+            banished = True
+        elif _COMPANION_ENGAGE_RE.search(low):
+            engaged = True
+    if banished and not engaged:
+        return "banished"
+    if engaged:
+        return "engaged"
+    return ""
+
+
+def select_companions(npcs: list, panel_sequence: int = 0, max_npcs: int = 2) -> list:
+    """Engaged figures come back. Banished figures wait. The story bible is unchanged."""
+    engaged = [n for n in npcs if (n.get("user_response") or "") == "engaged"]
+    waiting = [n for n in npcs if (n.get("user_response") or "") == "banished"]
+    rest = [n for n in npcs if (n.get("user_response") or "") not in ("engaged", "banished")]
+    pool = rest or waiting
+    chosen = list(engaged[:max_npcs])
+    if pool and len(chosen) < max_npcs:
+        start = panel_sequence % len(pool)
+        for i in range(len(pool)):
+            if len(chosen) >= max_npcs:
+                break
+            npc = pool[(start + i) % len(pool)]
+            if npc not in chosen:
+                chosen.append(npc)
+    return chosen[:max_npcs]
 DOMAIN_TO_NPC: Dict[str, Dict[str, str]] = {
     "attachment": {"name": "The Weaver", "role": "weaves and mends the threads that connect", "visual_prompt_fragment": "a quiet weaver figure in the middle distance, threading luminous strands between trees"},
     "love": {"name": "The Hearthkeeper", "role": "tends the fire that warms without burning", "visual_prompt_fragment": "a hearthkeeper tending a small steady fire near the path, warm light on their hands"},
@@ -672,6 +721,34 @@ async def _evolve_archetype_stage(user_id: str, new_biome: str, arch_ident: dict
         return None
 
 
+async def _recent_companion_lines(db_pool, user_id: str) -> List[str]:
+    """Recent client lines, used only to order this user's companions."""
+    if not db_pool or not user_id:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            idents = [user_id]
+            row = await conn.fetchrow(
+                "SELECT username, hardware_id FROM users "
+                "WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                user_id,
+            )
+            if row:
+                for key in ("username", "hardware_id"):
+                    value = row[key]
+                    if value and value not in idents:
+                        idents.append(value)
+            rows = await conn.fetch(
+                "SELECT user_text FROM conversation_history "
+                "WHERE user_id = ANY($1::text[]) ORDER BY created_at DESC LIMIT 30",
+                idents,
+            )
+        return [r["user_text"] for r in rows if r["user_text"]]
+    except Exception as exc:
+        logger.warning("TheraWorld: companion response lookup failed for %s: %s", user_id, exc)
+        return []
+
+
 async def _derive_crystal_npcs(user_id: str, profile: dict, journey: dict, db_pool,
                                panel_sequence: int = 0, max_npcs: int = 2) -> List[dict]:
     """PATENT Section 7 — forge recurring NPCs from crystal domain clusters.
@@ -708,12 +785,18 @@ async def _derive_crystal_npcs(user_id: str, profile: dict, journey: dict, db_po
             registry[key] = npc
             changed = True
 
-    # Rotate which registry NPCs appear today so companions take turns
+    # Engaged companions come back. Banished ones wait. Unmarked ones still rotate.
     ordered = [registry[d.lower().strip()] for d in eligible if d.lower().strip() in registry]
     if not ordered:
         return []
-    start = panel_sequence % len(ordered)
-    todays = [ordered[(start + i) % len(ordered)] for i in range(min(max_npcs, len(ordered)))]
+    lines = await _recent_companion_lines(db_pool, user_id)
+    if lines:
+        for npc in ordered:
+            signal = companion_response(npc.get("name") or "", lines)
+            if signal and npc.get("user_response") != signal:
+                npc["user_response"] = signal
+                changed = True
+    todays = select_companions(ordered, panel_sequence, max_npcs)
     for npc in todays:
         npc["appearances"] = int(npc.get("appearances", 0)) + 1
         changed = True

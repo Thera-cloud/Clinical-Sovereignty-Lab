@@ -806,12 +806,19 @@ class _VaultSyncListState extends State<_VaultSyncList> {
   }
 
   Future<void> _set(String hw, bool on) async {
-    await http.post(
+    final r = await http.post(
       Uri.parse(
           '${AppConfig.apiBaseUrl}/api/coach/integrations/clients/$hw/vault-sync'),
       headers: _h,
       body: json.encode({'vault_sync': on}),
     );
+    if (!mounted) return;
+    if (r.statusCode != 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Vault sync failed (${r.statusCode})')),
+      );
+      return;
+    }
     _load();
   }
 
@@ -2254,6 +2261,10 @@ class _RemoteListCard extends StatelessWidget {
           lines = list.map(labelOf).where((s) => s.isNotEmpty).toList();
         } else if (snap.hasData && snap.data!.statusCode == 403) {
           lines = ['Temporarily unavailable'];
+        } else if (snap.hasData) {
+          lines = ['Could not load (${snap.data!.statusCode})'];
+        } else if (snap.hasError) {
+          lines = ['Could not load'];
         }
         return Container(
           padding: const EdgeInsets.all(14),

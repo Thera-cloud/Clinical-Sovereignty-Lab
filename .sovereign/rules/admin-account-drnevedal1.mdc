@@ -31,7 +31,7 @@ DrNevedal1 must **never** appear in a client's family member list or be treated 
 
 1. **No `family_id` on DrNevedal1** — the admin account must not have a `family_id` or `family_role`. Setting these causes DrNevedal1 to appear in the "Current Members" section of client accounts.
 2. **Never assign admin to a family** — when assigning coaches or managing families, skip accounts with `role=ADMIN`. The `GET /api/client/family/members/{hw_id}` endpoint filters out ADMIN-role accounts as a safety net.
-3. **Coach assignment ≠ family membership** — to make Dr. Nevedal the coach for a client, set `coach_id=COACH_HNEVEDAL_ID` on the client's profile. Do NOT add DrNevedal1 to the client's `family_id`.
+3. **Coach assignment ≠ family membership** — new clients go to CoachN (`COACH_COACHN_ID`). `hnevedal` is an assistant coach, not the default. Do NOT add DrNevedal1 to the client's `family_id`.
 4. **If admin accidentally gets a `family_id`**, remove it immediately from both PostgreSQL (`UPDATE users SET profile_data = ...`) and the JSON registry backup, then restart the bridge to reload the in-memory cache.
 
 ## Where Admin Identity Lives

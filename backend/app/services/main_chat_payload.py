@@ -231,10 +231,11 @@ def is_resend(user_text: str, live_turns: Optional[List[dict]]) -> bool:
 
 
 def theraworld_this_turn(user_text: str, panel_ctx: str, setting_on: bool) -> bool:
-    if setting_on:
-        return True
+    """A scene is open only when one was actually loaded. The switch alone is not a scene."""
     if (panel_ctx or "").strip():
         return True
+    if setting_on:
+        return False
     return bool(_PANEL_RE.search(user_text or ""))
 
 
@@ -326,11 +327,53 @@ def repair_prior_turns(history: Optional[List[dict]], current_user: str) -> Tupl
 
 
 def _clip(text: str, limit: int) -> str:
+    return _clip_marked(text, limit, "[older lines of this block were left out]")
+
+
+def _clip_marked(text: str, limit: int, note: str) -> str:
     body = (text or "").strip()
     if len(body) <= limit:
         return body
     cut = body[:limit].rsplit("\n", 1)[0]
-    return (cut or body[:limit]) + "\n[older lines of this block were left out]"
+    return (cut or body[:limit]) + "\n" + note
+
+
+_ATTACHMENT_BUDGET = 6_000
+_PANEL_RESERVE = 1_500
+_END_CUT_NOTE = "[the end of this block was left out]"
+
+
+def panel_reserved_slice(panel_ctx: str, limit: int = _PANEL_RESERVE) -> str:
+    """Keep the character, the scene, and the pixel note. Drop the long protocol."""
+    kept = []
+    for line in (panel_ctx or "").splitlines():
+        stripped = line.strip()
+        if (
+            stripped.startswith("- Core character")
+            or stripped.startswith("- Scene narrative")
+            or stripped.startswith("[SSE PANEL IMAGE")
+            or stripped.startswith("[SCENE NOTES ARE WRITING ONLY]")
+        ):
+            kept.append(stripped)
+    return _clip_marked("\n".join(kept), limit, _END_CUT_NOTE)
+
+
+def shared_turn_note(attachment_block: str, panel_ctx: str) -> str:
+    """Vault text first, panel slice last, inside the 6000-character cap."""
+    panel = panel_reserved_slice(panel_ctx)
+    vault = _as_text(attachment_block)
+    scene = (panel_ctx or "").strip()
+    if scene and scene in vault:
+        vault = vault.replace(scene, "").strip()
+    if not panel:
+        return _clip_marked(vault, _ATTACHMENT_BUDGET, _END_CUT_NOTE)
+    note_extra = len(_END_CUT_NOTE) + 1
+    vault_limit = _ATTACHMENT_BUDGET - len(panel) - 2 - note_extra
+    vault_part = _clip_marked(vault, vault_limit, _END_CUT_NOTE) if vault and vault_limit > 80 else ""
+    joined = f"{vault_part}\n\n{panel}" if vault_part else panel
+    if len(joined) > _ATTACHMENT_BUDGET:
+        return panel
+    return joined
 
 
 def _strip_reflections(text: str) -> str:
@@ -483,7 +526,7 @@ def assemble_stride_prompt(
         tail_bits.append(directives)
     if depth_directive and not fragile:
         tail_bits.append(_clip(depth_directive, 900))
-    attachment = _clip(_as_text(attachment_block), 6_000)
+    attachment = shared_turn_note(attachment_block, panel_ctx)
     if attachment:
         tail_bits.append("SHARED THIS TURN (answer from it):\n" + attachment)
     if resend:
@@ -496,8 +539,10 @@ def assemble_stride_prompt(
     elif _TEACH_RE.search(user_text or ""):
         tail_bits.append("TEACHING: they asked. One step toward what they asked, tied to their words.")
     if theraworld_this_turn(user_text, panel_ctx, theraworld_setting):
-        scene = "" if attachment else _clip(panel_ctx, 500)
+        scene = _clip(panel_reserved_slice(panel_ctx) or (panel_ctx or ""), 500)
         tail_bits.append("THERA-WORLD: they opened it this turn." + (f"\n{scene}" if scene else ""))
+    elif theraworld_setting and not (panel_ctx or "").strip():
+        pass
     elif session_id and session_id not in _journey_offered and not fragile:
         if len(_journey_offered) > 500:
             _journey_offered.clear()
@@ -507,7 +552,13 @@ def assemble_stride_prompt(
         tail_bits.append(_clip(safety_suffix, 1_200))
     if ios_mode:
         tail_bits.append("Wellness mode: no diagnosis and no treatment claims.")
-    if has_vision:
+    writing_only = "[SCENE NOTES ARE WRITING ONLY]" in (panel_ctx or "")
+    if has_vision and writing_only:
+        tail_bits.append(
+            "A vault file is attached as pixels. Trust those pixels for the file. "
+            "The journey scene is writing only."
+        )
+    elif has_vision:
         tail_bits.append("An image is attached. Trust the picture over any caption.")
     elif (panel_ctx or "").strip():
         tail_bits.append("No picture arrived this turn. You have written scene notes only. Do not say you can see it.")

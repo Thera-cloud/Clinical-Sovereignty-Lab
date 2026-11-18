@@ -19,7 +19,13 @@ VERTICALS = (
 )
 
 INV6_BLOCKED = re.compile(
-    r"\b(clinical|therapy|diagnose|treatment|prescribe|assess your case)\b",
+    r"\b("
+    r"diagnose(?:s|d|ing)? (?:you|your|this client|the client)|"
+    r"prescribe(?:s|d|ing)? (?:you|your|medication|meds|treatment)|"
+    r"assess your case|"
+    r"(?:this|your) therapy case|"
+    r"clinical (?:hour|diagnosis|treatment|case)"
+    r")\b",
     re.IGNORECASE,
 )
 
