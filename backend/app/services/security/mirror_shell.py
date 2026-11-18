@@ -38,6 +38,20 @@ from app.models.hive_defense import (
 
 logger = logging.getLogger("hive.mirror_shell")
 
+_client_shell: Optional["MirrorShell"] = None
+
+
+async def client_control_shell() -> "MirrorShell":
+    """Shell for the bridge process. The backend hive dict is not in that process."""
+    global _client_shell
+    if _client_shell is None:
+        from app.services.security.forensic_logger import ForensicLogger
+        shell = MirrorShell(coherence_gate=None, forensic_logger=ForensicLogger())
+        await shell.initialize()
+        _client_shell = shell
+        logger.info("Bridge client-control mirror ready")
+    return _client_shell
+
 
 # =============================================================================
 # MIRROR NAMESPACE MANAGER
@@ -288,6 +302,7 @@ class MirrorShell:
         self._mirror_contained: int = 0
         self._mirror_suspicious: int = 0
         self._passed_to_real: int = 0
+        self._control_hits: Dict[str, List[float]] = {}
 
         self._initialized: bool = False
         logger.info("MirrorShell created (patent claim %d)", self.PATENT_CLAIM)
@@ -314,6 +329,47 @@ class MirrorShell:
 
         self._initialized = True
         logger.info("MirrorShell initialized — defense perimeter ACTIVE")
+
+    async def assess_client_control(self, signal: Dict[str, Any]) -> GateDecision:
+        """External login and credential messages. Hive heartbeats do not apply.
+
+        Contain an oversized body or a burst of control attempts from one address.
+        A normal login passes. # SOVEREIGN-VOICE
+        """
+        source = str(signal.get("source_address") or "unknown")[:128]
+        signal_type = str(signal.get("signal_type") or "unknown")[:64]
+        try:
+            size = int(signal.get("payload_size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        now = time.time()
+        hits = [stamp for stamp in self._control_hits.get(source, []) if now - stamp < 60]
+        hits.append(now)
+        self._control_hits[source] = hits
+        if len(self._control_hits) > 5000:
+            self._control_hits.pop(next(iter(self._control_hits)))
+        decision = GateDecision.PASS_TO_REAL
+        reason = "external control accepted"
+        if size > 262144 or len(hits) > 30:
+            decision = GateDecision.MIRROR_CONTAIN
+            reason = "oversized control message" if size > 262144 else "control burst"
+        if self._initialized and self._forensic is not None:
+            try:
+                await self._forensic.log_event(
+                    event_type="hive.mirror.client_control",
+                    source_entity=source,
+                    evidence={
+                        "signal_type": signal_type,
+                        "bytes": size,
+                        "decision": decision.value,
+                        "reason": reason,
+                    },
+                )
+            except Exception as exc:
+                logger.warning("MirrorShell control log failed: %s", exc)
+        elif not self._initialized:
+            logger.error("assess_client_control before initialize — %s", reason)
+        return decision
 
     async def shutdown(self) -> None:
         """
@@ -353,6 +409,9 @@ class MirrorShell:
         Returns:
             The GateDecision indicating what happened to the signal.
         """
+        if signal.get("external"):
+            return await self.assess_client_control(signal)
+
         if not self._initialized:
             logger.error("process_signal called before initialize() — rejecting")
             return GateDecision.MIRROR_CONTAIN

@@ -497,6 +497,7 @@ class GhostSwarm:
         self._mission_models: Dict[UUID, GhostMission] = {}
         # Assembled findings (populated after recall, OUTSIDE the zone)
         self._assembled_findings: Dict[UUID, List[Dict[str, Any]]] = {}
+        self._deployment_approvals: Dict[str, Dict[str, str]] = {}
         # Lock for mission management
         self._lock = asyncio.Lock()
 
@@ -557,7 +558,18 @@ class GhostSwarm:
     # DEPLOYMENT
     # --------------------------------------------------------------------- #
 
-    async def deploy(self, containment_zone: str) -> GhostMission:
+    def grant_deployment(self, approver: str, zone: str) -> str:
+        """Record admin approval before any deceptive ghost deploy. Claims 53-56."""
+        import secrets
+        token = secrets.token_hex(16)
+        self._deployment_approvals[token] = {
+            "approver": (approver or "")[:64],
+            "zone": zone,
+        }
+        logger.info("Ghost deploy approval recorded for zone %s", zone)
+        return token
+
+    async def deploy(self, containment_zone: str, approval_token: str = "") -> GhostMission:
         """
         Deploy a ghost swarm into a containment zone.
 
@@ -576,6 +588,10 @@ class GhostSwarm:
         GhostMission
             Pydantic model describing the active mission.
         """
+        approval = self._deployment_approvals.pop(approval_token, None) if approval_token else None
+        if not approval or approval.get("zone") != containment_zone:
+            logger.warning("Ghost swarm deploy refused: no admin approval for %s", containment_zone)
+            raise PermissionError("ghost deploy requires recorded admin approval")
         mission_id = uuid4()
         ghosts = self._compose_swarm(mission_id, containment_zone)
         total_count = len(ghosts)

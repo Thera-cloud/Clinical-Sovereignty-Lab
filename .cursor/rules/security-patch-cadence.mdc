@@ -11,7 +11,7 @@ Cadence and severity handling established with **2026-04-29 Sunday-readiness** /
 
 | Trigger | Minimum frequency |
 |--------|-------------------|
-| **Quarterly** | At least once per calendar quarter on **production-shaped** deps. |
+| **Quarterly** | At least once per calendar quarter on **production-shaped** deps. Same quarter, write down the public hostnames and ports that answer (app, coach, command, api, www). |
 | **Major exposure** | Before **radio / press / large marketing / product launch** windows. |
 | **After incidents** | When a CVE is disclosed for a runtime dependency already in use. |
 
@@ -19,7 +19,8 @@ Cadence and severity handling established with **2026-04-29 Sunday-readiness** /
 
 | Severity | Action |
 |----------|--------|
-| **CRITICAL** | Patch within **7 days** (sooner if exploit in the wild). |
+| **CRITICAL, internet-facing, known exploited** | Patch within **3 days**. List the exposed host in the quarterly asset note. This matches the control intent of CISA BOD 26-04 for the worst class. The directive itself binds federal civilian agencies. |
+| **CRITICAL** | Patch within **7 days** when it is not in the row above. |
 | **HIGH** | Patch within **30 days**. |
 | **MEDIUM** | Next **quarterly** cycle, **unless** exploitation evidence or auditor mandate — then treat as HIGH. |
 

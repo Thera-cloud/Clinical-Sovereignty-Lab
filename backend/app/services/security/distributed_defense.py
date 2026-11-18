@@ -323,8 +323,20 @@ class MeshGhostSwarm:
 
     def __init__(self):
         self._phantoms: Dict[str, MeshPhantomNode] = {}
+        self._approvals: Dict[str, str] = {}
 
-    def deploy(self, count: int = 5) -> List[str]:
+    def grant(self, approver: str) -> str:
+        """Record admin approval before phantom nodes are deployed. Claims 53-56."""
+        token = secrets.token_hex(16)
+        self._approvals[token] = (approver or "")[:64]
+        logger.info("Phantom deploy approval recorded")
+        return token
+
+    def deploy(self, count: int = 5, approval_token: str = "") -> List[str]:
+        if approval_token not in self._approvals:
+            logger.warning("Phantom deploy refused: no admin approval")
+            raise PermissionError("phantom deploy requires recorded admin approval")
+        self._approvals.pop(approval_token, None)
         ids = []
         for _ in range(count):
             nid = f"phantom_{secrets.token_hex(6)}"

@@ -1493,6 +1493,7 @@ async def deploy_mirror_trap(request: Request, body: dict = {}):
     if not orchestrator:
         raise HTTPException(503, "Sentinel orchestrator not initialized")
 
+    logger.info("Mirror trap deploy recorded for admin session, ip=%s", ip)
     namespace_id = await orchestrator._route_to_mirror(ip)
     return {
         "status": "deployed",

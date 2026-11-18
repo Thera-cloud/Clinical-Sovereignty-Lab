@@ -13923,29 +13923,35 @@ async def handle_client(websocket, path=None):
                 await websocket.close(1008, "Auth timeout")
                 return
 
-            # ── PHASE 8: Mirror Shell Signal Evaluation ──────────────────
-            # Every external WebSocket message is logged through the Mirror
-            # Shell for forensic monitoring and anomaly detection.
-            # The shell runs asynchronously and does NOT block the message
-            # dispatch — it records the signal for the Curiosity Protocol,
-            # Drift Scorer, and Forensic Logger to analyze.
+            # ── PHASE 8: Mirror Shell control gate ───────────────────────
+            # SOVEREIGN-VOICE: login and credential messages wait on the mirror.
+            # External clients are not hive fibres, so they are not absorbed.
+            # HIVE_MIRROR_ENFORCE closes the socket when the decision is contain.
             try:
-                _hive = getattr(_fastapi_app, 'hive_defense', None) if '_fastapi_app' in dir() else None
-                if _hive is None and db_pool is not None:
-                    # Try to get from the module-level reference
-                    _hive = _hive_defense_ref
-                if _hive and _hive.get("mirror_shell"):
-                    import asyncio as _aio
-                    _aio.ensure_future(
-                        _hive["mirror_shell"].process_signal({
-                            "source": uid or "GUEST",
-                            "type": t,
-                            "payload_size": len(message),
-                            "hardware_id": current_hardware_id or "unknown",
-                        })
-                    )
+                from app.services.security.mirror_shell import client_control_shell
+                _control_types = (
+                    "login_request", "register_request", "verify_admin_passphrase",
+                    "verify_sms_code", "forgot_password", "force_password_change", "auth",
+                )
+                if t in _control_types:
+                    _shell = await client_control_shell()
+                    _decision = await _shell.assess_client_control({
+                        "source_address": client_ip or uid or "GUEST",
+                        "signal_type": t,
+                        "payload_size": len(message),
+                        "external": True,
+                    })
+                    _enforce = os.getenv("HIVE_MIRROR_ENFORCE", "true").lower() in ("1", "true", "yes")
+                    if _enforce and getattr(_decision, "value", "") == "contain":
+                        await websocket.close(1008, "Blocked by defense perimeter")
+                        return
             except Exception:
-                pass  # Mirror Shell is non-blocking; failures never affect WS traffic
+                if os.getenv("HIVE_MIRROR_ENFORCE", "true").lower() in ("1", "true", "yes") and t in (
+                    "login_request", "register_request", "verify_admin_passphrase",
+                    "verify_sms_code", "forgot_password", "force_password_change", "auth",
+                ):
+                    await websocket.close(1008, "Blocked by defense perimeter")
+                    return
 
             # ── HIVE DEFENSE v4.0: Guardian Fibre per-message observation ─
             # Every WS message from an authenticated user updates the

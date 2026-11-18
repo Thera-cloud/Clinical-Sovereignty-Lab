@@ -1245,6 +1245,10 @@ async def lifespan(app: FastAPI):
             coherence_gate=coherence_gate,
             forensic_logger=forensic_logger,
         )
+        try:
+            await mirror_shell.initialize()  # SOVEREIGN-VOICE: perimeter active before traffic
+        except Exception as _mirror_init_err:
+            logger.warning("MirrorShell initialize failed: %s", _mirror_init_err)
         attacker_db = AttackerFingerprintDB()
         # Penetrator + InfiniteMirrorTrap are spawned per-incident, not singletons.
         # We store factory references for the API/workers to use.

@@ -358,7 +358,8 @@ async def summon_internal(request: Request):
         except HTTPException:
             raise
         except Exception as ems_err:
-            logger.warning("EdgeMirrorShell assessment error (allowing): %s", ems_err)
+            logger.warning("EdgeMirrorShell assessment error (denying): %s", ems_err)
+            raise HTTPException(403, "Request denied by coherence layer")
 
     # SASE inbound evaluation
     hive_v4 = getattr(request.app.state, "hive_v4", {})
@@ -377,7 +378,8 @@ async def summon_internal(request: Request):
         except HTTPException:
             raise
         except Exception as sase_err:
-            logger.warning("SASE evaluation error (allowing): %s", sase_err)
+            logger.warning("SASE evaluation error (denying): %s", sase_err)
+            raise HTTPException(403, "Request denied by SASE policy")
 
     try:
         import json
@@ -403,7 +405,8 @@ async def summon_internal(request: Request):
         except HTTPException:
             raise
         except Exception as es_err:
-            logger.warning("EndpointShield evaluation error (allowing): %s", es_err)
+            logger.warning("EndpointShield evaluation error (denying): %s", es_err)
+            raise HTTPException(403, "Payload rejected by endpoint shield")
 
     summon_service = getattr(request.app.state, "nate_summon_service", None)
     if not summon_service:
