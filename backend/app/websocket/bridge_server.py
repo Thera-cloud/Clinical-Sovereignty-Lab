@@ -13961,13 +13961,11 @@ async def handle_client(websocket, path=None):
             # Runs asynchronously so it never blocks the message dispatch.
             if uid and current_profile:
                 try:
-                    _hv4 = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
-                    _hv4 = getattr(_hv4, 'hive_v4', None) if _hv4 else None
-                    if _hv4:
-                        _gf = _hv4.get("guardian_fibre")
-                        if _gf:
-                            import asyncio as _aio_gf
-                            _aio_gf.ensure_future(
+                    from app.websocket.bridge_defense_taps import bridge_guardian
+                    _gf = bridge_guardian(db_pool)
+                    if _gf:
+                        import asyncio as _aio_gf
+                        _aio_gf.ensure_future(
                                 _gf.observe_request(
                                     user_id=uid,
                                     message_type=t or "unknown",
@@ -13984,18 +13982,11 @@ async def handle_client(websocket, path=None):
             # ── HIVE DEFENSE v4.3: Pipeline Drum tap for WS messages (GAP W1) ──
             # WS traffic bypasses HTTP middleware, so we tap directly here.
             try:
-                _hv4_drum = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
-                _hv4_drum = getattr(_hv4_drum, 'hive_v4', None) if _hv4_drum else None
-                if _hv4_drum:
-                    _drum = _hv4_drum.get("pipeline_drum")
-                    if _drum:
-                        _drum.tap_request(
-                            endpoint=f"ws://{t or 'unknown'}",
-                            method="WS",
-                            status_code=200,
-                            response_time_ms=0,
-                            payload=message.encode() if isinstance(message, str) else message,
-                        )
+                from app.websocket.bridge_defense_taps import bridge_drum, note_drum_tap
+                _drum = await bridge_drum()
+                if _drum:
+                    _raw = message.encode() if isinstance(message, str) else message
+                    note_drum_tap(_drum, f"ws://{t or 'unknown'}", _raw if isinstance(_raw, (bytes, bytearray)) else b"")
             except Exception:
                 pass  # Pipeline Drum tap is non-blocking
 
@@ -14080,6 +14071,14 @@ async def handle_client(websocket, path=None):
                     handle_client._login_attempts.pop(_bf_key, None)
 
                     # ── HIVE DEFENSE v4.0: Guardian Fibre imprint on login ──
+                    # SOVEREIGN-VOICE: score only. This does not accept or reject the login.
+                    try:
+                        from app.websocket.bridge_defense_taps import bridge_guardian as _bridge_guardian
+                        _gf_local = _bridge_guardian(db_pool)
+                        if _gf_local:
+                            _hive_v4 = {"guardian_fibre": _gf_local}
+                    except Exception:
+                        pass
                     if _hive_v4:
                         try:
                             _gf = _hive_v4.get("guardian_fibre")
