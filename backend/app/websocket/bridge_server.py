@@ -13558,7 +13558,7 @@ async def handle_client(websocket, path=None):
                     _li_pwl = len(d.get("password") or "")
                     _li_tele = d.get("client_telemetry") or {}
                     _li_att = _li_tele.get("attempt_number") if isinstance(_li_tele, dict) else None
-                    _li_ip = getattr(websocket, 'remote_address', ('?',))[0] if hasattr(websocket, 'remote_address') else '?'
+                    _li_ip = client_ip or "?"  # SOVEREIGN-VOICE
                     print(f">>> [LOGIN_AUDIT] in id={_li_id!r} role={_li_role} pw_len={_li_pwl} ip={_li_ip} attempt={_li_att}")
                 except Exception:
                     print(f">>> RECEIVED: type={_log_type} [content redacted]")
@@ -13929,14 +13929,20 @@ async def handle_client(websocket, path=None):
             try:
                 from app.services.security.mirror_shell import client_control_shell
                 _shell = await client_control_shell()
+                if db_pool is not None:
+                    _shell.attach_pool(db_pool)
                 _src = client_ip or uid or "GUEST"
                 if t in (
                     "login_request", "register_request", "verify_admin_passphrase",
                     "verify_sms_code", "forgot_password", "force_password_change", "auth",
-                ) or _shell.reflection_held(id(websocket), _src):
-                    _held = await _shell.hold_external_attempt(_src, t, len(message), id(websocket))
+                ) or _shell.reflection_held(id(websocket), _src) or not current_profile:
+                    _held = await _shell.hold_external_attempt(
+                        _src, t, len(message), id(websocket), authenticated=bool(current_profile),
+                    )
                     if _held.get("frame"):
                         await websocket.send(json.dumps(_held["frame"]))
+                        return
+                    if _held.get("drop"):
                         return
                     if _held.get("close"):
                         await websocket.close(1008, "Blocked by defense perimeter")
@@ -13999,7 +14005,7 @@ async def handle_client(websocket, path=None):
                 if not hasattr(handle_client, '_login_attempts'):
                     handle_client._login_attempts = {}
                 _login_user = (d.get("username", "") or "").strip().lower()
-                _login_ip = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
+                _login_ip = client_ip or "unknown"  # SOVEREIGN-VOICE
                 # QUANTUM-CRYSTAL-ARCH: username lockout (IP rotation cannot bypass)
                 _bf_key = _login_user or f"ip:{_login_ip}"
                 _bf = handle_client._login_attempts.get(_bf_key, {"count": 0, "locked_until": None})
@@ -14262,7 +14268,7 @@ async def handle_client(websocket, path=None):
                     # SOVEREIGN-VOICE: P6-002 — log successful login (schema-correct)
                     if db_pool:
                         try:
-                            _la_ip2 = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
+                            _la_ip2 = client_ip or "unknown"  # SOVEREIGN-VOICE
                             _la_id2 = res.get("username", _login_user or "unknown")
                             _la_ua2 = (d.get("user_agent") or "")[:200]
                             _la_uah2 = hashlib.sha256(_la_ua2.encode()).hexdigest()[:32] if _la_ua2 else None
@@ -14352,7 +14358,7 @@ async def handle_client(websocket, path=None):
                             _ci_signal = AttackSignal(
                                 source=AttackSource.WEBSOCKET,
                                 failure_type=f"login_failed:{res}",
-                                ip_address=getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else None,
+                                ip_address=client_ip,  # SOVEREIGN-VOICE
                                 user_agent=d.get("user_agent"),
                                 metadata={"username": d.get("username", ""), "expected_role": d.get("expected_role")},
                             )
@@ -14362,7 +14368,7 @@ async def handle_client(websocket, path=None):
                     # SOVEREIGN-VOICE: P6-002 — persist failed login (schema-correct, rich context)
                     if db_pool:
                         try:
-                            _la_ip = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
+                            _la_ip = client_ip or "unknown"  # SOVEREIGN-VOICE
                             _la_id = (d.get("username") or "unknown").strip()
                             _la_idtype = "email" if "@" in _la_id else "username"
                             _la_pwl = len(d.get("password") or "")

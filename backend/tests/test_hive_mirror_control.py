@@ -1,5 +1,7 @@
 """Control-plane checks for the mirror and ghost deploy gate."""
 
+import asyncio
+
 import pytest
 
 from app.models.hive_defense import GateDecision
@@ -114,6 +116,86 @@ async def test_ghost_deploy_requires_recorded_approval():
         await swarm.deploy("zone-a")
     token = swarm.grant_deployment("DrNevedal1", "zone-a")
     assert token
+
+
+@pytest.mark.asyncio
+async def test_known_preauth_frame_still_reaches_the_handler():
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    held = await shell.hold_external_attempt(
+        "203.0.113.10", "forgot_password_request", 180, 70, authenticated=False,
+    )
+    assert held == {}
+    consent = await shell.hold_external_attempt(
+        "203.0.113.10", "accept_consent_update", 120, 70, authenticated=False,
+    )
+    assert consent == {}
+
+
+@pytest.mark.asyncio
+async def test_unlisted_preauth_frame_is_dropped_and_login_still_passes():
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    dropped = await shell.hold_external_attempt(
+        "203.0.113.11", "get_metrics", 40, 71, authenticated=False,
+    )
+    assert dropped == {"drop": True}
+    login = await shell.hold_external_attempt(
+        "203.0.113.11", "login_request", 400, 71, authenticated=False,
+    )
+    assert login == {}
+
+
+@pytest.mark.asyncio
+async def test_authenticated_chat_is_not_contained():
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    held = await shell.hold_external_attempt(
+        "203.0.113.12", "nate_query", 80, 72, authenticated=True,
+    )
+    assert held == {}
+
+
+@pytest.mark.asyncio
+async def test_preauth_hold_off_lets_an_unlisted_frame_through(monkeypatch):
+    monkeypatch.setenv("HIVE_MIRROR_PREAUTH_HOLD", "false")
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    held = await shell.hold_external_attempt(
+        "203.0.113.13", "get_metrics", 40, 73, authenticated=False,
+    )
+    assert held == {}
+
+
+@pytest.mark.asyncio
+async def test_unlisted_burst_is_contained(monkeypatch):
+    monkeypatch.setenv("HIVE_MIRROR_REFLECT", "true")
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    last = {}
+    for _ in range(31):
+        last = await shell.hold_external_attempt(
+            "203.0.113.14", "get_metrics", 40, 74, authenticated=False,
+        )
+    assert "frame" in last or last == {"close": True}
+
+
+class _Boom:
+    async def log_event(self, **kwargs):
+        raise RuntimeError("store down")
+
+    async def flush_to_db(self, pool):
+        raise RuntimeError("store down")
+
+
+@pytest.mark.asyncio
+async def test_forensic_failure_does_not_change_a_normal_login():
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Boom())
+    await shell.initialize()
+    shell.attach_pool(object())
+    held = await shell.hold_external_attempt("203.0.113.15", "login_request", 400, 75)
+    assert held == {}
+    await asyncio.sleep(0)
 
 
 def test_phantom_deploy_requires_recorded_approval():

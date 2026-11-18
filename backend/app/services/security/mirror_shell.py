@@ -43,6 +43,18 @@ _CONTROL_TYPES = frozenset({
     "login_request", "register_request", "verify_admin_passphrase",
     "verify_sms_code", "forgot_password", "force_password_change", "auth",
 })
+# Frames the app sends before a profile exists. Anything else on that socket
+# is logged and not dispatched. A logged-in session is not on this list.
+_PRE_AUTH = frozenset({
+    "login_request", "register_request", "auth", "session_recover",
+    "verify_admin_passphrase", "verify_sms_code",
+    "accept_consent_update", "accept_coach_ethics",
+    "forgot_password", "forgot_password_request", "forgot_password_confirm",
+    "forgot_password_phone_request", "forgot_password_phone_confirm",
+    "forgot_username_request", "force_password_change",
+    "public_trial_start", "public_trial_chat", "public_trial_capture_email",
+    "ping", "pong", "logout",
+})
 _client_shell: Optional["MirrorShell"] = None
 
 
@@ -54,6 +66,7 @@ async def client_control_shell() -> "MirrorShell":
         shell = MirrorShell(coherence_gate=None, forensic_logger=ForensicLogger())
         await shell.initialize()
         _client_shell = shell
+        print(">>> [HIVE] Bridge client-control mirror ready", flush=True)
         logger.info("Bridge client-control mirror ready")
     return _client_shell
 
@@ -309,6 +322,7 @@ class MirrorShell:
         self._passed_to_real: int = 0
         self._control_hits: Dict[str, List[float]] = {}
         self._holds: Dict[str, Dict[str, Any]] = {}
+        self._db_pool = None
 
         self._initialized: bool = False
         logger.info("MirrorShell created (patent claim %d)", self.PATENT_CLAIM)
@@ -348,34 +362,70 @@ class MirrorShell:
             size = int(signal.get("payload_size") or 0)
         except (TypeError, ValueError):
             size = 0
+        hits = self._note_hit(source)
+        decision = GateDecision.PASS_TO_REAL
+        reason = "external control accepted"
+        if size > 262144 or hits > 30:
+            decision = GateDecision.MIRROR_CONTAIN
+            reason = "oversized control message" if size > 262144 else "control burst"
+        await self._record_decision(source, signal_type, size, decision.value, reason)
+        if not self._initialized:
+            logger.error("assess_client_control before initialize — %s", reason)
+        return decision
+
+    def attach_pool(self, pool) -> None:
+        """Best-effort store for the bridge forensic buffer. Never required to log in."""
+        self._db_pool = pool
+
+    def _note_hit(self, source: str) -> int:
         now = time.time()
         hits = [stamp for stamp in self._control_hits.get(source, []) if now - stamp < 60]
         hits.append(now)
         self._control_hits[source] = hits
         if len(self._control_hits) > 5000:
             self._control_hits.pop(next(iter(self._control_hits)))
-        decision = GateDecision.PASS_TO_REAL
-        reason = "external control accepted"
-        if size > 262144 or len(hits) > 30:
-            decision = GateDecision.MIRROR_CONTAIN
-            reason = "oversized control message" if size > 262144 else "control burst"
+        return len(hits)
+
+    async def _record_decision(
+        self, source: str, signal_type: str, size: int, decision: str, reason: str,
+    ) -> None:
+        print(
+            f">>> [HIVE] decision={decision} type={str(signal_type)[:64]} "
+            f"bytes={int(size or 0)} source={str(source)[:128]} reason={reason}",
+            flush=True,
+        )
         if self._initialized and self._forensic is not None:
             try:
                 await self._forensic.log_event(
                     event_type="hive.mirror.client_control",
-                    source_entity=source,
+                    source_entity=str(source)[:128],
                     evidence={
-                        "signal_type": signal_type,
-                        "bytes": size,
-                        "decision": decision.value,
-                        "reason": reason,
+                        "signal_type": str(signal_type)[:64],
+                        "bytes": int(size or 0),
+                        "decision": str(decision)[:32],
+                        "reason": str(reason)[:120],
                     },
                 )
             except Exception as exc:
-                logger.warning("MirrorShell control log failed: %s", exc)
-        elif not self._initialized:
-            logger.error("assess_client_control before initialize — %s", reason)
-        return decision
+                print(f">>> [HIVE] forensic log failed: {exc}", flush=True)
+        self._schedule_flush()
+
+    def _schedule_flush(self) -> None:
+        pool = self._db_pool
+        forensic = self._forensic
+        if pool is None or forensic is None or not hasattr(forensic, "flush_to_db"):
+            return
+        import asyncio
+        try:
+            asyncio.get_running_loop().create_task(self._flush_quiet(pool))
+        except RuntimeError:
+            return
+
+    async def _flush_quiet(self, pool) -> None:
+        try:
+            await self._forensic.flush_to_db(pool)
+        except Exception as exc:
+            print(f">>> [HIVE] forensic flush failed: {exc}", flush=True)
 
     def reflection_held(self, conn_id: int, source: str) -> bool:
         """True when this socket is already inside a reflection hold."""
@@ -388,12 +438,15 @@ class MirrorShell:
         signal_type: str,
         payload_size: int,
         conn_id: int,
+        authenticated: bool = True,
     ) -> Dict[str, Any]:
         """Answer a contained socket with a stored reflection, or close it.
 
         HIVE_MIRROR_REFLECT defaults off. A normal login returns an empty
         dict so the real handler runs. One failed password is not a contain.
-        # SOVEREIGN-VOICE
+        An unlisted type before a session is dropped and not held, so the
+        next login on that socket still reaches the real handler. A burst
+        of those types uses the same contain path. # SOVEREIGN-VOICE
         """
         self._expire_holds()
         key = self._hold_key(conn_id, source)
@@ -411,7 +464,17 @@ class MirrorShell:
             held["seen"] = now
             return {"frame": frame}
         if signal_type not in _CONTROL_TYPES:
-            return {}
+            if authenticated or signal_type in _PRE_AUTH:
+                return {}
+            hold_unknown = os.getenv("HIVE_MIRROR_PREAUTH_HOLD", "true").lower() in ("1", "true", "yes")
+            if not hold_unknown:
+                await self._record_decision(source, signal_type, payload_size, "watch", "preauth hold off")
+                return {}
+            if self._note_hit(source) > 30 or int(payload_size or 0) > 262144:
+                await self._record_decision(source, signal_type, payload_size, "contain", "unlisted preauth")
+                return await self._reflect_contain(source, signal_type, payload_size, key, now)
+            await self._record_decision(source, signal_type, payload_size, "drop", "unlisted preauth")
+            return {"drop": True}
         decision = await self.assess_client_control({
             "source_address": source,
             "signal_type": signal_type,
@@ -420,6 +483,11 @@ class MirrorShell:
         })
         if getattr(decision, "value", "") != "contain":
             return {}
+        return await self._reflect_contain(source, signal_type, payload_size, key, now)
+
+    async def _reflect_contain(
+        self, source: str, signal_type: str, payload_size: int, key: str, now: float,
+    ) -> Dict[str, Any]:
         reflect = os.getenv("HIVE_MIRROR_REFLECT", "false").lower() in ("1", "true", "yes")
         enforce = os.getenv("HIVE_MIRROR_ENFORCE", "true").lower() in ("1", "true", "yes")
         if not reflect:
