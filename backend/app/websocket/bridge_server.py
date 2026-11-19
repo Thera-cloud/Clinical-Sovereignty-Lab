@@ -14012,8 +14012,8 @@ async def handle_client(websocket, path=None):
                     }))
                     continue
 
-                # SOVEREIGN-VOICE: durable lock from login_attempts. Empty username stays on the memory lock.
-                if (d.get("username") or "").strip() and os.getenv("HIVE_LOGIN_DB_LOCK", "true").lower() in ("1", "true", "yes"):
+                # SOVEREIGN-VOICE: durable lock from login_attempts. A blank name uses the caller address.
+                if os.getenv("HIVE_LOGIN_DB_LOCK", "true").lower() in ("1", "true", "yes"):
                     try:
                         from app.websocket.bridge_defense_taps import bridge_login_allowed
                         _login_check = await bridge_login_allowed(
@@ -14065,6 +14065,11 @@ async def handle_client(websocket, path=None):
                 if tok:
                     uid = res.get("hardware_id")
                     handle_client._login_attempts.pop(_bf_key, None)
+                    try:
+                        from app.websocket.bridge_defense_taps import note_login_success
+                        await note_login_success(_login_user, _login_ip)  # SOVEREIGN-VOICE
+                    except Exception:
+                        pass
 
                     # ── HIVE DEFENSE v4.0: Guardian Fibre imprint on login ──
                     # SOVEREIGN-VOICE: score only. This does not accept or reject the login.
@@ -14343,6 +14348,11 @@ async def handle_client(websocket, path=None):
                         print(f"[SECURITY] Login locked for 3min: user={_login_user} ip={_login_ip}")
                     await websocket.send(json.dumps(_login_fail_payload))
                     handle_client._login_attempts[_bf_key] = _bf
+                    try:
+                        from app.websocket.bridge_defense_taps import note_login_failure
+                        await note_login_failure(_login_user, _login_ip)  # SOVEREIGN-VOICE
+                    except Exception:
+                        pass
                     # Feed counter-intelligence orchestrator on failed login
                     try:
                         _ci_orch = sys.modules[__name__].__dict__.get('_ci_orchestrator')
@@ -14364,8 +14374,12 @@ async def handle_client(websocket, path=None):
                     if db_pool:
                         try:
                             _la_ip = client_ip or "unknown"  # SOVEREIGN-VOICE
-                            _la_id = (d.get("username") or "unknown").strip()
-                            _la_idtype = "email" if "@" in _la_id else "username"
+                            _la_id = (d.get("username") or "").strip()
+                            if not _la_id:
+                                _la_id = f"ip:{_la_ip}"
+                                _la_idtype = "ip"
+                            else:
+                                _la_idtype = "email" if "@" in _la_id else "username"
                             _la_pwl = len(d.get("password") or "")
                             _la_tele = d.get("client_telemetry") or {}
                             _la_att = _la_tele.get("attempt_number") if isinstance(_la_tele, dict) else None
