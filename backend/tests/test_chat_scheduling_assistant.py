@@ -143,14 +143,20 @@ async def test_handle_turn_no_slots(monkeypatch):
     assert "open" in out["response"].lower() or "another day" in out["response"].lower()
 
 
-# Bridge client_book_session error codes — Flutter NeuralInterfaceV2 handles these.
+# Bridge client_book_session error codes — main chat shows the policy detail.
 BOOKING_ERROR_CODES = frozenset({
     "COVENANT_REQUIRED",
     "SESSION_LIMIT_REACHED",
+    "PAYMENT_CONSENT_REQUIRED",
+    "CARD_REQUIRED",
     "Time slot conflict",
 })
 
 
 @pytest.mark.parametrize("code", sorted(BOOKING_ERROR_CODES))
 def test_booking_error_codes_contract(code):
-    assert code in BOOKING_ERROR_CODES
+    from pathlib import Path
+    chat = Path(__file__).resolve().parents[2] / "mobile/lib/updated_screens.dart"
+    text = chat.read_text()
+    assert code in text
+    assert "'payment_consent': true" in text

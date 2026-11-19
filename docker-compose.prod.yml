@@ -477,6 +477,8 @@ services:
       - HIVE_MIRROR_REFLECT=${HIVE_MIRROR_REFLECT:-false}
       # QUANTUM-CRYSTAL-ARCH — main-chat stride live turns (operator on 2026-11-15)
       - ENABLE_MAIN_CHAT_STRIDE=${ENABLE_MAIN_CHAT_STRIDE:-true}
+      # QUANTUM-CRYSTAL-ARCH — main-chat slot chips (real calendar, same book path as Settings)
+      - ENABLE_CHAT_SCHEDULING=${ENABLE_CHAT_SCHEDULING:-true}
       # QUANTUM-CRYSTAL-ARCH — paid Inner Chamber / Sovereign Circle must go Stripe-first (WS bypass blocked)
       - REGISTRATION_STRIPE_FIRST=true
       # QUANTUM-CRYSTAL-ARCH — heal→thrive phase model (bridge addendum)

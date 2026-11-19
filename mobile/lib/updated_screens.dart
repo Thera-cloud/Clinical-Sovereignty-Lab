@@ -2570,7 +2570,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
               : 'Please accept the updated Sovereign Covenant to continue.');
           return;
         }
-        const schedCodes = {'COVENANT_REQUIRED', 'SESSION_LIMIT_REACHED'};
+        const schedCodes = {
+          'COVENANT_REQUIRED',
+          'SESSION_LIMIT_REACHED',
+          'PAYMENT_CONSENT_REQUIRED',
+          'CARD_REQUIRED',
+        };
         if (schedCodes.contains(code) || code == 'Time slot conflict') {
           final friendly = detail.isNotEmpty ? detail : code;
           _addSystemMsg(friendly);
@@ -2661,21 +2666,51 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2>
   }
 
   void _bookSchedulingSlot(String coachId, String startIso, String endIso) {
-    if (startIso.isEmpty || endIso.isEmpty) return;
-    // Prefer server-resolved coach_id; fall back to profile fields.
+    if (startIso.isEmpty || endIso.isEmpty || !mounted) return;
     final resolvedCoach = coachId.isNotEmpty
         ? coachId
         : ((widget.currentUserProfile?['coach_id'] ??
                     widget.currentUserProfile?['assigned_coach_id'] ??
                     '')
                 .toString());
-    _wsSend(jsonEncode({
-      'type': 'client_book_session',
-      'coach_id': resolvedCoach,
-      'scheduled_start': startIso,
-      'scheduled_end': endIso,
-    }));
-    _addSystemMsg('Requesting ${_fmtSlotLabel(startIso)}…');
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Request this time',
+            style: TextStyle(color: Color(0xFFC9A962))),
+        content: Text(
+          'Request ${_fmtSlotLabel(startIso)}. Your coach approves the time. '
+          'A card on file is charged in the 72 hours before the session. '
+          'Cancel 24 hours or more ahead to void the charge.',
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFC9A962),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Request'),
+          ),
+        ],
+      ),
+    ).then((ok) {
+      if (ok != true || !mounted) return;
+      _wsSend(jsonEncode({
+        'type': 'client_book_session',
+        'coach_id': resolvedCoach,
+        'scheduled_start': startIso,
+        'scheduled_end': endIso,
+        'payment_consent': true,
+      }));
+      _addSystemMsg('Requesting ${_fmtSlotLabel(startIso)}…');
+    });
   }
 
   String _fmtSlotLabel(String iso) {
