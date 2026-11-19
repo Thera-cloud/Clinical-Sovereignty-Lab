@@ -21,9 +21,11 @@ Patent-Pending — Claim 30
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -261,6 +263,43 @@ class MirrorNamespaceManager:
         }
 
 
+_PROCESS_REDIS = object()
+_hit_client = None
+_hit_client_lock = threading.Lock()
+
+
+def _dedicated_hit_client():
+    """Redis client used only from the burst-count thread. Not the token client."""
+    global _hit_client
+    if _hit_client is not None:
+        return _hit_client
+    with _hit_client_lock:
+        if _hit_client is None:
+            import redis
+            _hit_client = redis.Redis(
+                host=os.environ.get("REDIS_HOST", "redis"),
+                port=int(os.environ.get("REDIS_PORT", "6379")),
+                password=os.environ.get("REDIS_PASSWORD") or None,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+                decode_responses=True,
+            )
+        return _hit_client
+
+
+def _redis_window_count(client, key: str, now: float) -> int:
+    """Count hits in the last 60 seconds. The body of the frame is not stored."""
+    if client is _PROCESS_REDIS:
+        client = _dedicated_hit_client()
+    pipe = client.pipeline()
+    pipe.zadd(key, {f"{now:.6f}-{time.monotonic_ns()}": now})
+    pipe.zremrangebyscore(key, 0, now - 60)
+    pipe.zcard(key)
+    pipe.expire(key, 70)
+    out = pipe.execute()
+    return int(out[2])
+
+
 # =============================================================================
 # MIRROR SHELL — THE OUTERMOST DEFENSE LAYER
 # =============================================================================
@@ -323,6 +362,7 @@ class MirrorShell:
         self._control_hits: Dict[str, List[float]] = {}
         self._holds: Dict[str, Dict[str, Any]] = {}
         self._db_pool = None
+        self._redis = None  # SOVEREIGN-VOICE: rolling burst count. None keeps memory.
 
         self._initialized: bool = False
         logger.info("MirrorShell created (patent claim %d)", self.PATENT_CLAIM)
@@ -362,7 +402,7 @@ class MirrorShell:
             size = int(signal.get("payload_size") or 0)
         except (TypeError, ValueError):
             size = 0
-        hits = self._note_hit(source)
+        hits = await self._note_hit(source)
         decision = GateDecision.PASS_TO_REAL
         reason = "external control accepted"
         if size > 262144 or hits > 30:
@@ -377,14 +417,42 @@ class MirrorShell:
         """Best-effort store for the bridge forensic buffer. Never required to log in."""
         self._db_pool = pool
 
-    def _note_hit(self, source: str) -> int:
+    def attach_redis(self, client) -> None:
+        """Rolling 60-second burst count. None keeps the in-process counter. # SOVEREIGN-VOICE"""
+        self._redis = client
+
+    def use_process_redis(self) -> None:
+        """Count bursts on a client this process owns. # SOVEREIGN-VOICE"""
+        self._redis = _PROCESS_REDIS
+
+    async def _note_hit(self, source: str) -> int:
         now = time.time()
         hits = [stamp for stamp in self._control_hits.get(source, []) if now - stamp < 60]
         hits.append(now)
         self._control_hits[source] = hits
         if len(self._control_hits) > 5000:
             self._control_hits.pop(next(iter(self._control_hits)))
-        return len(hits)
+        local = len(hits)
+        remote = await self._redis_hit_count(source, now)
+        if remote is None:
+            return local
+        return max(local, remote)
+
+    async def _redis_hit_count(self, source: str, now: float):
+        client = self._redis
+        if client is None:
+            return None
+        if os.getenv("HIVE_CONTROL_HITS_REDIS", "true").lower() not in ("1", "true", "yes"):
+            return None
+        prefix = os.environ.get("REDIS_KEY_PREFIX", "nate")
+        env = os.environ.get("ENVIRONMENT", "prod")
+        safe = "".join(ch if ch.isalnum() or ch in ".:_-" else "_" for ch in str(source)[:128]) or "unknown"
+        key = f"{prefix}:{env}:hive:control_hits:{safe}"
+        try:
+            return await asyncio.to_thread(_redis_window_count, client, key, now)
+        except Exception as exc:
+            print(f">>> [HIVE] control-hit redis failed: {exc}", flush=True)
+            return None
 
     async def _record_decision(
         self, source: str, signal_type: str, size: int, decision: str, reason: str,
@@ -470,7 +538,7 @@ class MirrorShell:
             if not hold_unknown:
                 await self._record_decision(source, signal_type, payload_size, "watch", "preauth hold off")
                 return {}
-            if self._note_hit(source) > 30 or int(payload_size or 0) > 262144:
+            if await self._note_hit(source) > 30 or int(payload_size or 0) > 262144:
                 await self._record_decision(source, signal_type, payload_size, "contain", "unlisted preauth")
                 return await self._reflect_contain(source, signal_type, payload_size, key, now)
             await self._record_decision(source, signal_type, payload_size, "drop", "unlisted preauth")

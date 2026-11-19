@@ -13931,6 +13931,8 @@ async def handle_client(websocket, path=None):
                 _shell = await client_control_shell()
                 if db_pool is not None:
                     _shell.attach_pool(db_pool)
+                if os.getenv("HIVE_CONTROL_HITS_REDIS", "true").lower() in ("1", "true", "yes"):
+                    _shell.use_process_redis()  # SOVEREIGN-VOICE
                 _src = client_ip or uid or "GUEST"
                 if t in (
                     "login_request", "register_request", "verify_admin_passphrase",
@@ -14010,29 +14012,23 @@ async def handle_client(websocket, path=None):
                     }))
                     continue
 
-                # ── HIVE DEFENSE v4.0: Login Guardian check (if available) ──
-                try:
-                    _hive_v4 = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
-                    _hive_v4 = getattr(_hive_v4, 'hive_v4', None) if _hive_v4 else None
-                except Exception:
-                    _hive_v4 = None
-
-                if _hive_v4:
+                # SOVEREIGN-VOICE: durable lock from login_attempts. Empty username stays on the memory lock.
+                if (d.get("username") or "").strip() and os.getenv("HIVE_LOGIN_DB_LOCK", "true").lower() in ("1", "true", "yes"):
                     try:
-                        _role = d.get("expected_role", "CLIENT")
-                        _lg = _hive_v4.get("coach_login_guardian") if _role == "COACH" else _hive_v4.get("member_login_guardian")
-                        if _lg:
-                            _login_check = await _lg.check_before_login(d.get("username", ""), _login_ip, d.get("user_agent", ""))
-                            if _login_check and not _login_check.get("allowed", True):
-                                _lg_cooldown = _login_check.get("lockout_remaining_sec", 180)
-                                await websocket.send(json.dumps({
-                                    "type": "login_failed",
-                                    "message": f"Too many attempts. Try again in {_lg_cooldown}s.",
-                                    "cooldown_seconds": _lg_cooldown,
-                                    "remaining_attempts": 0,
-                                }))
-                                # QUANTUM-CRYSTAL-ARCH: do not verify password while locked
-                                continue
+                        from app.websocket.bridge_defense_taps import bridge_login_allowed
+                        _login_check = await bridge_login_allowed(
+                            db_pool, d.get("username"), d.get("expected_role", "CLIENT"),
+                            _login_ip, d.get("user_agent", ""),
+                        )
+                        if _login_check and not _login_check.get("allowed", True):
+                            _lg_cooldown = int(_login_check.get("lockout_remaining_sec") or 180)
+                            await websocket.send(json.dumps({
+                                "type": "login_failed",
+                                "message": f"Too many attempts. Try again in {_lg_cooldown}s.",
+                                "cooldown_seconds": _lg_cooldown,
+                                "remaining_attempts": 0,
+                            }))
+                            continue  # QUANTUM-CRYSTAL-ARCH: do not verify password while locked
                     except Exception as _lg_err:
                         print(f">>> [LoginGuardian] Non-blocking check error: {_lg_err}")
 

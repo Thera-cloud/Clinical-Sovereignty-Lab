@@ -1,6 +1,7 @@
 """Control-plane checks for the mirror and ghost deploy gate."""
 
 import asyncio
+import time
 
 import pytest
 
@@ -33,6 +34,107 @@ async def test_oversized_control_message_is_contained():
         {"source_address": "203.0.113.5", "signal_type": "login_request", "payload_size": 300000}
     )
     assert decision == GateDecision.MIRROR_CONTAIN
+
+
+class _HitWindow:
+    """Sorted-set stand-in. `prior` recent hits are seeded on the first write."""
+
+    def __init__(self, prior=0, boom=False):
+        self.buckets = {}
+        self.prior = prior
+        self.boom = boom
+        self.seeded = False
+
+    def pipeline(self):
+        self._ops = []
+        return self
+
+    def zadd(self, key, mapping):
+        self._ops.append(("zadd", key, mapping))
+        return self
+
+    def zremrangebyscore(self, key, lo, hi):
+        self._ops.append(("trim", key, float(lo), float(hi)))
+        return self
+
+    def zcard(self, key):
+        self._ops.append(("card", key))
+        return self
+
+    def expire(self, key, ttl):
+        self._ops.append(("expire", key, ttl))
+        return self
+
+    def execute(self):
+        if self.boom:
+            raise RuntimeError("redis down")
+        card = 0
+        for op in self._ops:
+            if op[0] == "zadd":
+                key, mapping = op[1], op[2]
+                bucket = self.buckets.setdefault(key, {})
+                if not self.seeded:
+                    score = next(iter(mapping.values()))
+                    for i in range(self.prior):
+                        bucket[f"seed-{i}"] = score
+                    self.seeded = True
+                bucket.update(mapping)
+            elif op[0] == "trim":
+                key, lo, hi = op[1], op[2], op[3]
+                bucket = self.buckets.get(key, {})
+                self.buckets[key] = {m: s for m, s in bucket.items() if not (lo <= s <= hi)}
+            elif op[0] == "card":
+                card = len(self.buckets.get(op[1], {}))
+        return [1, 1, card, True]
+
+
+@pytest.mark.asyncio
+async def test_redis_burst_contains_after_a_restart():
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    shell.attach_redis(_HitWindow(prior=30))
+    decision = await shell.assess_client_control(
+        {"source_address": "203.0.113.40", "signal_type": "login_request", "payload_size": 80}
+    )
+    assert decision == GateDecision.MIRROR_CONTAIN
+
+
+@pytest.mark.asyncio
+async def test_one_login_stays_one_hit_when_redis_is_down():
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    shell.attach_redis(_HitWindow(boom=True))
+    decision = await shell.assess_client_control(
+        {"source_address": "203.0.113.41", "signal_type": "login_request", "payload_size": 80}
+    )
+    assert decision == GateDecision.PASS_TO_REAL
+
+
+@pytest.mark.asyncio
+async def test_process_redis_uses_its_own_client(monkeypatch):
+    window = _HitWindow(prior=30)
+    monkeypatch.setattr(
+        "app.services.security.mirror_shell._dedicated_hit_client", lambda: window,
+    )
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    shell.use_process_redis()
+    decision = await shell.assess_client_control(
+        {"source_address": "203.0.113.43", "signal_type": "login_request", "payload_size": 80}
+    )
+    assert decision == GateDecision.MIRROR_CONTAIN
+
+
+@pytest.mark.asyncio
+async def test_redis_counter_can_be_turned_off(monkeypatch):
+    monkeypatch.setenv("HIVE_CONTROL_HITS_REDIS", "false")
+    shell = MirrorShell(coherence_gate=None, forensic_logger=_Log())
+    await shell.initialize()
+    shell.attach_redis(_HitWindow(prior=40))
+    decision = await shell.assess_client_control(
+        {"source_address": "203.0.113.42", "signal_type": "login_request", "payload_size": 80}
+    )
+    assert decision == GateDecision.PASS_TO_REAL
 
 
 @pytest.mark.asyncio
