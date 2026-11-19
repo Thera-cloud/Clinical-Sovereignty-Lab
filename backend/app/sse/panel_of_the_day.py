@@ -30,6 +30,20 @@ from typing import Any, Mapping, Optional
 
 STALE_AFTER_DAYS = 2.0
 
+
+def _sign_client_url(panel: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Replace a stored 24h signature with a fresh one. A signing error keeps the stored URL."""
+    if not panel or not panel.get("r2_url"):
+        return panel
+    try:
+        from app.services.sse_panel_chat_context import _refresh_r2_presigned
+        signed = _refresh_r2_presigned(panel["r2_url"])
+        if signed:
+            panel["r2_url"] = signed
+    except Exception:
+        return panel
+    return panel
+
 SOURCE_JOURNEY = "journey"
 SOURCE_DELIVERY = "delivery"
 
@@ -184,11 +198,11 @@ async def resolve_panel_of_the_day(db, ids: list[str], *, now: Optional[datetime
         delivery = await db.fetchrow(_DELIVERY_SQL, ids)
     except Exception as exc:
         print(f">>> [PANEL-OF-DAY] delivery lookup skipped: {type(exc).__name__}: {exc}")
-    return choose_panel_of_the_day(
+    return _sign_client_url(choose_panel_of_the_day(
         dict(journey) if journey else None,
         dict(delivery) if delivery else None,
         now=now,
-    )
+    ))
 
 
 async def fetch_panel_row_by_id(db, panel_id: str, ids: list[str]) -> Optional[dict[str, Any]]:
@@ -208,7 +222,7 @@ async def fetch_panel_row_by_id(db, panel_id: str, ids: list[str]) -> Optional[d
             ids,
         )
         if row:
-            return normalize_journey_row(dict(row))
+            return _sign_client_url(normalize_journey_row(dict(row)))
     except Exception as exc:
         print(f">>> [PANEL-OF-DAY] panel_id lookup skipped: {type(exc).__name__}: {exc}")
     try:
@@ -224,7 +238,7 @@ async def fetch_panel_row_by_id(db, panel_id: str, ids: list[str]) -> Optional[d
             ids,
         )
         if drow:
-            return normalize_delivery_row(dict(drow))
+            return _sign_client_url(normalize_delivery_row(dict(drow)))
     except Exception as exc:
         print(f">>> [PANEL-OF-DAY] log_id lookup skipped: {type(exc).__name__}: {exc}")
     return None

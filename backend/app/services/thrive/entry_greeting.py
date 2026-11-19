@@ -772,10 +772,20 @@ async def _cached(db_pool: Any, username: str) -> Optional[EntryGreeting]:
     sigs = r["signals"] if isinstance(r["signals"], dict) else (json.loads(r["signals"]) if r["signals"] else {})
     if int(sigs.get("blend_v") or 0) < BLEND_V:
         return None
+    panel = sigs.get("thera_panel")
+    if isinstance(panel, dict) and panel.get("image_url"):
+        try:
+            from app.services.sse_panel_chat_context import _refresh_r2_presigned
+            panel = dict(panel)
+            signed = _refresh_r2_presigned(panel.get("image_url"))
+            if signed:
+                panel["image_url"] = signed
+        except Exception:
+            panel = sigs.get("thera_panel")
     return EntryGreeting(
         username=username, welcome=r["part_welcome"] or "", prime=r["part_prime"] or "", direction=r["part_direction"] or "",
         day_part=r["day_part"] or "midday", local_hour=int(r["local_hour"] or 12), growth_phase=r["growth_phase"] or gp.DEFAULT_PHASE,
-        thera_panel_id=r["thera_panel_id"], thera_panel=sigs.get("thera_panel"), cached=True,
+        thera_panel_id=r["thera_panel_id"], thera_panel=panel, cached=True,
         generated_by=sigs.get("generated_by", "template"), greeted_at=r["greeted_at"].isoformat() if r["greeted_at"] else None,
         due_practices=_due_practice_cards(sigs.get("practices_due") or []),
     )

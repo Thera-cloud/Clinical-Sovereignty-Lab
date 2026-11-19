@@ -1,6 +1,7 @@
 """Offline tests for the panel-of-the-day resolver (pure chooser + fake-db path)."""
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -138,6 +139,41 @@ async def test_resolver_queries_both_tables_and_picks_delivery_today():
 async def test_resolver_handles_empty_ids_and_none_db():
     assert await resolve_panel_of_the_day(None, ["x"]) is None
     assert await resolve_panel_of_the_day(_FakeDB(), []) is None
+
+
+@pytest.mark.asyncio
+async def test_resolver_replaces_a_stored_signature(monkeypatch):
+    def _fresh(url):
+        assert "X-Amz-Signature=stale" in url
+        return "https://signed.example/panel.png?X-Amz-Signature=fresh"
+
+    monkeypatch.setattr(
+        "app.services.sse_panel_chat_context._refresh_r2_presigned",
+        _fresh,
+    )
+    stored = _delivery(3, r2_url="https://r2.example/panel.png?X-Amz-Signature=stale")
+    p = await resolve_panel_of_the_day(_FakeDB(delivery=stored), ["u"], now=NOW)
+    assert p["r2_url"].endswith("X-Amz-Signature=fresh")
+
+
+@pytest.mark.asyncio
+async def test_resolver_keeps_the_stored_url_when_signing_fails(monkeypatch):
+    def _boom(url):
+        raise RuntimeError("r2 down")
+
+    monkeypatch.setattr(
+        "app.services.sse_panel_chat_context._refresh_r2_presigned",
+        _boom,
+    )
+    p = await resolve_panel_of_the_day(_FakeDB(delivery=_delivery(0.2)), ["u"], now=NOW)
+    assert p["r2_url"] == "https://r2/d.png"
+
+
+def test_vault_waits_for_folders_before_loading_panels():
+    text = Path(__file__).resolve().parents[2].joinpath(
+        "mobile/lib/screens/vault_browser_screen.dart"
+    ).read_text()
+    assert "await _loadFolders();\n        await Future.wait([_loadItems(), _loadStats()]);" in text
 
 
 @pytest.mark.asyncio

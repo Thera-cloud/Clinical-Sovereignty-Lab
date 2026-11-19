@@ -121,7 +121,8 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       if (_searchQuery.trim().isNotEmpty) {
         await _searchItems();
       } else {
-        await Future.wait([_loadFolders(), _loadItems(), _loadStats()]);
+        await _loadFolders();
+        await Future.wait([_loadItems(), _loadStats()]);
       }
     } catch (e) {
       setState(() => _error = e.toString());
