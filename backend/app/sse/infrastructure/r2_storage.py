@@ -48,6 +48,17 @@ def _mock_url(key: str) -> str:
     return f"mock://r2-not-configured/{key}"
 
 
+def image_content_type(image_bytes: bytes) -> str:
+    """Label the bytes we actually stored. Journey stills are JPEG."""
+    if image_bytes[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/png"
+
+
 async def store_image(image_bytes: bytes, key: str) -> str:
     """Upload image bytes to R2. Returns a presigned URL (24h)."""
     client = _get_client()
@@ -60,7 +71,7 @@ async def store_image(image_bytes: bytes, key: str) -> str:
             Bucket=_R2_BUCKET,
             Key=key,
             Body=image_bytes,
-            ContentType="image/png",
+            ContentType=image_content_type(image_bytes),
         )
 
     await asyncio.get_event_loop().run_in_executor(None, _upload)

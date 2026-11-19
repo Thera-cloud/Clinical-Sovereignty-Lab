@@ -11,6 +11,7 @@ def test_zoom_uses_root_navigator_and_disables_selection():
     assert "static Future<void> openZoom" in widget
     assert "onZoomClosed" in widget
     assert "onZoomOpened" in widget
+    assert widget.count("WebHtmlElementStrategy.fallback") == 2
 
 
 def test_chat_restores_scroll_after_panel_zoom():
@@ -34,5 +35,12 @@ def test_chat_restores_scroll_after_panel_zoom():
     assert "Sit with the figures with me" not in ask
     vault = (REPO / "mobile/lib/screens/vault_browser_screen.dart").read_text()
     assert "theraGoDeeperAsk(" in vault
+    assert vault.count("WebHtmlElementStrategy.fallback") == 2
     assert "_scrollToBottom({bool instant = false})" in src
     assert "_scrollController.jumpTo(pos.maxScrollExtent)" in src
+
+
+def test_store_image_labels_jpeg_bytes():
+    from app.sse.infrastructure.r2_storage import image_content_type
+    assert image_content_type(b"\xff\xd8\xff\xe0" + b"\x00" * 8) == "image/jpeg"
+    assert image_content_type(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8) == "image/png"

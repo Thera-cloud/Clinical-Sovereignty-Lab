@@ -56,6 +56,9 @@ class TheraPanelImage extends StatelessWidget {
                 fit: BoxFit.cover,
                 height: height,
                 width: double.infinity,
+                // Web byte-fetch fails closed on these stills. The image tag
+                // still paints them, so use that when the byte fetch fails.
+                webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
                 errorBuilder: (_, __, ___) => Container(
                   height: height,
                   color: Colors.black,
@@ -114,6 +117,7 @@ class TheraPanelZoomPage extends StatelessWidget {
                 child: Image.network(
                   url,
                   fit: BoxFit.contain,
+                  webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
                   errorBuilder: (_, __, ___) => const Icon(
                       Icons.broken_image_outlined,
                       color: Color(0xFF8B7355),

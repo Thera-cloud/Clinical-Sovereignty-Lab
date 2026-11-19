@@ -1106,7 +1106,13 @@ class _VaultItemCard extends StatelessWidget {
                             alignment: Alignment.center,
                             child: const Icon(Icons.play_circle_filled, color: Colors.white70, size: 22),
                           )
-                        : Image.network(thumb, width: 32, height: 32, fit: BoxFit.cover),
+                        : Image.network(
+                            thumb,
+                            width: 32,
+                            height: 32,
+                            fit: BoxFit.cover,
+                            webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+                          ),
                   )
                 else
                   Icon(isImage ? Icons.image : Icons.description, color: _VaultDesign.gold, size: 32),
@@ -1202,7 +1208,13 @@ class _VaultItemTile extends StatelessWidget {
                       alignment: Alignment.center,
                       child: const Icon(Icons.play_circle_filled, color: Colors.white70, size: 32),
                     )
-                  : Image.network(thumb, width: 48, height: 48, fit: BoxFit.cover),
+                  : Image.network(
+                      thumb,
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                      webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+                    ),
             )
           : Icon(isImage ? Icons.image : Icons.description, color: _VaultDesign.gold, size: 28),
       title: Text(
