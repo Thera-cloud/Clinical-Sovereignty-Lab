@@ -74,17 +74,19 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
   void _connect() {
     _sub?.cancel();
     _reconnectTimer?.cancel();
-    if (ClientWsHub.channel != null) {
-      _borrowedFromHub = true;
-      _channel = ClientWsHub.channel;
-      _sub = ClientWsHub.inbound.listen(_onMessage, onDone: _scheduleReconnect, onError: (_) => _scheduleReconnect);
+    final alreadyOpen = ClientWsHub.channel != null;
+    if (!alreadyOpen) {
+      ClientWsHub.attach(WebSocketChannel.connect(Uri.parse(defaultWsUrl)));
+    }
+    // One socket for Daily Reconnect and Family Sanctuary. A second socket
+    // gets kicked and the room looks dead.
+    _borrowedFromHub = true;
+    _channel = ClientWsHub.channel;
+    _sub = ClientWsHub.inbound.listen(_onMessage, onDone: _scheduleReconnect, onError: (_) => _scheduleReconnect);
+    if (alreadyOpen) {
       _status = 'ready';
       _send({'type': 'reconnect_get_or_create'});
-      return;
     }
-    _borrowedFromHub = false;
-    _channel = WebSocketChannel.connect(Uri.parse(defaultWsUrl));
-    _sub = _channel!.stream.listen(_onMessage, onDone: _scheduleReconnect, onError: (_) => _scheduleReconnect);
   }
 
   void _scheduleReconnect() {
@@ -359,6 +361,11 @@ class _DailyReconnectScreenState extends State<DailyReconnectScreen> {
         });
         if (type == 'reconnect_turn_ack') _turnController.clear();
         _scrollToLatestTurn();
+        return;
+      }
+      if (type == 'reconnect_finished') {
+        if (!mounted) return;
+        if (Navigator.of(context).canPop()) Navigator.of(context).pop();
         return;
       }
       if (type == 'reconnect_error') {

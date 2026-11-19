@@ -212,6 +212,16 @@ def test_reconnect_ui_shows_composer_until_answered():
     assert "_myIds" in text
 
 
+def test_done_for_today_reaches_the_engine_and_shares_the_socket():
+    bridge = Path(__file__).resolve().parents[1] / "app" / "websocket" / "bridge_server.py"
+    block = bridge.read_text().split("reconnect_get_or_create", 1)[1].split("ENABLE_DAILY_RECONNECT", 1)[0]
+    assert "reconnect_finish" in block
+    dart = Path(__file__).resolve().parents[2] / "mobile" / "lib" / "screens" / "daily_reconnect_screen.dart"
+    text = dart.read_text()
+    assert "reconnect_finished" in text
+    assert "ClientWsHub.attach" in text
+
+
 def test_daily_reconnect_ui_does_not_auto_dump_into_sanctuary():
     dart = Path(__file__).resolve().parents[2] / "mobile" / "lib" / "screens" / "daily_reconnect_screen.dart"
     text = dart.read_text()

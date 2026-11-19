@@ -29525,7 +29525,7 @@ Coach Reflection on Session {session_id}:
             
             elif t in (
                 "reconnect_get_or_create", "reconnect_join", "reconnect_consent_ack",
-                "reconnect_turn", "reconnect_fs_offer_response", "reconnect_cooldown_choice",
+                "reconnect_turn", "reconnect_finish", "reconnect_fs_offer_response", "reconnect_cooldown_choice",
                 "reconnect_reenter", "reconnect_exit",
             ):  # QUANTUM-CRYSTAL-ARCH — Daily Reconnect (ENABLE_DAILY_RECONNECT)
                 if not current_profile:
