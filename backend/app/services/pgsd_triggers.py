@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _FAST_SOURCES = frozenset({
     "live_activation",
     "sensitive_bridge_enroll",
+    "zoom_live_session",
 })
 
 _FAST_DEBOUNCE_SECONDS = 600

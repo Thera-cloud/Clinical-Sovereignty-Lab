@@ -6128,6 +6128,7 @@ class MetricsEngine:
             "reconsolidation_readiness": reconsolidation_readiness,
             "reconsolidation_targets": pmb.get("reconsolidation_targets", []),
             "legacy_patterns": pmb.get("legacy_patterns", []),
+            "live_session_marks": pmb.get("live_session_marks", []),
             "predictions": predictions,
             "last_pmb_update": str(datetime.datetime.now()),
             "pmb_version": pmb.get("pmb_version", 1)
@@ -11740,6 +11741,20 @@ class AzureCortex:
                         _member_crystal_parts.append(f"[{_fp_name}'s memory]:\n{_fp_ctx}")
                         _sanctuary_scopes.extend(scopes_from_recall_context(_fp_ctx))
             sanctuary_crystal_ctx = "\n\n".join(_member_crystal_parts) if _member_crystal_parts else ""
+            # QUANTUM-CRYSTAL-ARCH — household live session (summary, not a transcript dump)
+            try:
+                from app.services.zoom_household_learning import sanctuary_live_session_context as _san_live
+                _live = await _san_live(
+                    db_pool,
+                    family_profiles,
+                    sanctuary_data.get("head_of_household_id") or "",
+                )
+                if _live:
+                    sanctuary_crystal_ctx = (
+                        (sanctuary_crystal_ctx + "\n\n") if sanctuary_crystal_ctx else ""
+                    ) + _live
+            except Exception:
+                pass
             # QUANTUM-CRYSTAL-ARCH — Tier 2: PGSD briefing (ACCESS); no LIVE_CONTEXT
             try:
                 from app.services.pgsd_briefing import append_field_briefing as _pgsd_ap

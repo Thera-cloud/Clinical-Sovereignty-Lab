@@ -301,6 +301,80 @@ async def share_live_session_learning(
     return written
 
 
+async def sanctuary_live_session_context(db_pool, family_profiles, head_id: str = "") -> str:
+    """Summary of the household live session for Family Sanctuary. No transcript dump."""
+    import os
+
+    flag = os.environ.get("ENABLE_FAMILY_SESSION_CONTEXT", "true").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return ""
+    viewer = (head_id or "").strip()
+    if not viewer:
+        for profile in family_profiles or []:
+            viewer = (profile.get("hardware_id") or profile.get("username") or "").strip()
+            if viewer:
+                break
+    if not viewer or not db_pool:
+        return ""
+    return await live_session_awareness_context(db_pool, viewer, limit=1)
+
+
+async def stamp_household_session_moment(db_pool, client_id: str, session_id: str) -> int:
+    """Stamp the live session on each household member. Coherence tag is the stored C_emo."""
+    if not db_pool or not (session_id or "").strip():
+        return 0
+    targets = await household_crystal_targets(db_pool, client_id)
+    written = 0
+    for target in targets:
+        hw = target["hardware_id"]
+        role = "head" if target.get("primary") == "1" else "household"
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT pmb, c_emo FROM client_metrics WHERE hardware_id = $1",
+                    hw,
+                )
+                if not row:
+                    continue
+                pmb = row["pmb"] or {}
+                if isinstance(pmb, str):
+                    try:
+                        pmb = json.loads(pmb)
+                    except Exception:
+                        pmb = {}
+                if not isinstance(pmb, dict):
+                    pmb = {}
+                marks = pmb.get("live_session_marks")
+                if not isinstance(marks, list):
+                    marks = []
+                if any(isinstance(m, dict) and m.get("session_id") == session_id for m in marks):
+                    continue
+                tag = row["c_emo"]
+                marks.append({
+                    "session_id": session_id,
+                    "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "source": "zoom_live_session",
+                    "coherence_tag": float(tag) if tag is not None else None,
+                    "family_role": role,
+                })
+                pmb["live_session_marks"] = marks[-20:]
+                await conn.execute(
+                    "UPDATE client_metrics SET pmb = $2::jsonb WHERE hardware_id = $1",
+                    hw,
+                    json.dumps(pmb),
+                )
+                written += 1
+        except Exception as exc:
+            logger.warning("live session mark failed for %s: %s", hw, exc)
+        try:
+            from app.services.pgsd_triggers import notify_user_async
+
+            await notify_user_async(db_pool, hw, source="zoom_live_session")
+        except Exception as exc:
+            logger.warning("pgsd session stamp failed for %s: %s", hw, exc)
+    return written
+
+
 async def stamp_family_from_client(db_pool, meeting_id: str) -> int:
     """Fill empty coaching_sessions.family_id from the booked client's profile."""
     if not db_pool or not meeting_id:

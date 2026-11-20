@@ -286,6 +286,102 @@ async def _find_coach_folder_id(
     return row["id"] if row else None
 
 
+async def _family_label(conn, family_id: str, fallback_name: str) -> str:
+    """One display name for the household folder. Head and spouse when both exist."""
+    rows = await conn.fetch(
+        """
+        SELECT COALESCE(profile_data->>'name', username) AS name,
+               UPPER(COALESCE(profile_data->>'family_role', '')) AS role
+        FROM users
+        WHERE role = 'CLIENT'
+          AND COALESCE(profile_data->>'family_id', '') = $1
+        """,
+        family_id,
+    )
+    head = spouse = ""
+    for row in rows:
+        role = (row["role"] or "").strip()
+        name = (row["name"] or "").strip()
+        if role in ("HEAD", "HOH", "HEAD_OF_HOUSEHOLD") and name:
+            head = name
+        elif role == "SPOUSE" and name:
+            spouse = name
+    if head and spouse:
+        return f"{head} & {spouse}"
+    if head:
+        return f"{head} Family"
+    return f"{fallback_name} Family" if fallback_name else "Family"
+
+
+async def _ensure_family_folder(conn, coach_id: str, client_hw: str, client_username: str, client_name: str):
+    """The household folder keyed by family_id. Session files live here, not on one spouse."""
+    row = await conn.fetchrow(
+        """
+        SELECT COALESCE(profile_data->>'family_id', '') AS fid, username
+        FROM users
+        WHERE role = 'CLIENT'
+          AND (
+            hardware_id = $1 OR LOWER(username) = LOWER($1)
+            OR hardware_id = $2 OR LOWER(username) = LOWER($2)
+          )
+        LIMIT 1
+        """,
+        client_hw or "",
+        client_username or "",
+    )
+    family_id = (row["fid"] or "").strip() if row else ""
+    if not family_id:
+        return None
+    label = await _family_label(conn, family_id, client_name or (row["username"] if row else ""))
+    existing = await conn.fetchrow(
+        """
+        SELECT id, entity_name FROM coach_folders
+        WHERE coach_id = $1 AND folder_type = 'family' AND entity_id = $2
+        LIMIT 1
+        """,
+        coach_id,
+        family_id,
+    )
+    if existing:
+        current = (existing["entity_name"] or "").strip()
+        username = (row["username"] or "").strip() if row else ""
+        auto_name = current in {
+            f"{username} Family",
+            f"{client_username} Family",
+            f"{client_hw} Family",
+        }
+        if auto_name and label and label != current:
+            await conn.execute(
+                "UPDATE coach_folders SET entity_name = $2 WHERE id = $1",
+                existing["id"],
+                label,
+            )
+        return existing["id"]
+    created = await conn.fetchrow(
+        """
+        INSERT INTO coach_folders (coach_id, folder_type, entity_id, entity_name)
+        VALUES ($1, 'family', $2, $3)
+        ON CONFLICT DO NOTHING
+        RETURNING id
+        """,
+        coach_id,
+        family_id,
+        label,
+    )
+    if created:
+        return created["id"]
+    again = await conn.fetchrow(
+        """
+        SELECT id FROM coach_folders
+        WHERE coach_id = $1 AND folder_type = 'family' AND entity_id = $2
+        LIMIT 1
+        """,
+        coach_id,
+        family_id,
+    )
+    return again["id"] if again else None
+
+
 async def _fetch_summary_content(
     db_pool,
     pg_row: Dict[str, Any],
@@ -516,6 +612,16 @@ async def try_place_session_summary_in_coach_folder(
                 patch["zoom_doc_url"] = doc_url
             if doc_file_id:
                 patch["zoom_doc_file_id"] = doc_file_id
+            family_folder_id = await _ensure_family_folder(
+                conn, coach_id, client_hw, client_username, client_name
+            )
+            if family_folder_id:
+                await conn.execute(
+                    "UPDATE coach_folder_files SET folder_id = $1 WHERE id = $2::uuid",
+                    family_folder_id,
+                    file_id,
+                )
+                patch["zoom_family_folder_id"] = str(family_folder_id)
             await _patch_session_data(conn, session_id, patch)
             # QUANTUM-CRYSTAL-ARCH: summary without transcript — enqueue Path B fetch
             if file_id and not (sd.get("transcript_location") or "").strip():
@@ -564,6 +670,11 @@ async def _crystallize_summary(
             min_score=0,
         )
         logger.info("[ZoomFolder] Household crystals for session %s: %s", session_id, n)
+        from app.services.zoom_household_learning import stamp_household_session_moment
+
+        await stamp_household_session_moment(
+            db_pool, client_hardware_id, session_id
+        )
     except Exception as e:
         logger.warning("[ZoomFolder] crystallize failed for %s: %s", session_id, e)
 
@@ -674,6 +785,17 @@ async def get_folder_session_summaries_context_pg(
             pass
 
         async with db_pool.acquire() as conn:
+            family_rows = await conn.fetch(
+                """
+                SELECT DISTINCT profile_data->>'family_id' AS fid
+                FROM users
+                WHERE role = 'CLIENT'
+                  AND COALESCE(profile_data->>'family_id', '') <> ''
+                  AND (hardware_id = ANY($1::text[]) OR username = ANY($1::text[]))
+                """,
+                entity_ids,
+            )
+            family_ids = [r["fid"] for r in family_rows if r["fid"]]
             rows = await conn.fetch(
                 """
                 SELECT f.filename, f.metadata, f.created_at, cf.entity_name,
@@ -683,14 +805,17 @@ async def get_folder_session_summaries_context_pg(
                 JOIN coach_folders cf ON cf.id = f.folder_id
                 LEFT JOIN coaching_sessions cs
                   ON cs.session_id = COALESCE(f.metadata->>'session_id', '')
-                WHERE cf.folder_type = 'client'
-                  AND cf.entity_id = ANY($1::text[])
-                  AND f.file_type = $2
+                WHERE f.file_type = $2
+                  AND (
+                    (cf.folder_type = 'client' AND cf.entity_id = ANY($1::text[]))
+                    OR (cf.folder_type = 'family' AND cf.entity_id = ANY($3::text[]))
+                  )
                 ORDER BY COALESCE(cs.actual_start, cs.actual_end, f.created_at) DESC NULLS LAST
-                LIMIT $3
+                LIMIT $4
                 """,
                 entity_ids,
                 _FILE_TYPE,
+                family_ids,
                 limit,
             )
         if not rows:
