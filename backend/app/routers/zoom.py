@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.services.api_server import require_coach, require_admin
+from app.services.session_zoom_repair import session_is_host
 from app.services.zoom_client import ZoomClient
 from app.services.zoom_webhook import verify_signature, url_validation_response
 
@@ -93,12 +94,90 @@ class CreateMeetingRequest(BaseModel):
     agenda: str = ""
 
 
+def _caller_ids(user: Dict) -> set:
+    ids = {
+        str((user or {}).get("hardware_id") or ""),
+        str((user or {}).get("username") or ""),
+        str((user or {}).get("id") or ""),
+        str((user or {}).get("user_id") or ""),
+    }
+    ids.discard("")
+    return ids
+
+
+def _profile_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+async def _zoom_create_host_anchor(request: Request, user: Dict, req: CreateMeetingRequest) -> str:
+    """Return the coach id that may receive the host link. Rejects a coach naming another room."""
+    if str((user or {}).get("role") or "").upper() == "ADMIN" or (user or {}).get("is_audit"):
+        return str((user or {}).get("hardware_id") or (user or {}).get("username") or "")
+    session_id = (req.schedule_session_id or "").strip()
+    client_id = (req.client_id or "").strip()
+    if not session_id and not client_id:
+        raise HTTPException(403, "Access denied: a session or assigned client is required")
+    db_pool = getattr(request.app.state, "db_pool", None) or _get_app_db_pool()
+    if not db_pool:
+        raise HTTPException(503, "Database unavailable")
+    caller = _caller_ids(user)
+    async with db_pool.acquire() as conn:
+        if session_id:
+            row = await conn.fetchrow(
+                """SELECT coach_id, client_id
+                     FROM coaching_sessions
+                    WHERE session_id = $1
+                    LIMIT 1""",
+                session_id,
+            )
+            if not row:
+                raise HTTPException(404, "Session not found")
+            coach_id = str(row["coach_id"] or "")
+            if coach_id not in caller:
+                raise HTTPException(403, "Access denied: you are not this session's coach")
+            if client_id and str(row["client_id"] or "") != client_id:
+                raise HTTPException(403, "Access denied: client does not match this session")
+            return coach_id
+        row = await conn.fetchrow(
+            """SELECT profile_data
+                 FROM users
+                WHERE hardware_id = $1 OR username = $1
+                LIMIT 1""",
+            client_id,
+        )
+        if not row:
+            raise HTTPException(404, "Client not found")
+        pd = _profile_dict(row["profile_data"])
+        assigned = {
+            str(pd.get("coach_id") or ""),
+            str(pd.get("assigned_coach_id") or ""),
+            str(pd.get("assigned_coach") or ""),
+        }
+        assigned.discard("")
+        if not (caller & assigned):
+            raise HTTPException(403, "Access denied: client is not assigned to you")
+        return str((user or {}).get("hardware_id") or (user or {}).get("username") or "")
+
+
 @router.post("/meetings/create", dependencies=[Depends(require_coach)])
-async def create_meeting(req: CreateMeetingRequest):
+async def create_meeting(
+    req: CreateMeetingRequest,
+    request: Request,
+    user: Dict = Depends(require_coach),
+):
     if not settings.ENABLE_ZOOM:
         raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
     if not settings.ZOOM_ACCOUNT_ID or not settings.ZOOM_CLIENT_ID or not settings.ZOOM_CLIENT_SECRET:
         raise HTTPException(status_code=400, detail="Zoom not configured (missing env vars)")
+    host_anchor = await _zoom_create_host_anchor(request, user, req)
 
     client = ZoomClient(
         account_id=settings.ZOOM_ACCOUNT_ID,
@@ -151,7 +230,10 @@ async def create_meeting(req: CreateMeetingRequest):
         }
         _save_json(ZOOM_MEETING_MAP_FILE, mm)
 
-    return {"zoom_meeting": zoom_resp}
+    visible = dict(zoom_resp)
+    if not session_is_host(user, {"coach_id": host_anchor}):
+        visible.pop("start_url", None)
+    return {"zoom_meeting": visible}
 
 
 @router.post("/webhook")

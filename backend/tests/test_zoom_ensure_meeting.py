@@ -93,3 +93,11 @@ def test_family_member_can_access_session():
         {"role": "CLIENT", "hardware_id": "CLIENT_C", "family_id": "FAM_OTHER"},
         session,
     )
+    assert not user_can_access_session(
+        {"role": "COACH", "hardware_id": "COACH_OTHER", "family_id": "FAM_1"},
+        session,
+    )
+    assert user_can_access_session(
+        {"role": "COACH", "hardware_id": "COACH_N", "family_id": "FAM_1"},
+        session,
+    )

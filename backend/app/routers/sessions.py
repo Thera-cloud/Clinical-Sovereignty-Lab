@@ -845,8 +845,14 @@ def _make_zoom_client() -> ZoomClient:
 # Endpoints
 
 @router.post("/schedule")
-async def schedule_session(req: ScheduleSessionRequest, request: Request):
-    """Schedule a new session"""
+async def schedule_session(
+    req: ScheduleSessionRequest,
+    request: Request,
+    user: Dict = Depends(_require_auth),
+):
+    """Schedule a new session. The coach id must be the logged-in coach."""
+    if not session_is_host(user, {"coach_id": req.coach_id}):
+        raise HTTPException(403, "Access denied: you can only schedule your own sessions")
     sessions = await _load_sessions_pf(request)
     
     # Check for conflicts — skip sessions whose scheduled_end is in the past
@@ -1303,10 +1309,21 @@ async def get_client_sessions(request: Request, client_id: str, current_user: st
         is_assigned_coach = any(s.get("coach_id") == current_user for s in client_sessions)
         if not is_assigned_coach:
             raise HTTPException(403, "Access denied: you are not this client or their assigned coach")
-    
+
+    visible = []
+    for s in client_sessions:
+        item = dict(s)
+        is_host = user_role == "ADMIN" or item.get("coach_id") == current_user
+        if user_role != "ADMIN" and current_user != client_id and not is_host:
+            continue
+        if not is_host:
+            item["zoom_host_url"] = ""
+        visible.append(item)
+    client_sessions = visible
+
     if status:
         client_sessions = [s for s in client_sessions if s.get("status") == status]
-    
+
     client_sessions.sort(key=lambda x: x.get("scheduled_start", ""), reverse=True)
     return {"sessions": client_sessions[:limit]}
 
@@ -1654,6 +1671,18 @@ async def ensure_zoom_meeting(
         raise HTTPException(404, "Session not found")
     if not _user_can_access_session(user, target):
         raise HTTPException(403, "Access denied: you are not a participant in this session")
+    if not session_is_host(user, target):
+        public = dict(target)
+        public["zoom_host_url"] = ""
+        return {
+            "ok": True,
+            "recreated": False,
+            "zoom_meeting_id": target.get("zoom_meeting_id") or "",
+            "zoom_link": target.get("zoom_link") or "",
+            "zoom_host_url": "",
+            "session": public,
+            "notification": None,
+        }
 
     client_name = str(target.get("client_name") or "").strip() or "Client"
     topic = f"Coaching Session — {client_name}"

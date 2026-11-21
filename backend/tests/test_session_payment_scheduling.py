@@ -279,7 +279,20 @@ def test_schedule_session_quotes_price_and_always_notifies():
     assert '0 if _is_consultation else None' not in chunk
     assert 'if (session.get("zoom_link") or "").strip():' not in chunk
     assert "await _send_session_link(request, session)" in chunk
+    assert "you can only schedule your own sessions" in chunk
     assert '"payment_status": "waived" if _is_consultation else "pending"' in chunk
+
+
+def test_client_session_list_hides_other_coaches_and_host_link():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "sessions.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("async def get_client_sessions(")
+    end = text.index("async def get_coach_sessions(")
+    chunk = text[start:end]
+    assert "if user_role != \"ADMIN\" and current_user != client_id and not is_host:" in chunk
+    assert 'item["zoom_host_url"] = ""' in chunk
 
 
 def test_resend_session_link_allows_empty_zoom():

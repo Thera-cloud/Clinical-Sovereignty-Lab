@@ -58,6 +58,9 @@ def user_can_access_session(user: Dict[str, Any], session: dict) -> bool:
     }
     if ids & targets:
         return True
+    # A shared family id is a client's doorway. A coach enters only as that session's coach.
+    if role != "CLIENT":
+        return False
     sess_fam = str((session or {}).get("family_id") or "").strip()
     if not sess_fam:
         return False
