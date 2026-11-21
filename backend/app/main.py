@@ -4818,6 +4818,12 @@ try:
     app.include_router(hive_defense_api.helix_public_router)
 except Exception as _helix_pub_err:
     print(f"   ⚠️  Helix public router failed: {_helix_pub_err}")
+# SOVEREIGN-VOICE — edge probe memory. Flag: ENABLE_EDGE_PROBE_MEMORY
+try:
+    from app.routers.edge_probe_api import router as edge_probe_router
+    app.include_router(edge_probe_router)
+except Exception as _edge_probe_err:
+    print(f"   ⚠️  Edge probe router failed: {_edge_probe_err}")
 app.include_router(assessments_api.router)
 app.include_router(trust_enforcer_api.router)
 
