@@ -15,7 +15,12 @@ logger = logging.getLogger("edge_probe")
 
 router = APIRouter(tags=["edge_probe"])
 
-_QUIET = Response(status_code=404, content=b"", media_type="text/plain")
+_QUIET = Response(
+    status_code=404,
+    content=b"",
+    media_type="text/plain",
+    headers={"Cache-Control": "no-store"},
+)
 
 
 def _client_ip(request: Request) -> str:
@@ -56,5 +61,5 @@ async def edge_probe(request: Request):
         return _QUIET
     page = mirror_page(result["canary_id"])
     if request.method == "HEAD":
-        return Response(status_code=404, media_type="text/html")
-    return HTMLResponse(status_code=404, content=page)
+        return Response(status_code=404, media_type="text/html", headers={"Cache-Control": "no-store"})
+    return HTMLResponse(status_code=404, content=page, headers={"Cache-Control": "no-store"})
